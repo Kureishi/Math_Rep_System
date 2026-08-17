@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Math Representation System — Sample Workflow</title>
+<style>
+  :root{
+    --bg:#0f1116; --panel:#161923; --panel2:#1d2130; --line:#2a2f3f;
+    --text:#e7e9ee; --muted:#9199ac; --accent:#5eead4; --accent2:#f0b94f;
+    --bad:#f2789f; --good:#5eead4; --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  header{padding:28px 40px 10px;border-bottom:1px solid var(--line);}
+  header h1{margin:0 0 4px;font-size:22px;font-weight:700;letter-spacing:-0.01em;}
+  header p{margin:0;color:var(--muted);font-size:14px;}
+  .wrap{max-width:920px;margin:0 auto;padding:28px 24px 80px;}
+  .steps{display:flex;gap:6px;margin-bottom:26px;flex-wrap:wrap;}
+  .step-btn{
+    background:var(--panel);border:1px solid var(--line);color:var(--muted);
+    padding:9px 14px;border-radius:8px;font-size:12.5px;cursor:pointer;font-family:var(--sans);
+    transition:all .15s; white-space:nowrap;
+  }
+  .step-btn .n{color:var(--accent2);font-family:var(--mono);margin-right:6px;}
+  .step-btn.active{background:var(--panel2);border-color:var(--accent);color:var(--text);}
+  .step-btn:hover{border-color:var(--accent);}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:26px 28px;min-height:340px;}
+  .panel h2{margin-top:0;font-size:17px;}
+  .muted{color:var(--muted);font-size:13.5px;}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:16px 18px;margin:12px 0;}
+  .eq{font-family:var(--mono);font-size:16px;color:var(--accent);}
+  .badge{display:inline-block;padding:2px 9px;border-radius:100px;font-size:11.5px;font-weight:600;margin-right:8px;}
+  .badge.good{background:rgba(94,234,212,.15);color:var(--good);}
+  .badge.bad{background:rgba(242,120,159,.15);color:var(--bad);}
+  .check{display:flex;gap:8px;align-items:flex-start;margin:6px 0;font-size:13.5px;}
+  .check .dot{color:var(--good);}
+  .imgbox{display:flex;align-items:center;gap:14px;background:var(--panel2);border:1px dashed var(--line);
+    border-radius:9px;padding:14px;}
+  textarea, .fakein{width:100%;background:#0c0e14;border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:12px 14px;font-family:var(--sans);font-size:14px;}
+  .btn{background:var(--accent);color:#0c0e14;border:none;padding:9px 18px;border-radius:8px;
+    font-weight:700;font-size:13.5px;cursor:pointer;margin-top:14px;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  td,th{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;}
+  th{color:var(--muted);font-weight:600;}
+  .sym{font-family:var(--mono);color:var(--accent2);}
+  .step-item{border-left:2px solid var(--accent);padding:4px 0 4px 14px;margin:14px 0;}
+  .step-item b{font-size:13.5px;}
+  .step-item .exp{color:var(--muted);font-size:12.5px;margin-top:3px;}
+  .scen{display:flex;gap:10px;margin:10px 0;font-size:13.5px;}
+  .scen .icon{font-size:18px;}
+  .slider-row{display:flex;align-items:center;gap:12px;margin:14px 0;}
+  .slider-row label{width:130px;font-size:13px;color:var(--muted);}
+  .slider-row input[type=range]{flex:1;accent-color:var(--accent);}
+  .slider-row .val{font-family:var(--mono);color:var(--accent);width:60px;text-align:right;}
+  canvas{background:#0c0e14;border:1px solid var(--line);border-radius:9px;width:100%;height:260px;}
+  .note{margin-top:24px;padding:14px 16px;background:rgba(240,185,79,.08);border:1px solid rgba(240,185,79,.3);
+    border-radius:9px;font-size:12.5px;color:var(--muted);}
+  .note b{color:var(--accent2);}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧮 Math Representation System — sample workflow</h1>
+  <p>Walk through each stage of the real pipeline on one example. Click through the steps below.</p>
+</header>
+<div class="wrap">
+  <div class="steps" id="stepNav"></div>
+  <div class="panel" id="panel"></div>
+  <div class="note">
+    <b>Why this is a click-through instead of a recorded GIF:</b> this environment can't run a browser
+    against a live Streamlit + LM Studio server to capture one. Everything shown here is a faithful
+    reproduction of real output already verified against the actual code (see the pipeline test run in
+    this conversation). Once you run <code>streamlit run app.py</code> locally, tools like
+    <b>ScreenToGif</b> (Windows), <b>Peek</b> (Linux), or <b>Kap</b> (macOS) will capture the real thing in
+    under a minute.
+  </div>
+</div>
+
+<script>
+const steps = [
+  {n:"1", label:"Input", render: renderInput},
+  {n:"2", label:"Extraction", render: renderExtraction},
+  {n:"3", label:"Verification", render: renderVerification},
+  {n:"4", label:"Steps", render: renderSteps},
+  {n:"5", label:"Scenarios", render: renderScenarios},
+  {n:"6", label:"Interactive plot", render: renderPlot},
+];
+
+const nav = document.getElementById('stepNav');
+steps.forEach((s,i)=>{
+  const b = document.createElement('button');
+  b.className='step-btn'+(i===0?' active':'');
+  b.innerHTML = `<span class="n">${s.n}</span>${s.label}`;
+  b.onclick=()=>select(i);
+  nav.appendChild(b);
+});
+function select(i){
+  [...nav.children].forEach((b,j)=>b.classList.toggle('active', j===i));
+  document.getElementById('panel').innerHTML='';
+  steps[i].render();
+}
+
+function renderInput(){
+  document.getElementById('panel').innerHTML = `
+    <h2>1 · Problem input</h2>
+    <p class="muted">Typed directly, or extracted from an uploaded photo via LM Studio's vision model.</p>
+    <textarea rows="3" readonly>A car accelerates uniformly from 8 m/s to 20 m/s over 6 seconds. What is its acceleration, and how far does it travel in that time?</textarea>
+    <div class="imgbox" style="margin-top:14px;">
+      <div style="font-size:26px;">📷</div>
+      <div class="muted">Image tab: upload a photo → "Extract text from image" → editable preview appears here before solving, exactly as typed input would.</div>
+    </div>
+    <button class="btn" onclick="select(1)">🔎 Represent &amp; Solve →</button>
+  `;
+}
+
+function renderExtraction(){
+  document.getElementById('panel').innerHTML = `
+    <h2>2 · Structured extraction (LM Studio)</h2>
+    <p class="muted">The reasoning model returns JSON, which <span class="sym">equation_engine.py</span> parses into real SymPy objects.</p>
+    <div class="card">
+      <div class="eq">Eq(v, u + a·t)</div>
+      <div class="muted" style="margin-top:6px;">Domain: kinematics — Constant acceleration relates final velocity to initial velocity plus acceleration times time.</div>
+    </div>
+    <table>
+      <tr><th>Symbol</th><th>Meaning</th><th>Known value</th></tr>
+      <tr><td class="sym">v</td><td>final velocity</td><td>20 m/s</td></tr>
+      <tr><td class="sym">u</td><td>initial velocity</td><td>8 m/s</td></tr>
+      <tr><td class="sym">t</td><td>time elapsed</td><td>6 s</td></tr>
+      <tr><td class="sym">a</td><td>acceleration</td><td><em>unknown — solve for this</em></td></tr>
+    </table>
+    <p class="muted" style="margin-top:10px;">Assumption logged: acceleration is uniform (constant).</p>
+  `;
+}
+
+function renderVerification(){
+  document.getElementById('panel').innerHTML = `
+    <h2>3 · Self-verification</h2>
+    <span class="badge good">✅ PASSED</span><span class="muted">symbolic checks + independent cross-check agree</span>
+    <div class="card">
+      <div class="check"><span class="dot">✅</span> <b>Equation parsing</b> — all equations parsed to valid SymPy expressions.</div>
+      <div class="check"><span class="dot">✅</span> <b>Target variable present</b> — 'a' appears in the equations.</div>
+      <div class="check"><span class="dot">✅</span> <b>Determinacy</b> — 1 unknown, 1 equation — solvable.</div>
+      <div class="check"><span class="dot">✅</span> <b>Independent cross-check</b> — derived-equation answer = <b>2</b>; independent LLM re-solve (from the raw word problem, no equations shown) = <b>2</b>. Agree.</div>
+    </div>
+    <p class="muted">This is the actual output of <span class="sym">modules/verifier.py</span> tested against a mocked LLM in this build — see the deliberately-broken-equation test too, which correctly failed with a 12-vs-2 mismatch and would trigger an automatic retry.</p>
+  `;
+}
+
+function renderSteps(){
+  document.getElementById('panel').innerHTML = `
+    <h2>4 · Step-by-step solution</h2>
+    <div class="step-item"><b>Step 1 — Start from: kinematic velocity equation</b>
+      <div class="eq" style="font-size:14px;">v = a·t + u</div></div>
+    <div class="step-item"><b>Step 2 — Substitute known values (v=20, u=8, t=6)</b>
+      <div class="eq" style="font-size:14px;">20 = 6a + 8</div></div>
+    <div class="step-item"><b>Step 3 — Isolate and simplify to solve for a</b>
+      <div class="eq" style="font-size:14px;">a = 2</div>
+      <div class="exp">Each step's plain-language sentence is generated by the LLM narrating this already-verified SymPy trace — it doesn't invent the algebra itself.</div></div>
+    <div class="step-item"><b>Step 4 — Numeric result</b>
+      <div class="eq" style="font-size:14px;">a = 2.00000 m/s²</div></div>
+    <button class="btn">➕ Extract <span class="sym">a</span> to workspace</button>
+  `;
+}
+
+function renderScenarios(){
+  document.getElementById('panel').innerHTML = `
+    <h2>5 · Where else this applies</h2>
+    <p class="muted">A separate LLM call, given only the final verified equation, not the original word problem.</p>
+    <div class="scen"><div class="icon">💰</div><div><b>Compound growth over fixed intervals</b><br><span class="muted">u/v → starting/ending balance, a → per-period growth rate, t → number of periods.</span></div></div>
+    <div class="scen"><div class="icon">🌡️</div><div><b>Linear heating/cooling of an object under constant power</b><br><span class="muted">u/v → start/end temperature, a → rate of temperature change, t → duration.</span></div></div>
+    <div class="scen"><div class="icon">📶</div><div><b>Network throughput ramping under constant load increase</b><br><span class="muted">u/v → start/end throughput, a → ramp rate, t → elapsed time.</span></div></div>
+  `;
+}
+
+function renderPlot(){
+  document.getElementById('panel').innerHTML = `
+    <h2>6 · Interactive plot</h2>
+    <p class="muted">Real Plotly + Streamlit sliders in the app; this is a live vanilla-JS reproduction of the same idea so you can try it here.</p>
+    <div class="slider-row"><label>initial velocity u</label><input type="range" id="u" min="0" max="20" value="8" step="0.5"><span class="val" id="uv">8</span></div>
+    <div class="slider-row"><label>acceleration a</label><input type="range" id="a" min="-5" max="5" value="2" step="0.1"><span class="val" id="av">2</span></div>
+    <canvas id="cv" width="800" height="260"></canvas>
+    <p class="muted">x-axis: t (0–10s) · y-axis: v = u + a·t, redrawn live as you move the sliders.</p>
+  `;
+  const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+  const uEl=document.getElementById('u'), aEl=document.getElementById('a');
+  const uv=document.getElementById('uv'), av=document.getElementById('av');
+  function draw(){
+    const u=parseFloat(uEl.value), a=parseFloat(aEl.value);
+    uv.textContent=u; av.textContent=a;
+    const W=cv.width,H=cv.height,pad=40;
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle="#2a2f3f"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(pad,10); ctx.lineTo(pad,H-pad); ctx.lineTo(W-10,H-pad); ctx.stroke();
+    const tMax=10;
+    const vAt = t => u + a*t;
+    const vals = Array.from({length:11},(_,i)=>vAt(i));
+    const vMin=Math.min(0,...vals)-2, vMax=Math.max(...vals)+2;
+    const xOf = t => pad + (t/tMax)*(W-pad-20);
+    const yOf = v => (H-pad) - ((v-vMin)/(vMax-vMin))*(H-pad-20);
+    ctx.strokeStyle="#5eead4"; ctx.lineWidth=2.5; ctx.beginPath();
+    for(let t=0;t<=tMax;t+=0.2){
+      const x=xOf(t), y=yOf(vAt(t));
+      t===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    ctx.fillStyle="#9199ac"; ctx.font="11px monospace";
+    ctx.fillText("t=0", pad-4, H-pad+16); ctx.fillText("t=10", W-40, H-pad+16);
+    ctx.fillText(`v(0)=${u.toFixed(1)}`, pad+6, yOf(u)-6);
+  }
+  uEl.oninput=draw; aEl.oninput=draw; draw();
+}
+
+select(0);
+</script>
+</body>
+</html>
