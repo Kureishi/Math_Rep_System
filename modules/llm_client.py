@@ -44,12 +44,14 @@ class LMStudioClient:
 
     def chat(self, system: str, user: str, temperature: float,
               json_mode: bool = False, model: str | None = None) -> str:
-        kwargs = {}
-        if json_mode:
-            # Most LM Studio-hosted models honor this; if a model doesn't,
-            # equation_engine.py has a fallback JSON extractor.
-            kwargs["response_format"] = {"type": "json_object"}
-
+        # NOTE: LM Studio's OpenAI-compat server is stricter than OpenAI's
+        # own API here -- it rejects response_format={"type": "json_object"}
+        # with a 400 ("must be 'json_schema' or 'text'"). Rather than build
+        # a full json_schema per call site (extraction, narration, and
+        # scenarios each have different shapes), we just ask for JSON in the
+        # prompt and rely on extract_json()'s forgiving parser below, which
+        # already strips code fences/prose. json_mode is kept as a parameter
+        # so call sites can still signal intent even though it's a no-op here.
         resp = self._client.chat.completions.create(
             model=model or settings.reasoning_model,
             temperature=temperature,
@@ -58,7 +60,6 @@ class LMStudioClient:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            **kwargs,
         )
         return resp.choices[0].message.content
 
