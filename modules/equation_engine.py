@@ -32,7 +32,7 @@ matching this exact schema:
       "derivation": "2-4 sentences explaining how this follows from the problem text, referencing the specific quantities given"
     }
   ],
-  "solve_for": "the symbol the problem is ultimately asking for, or null if it's just asking to model the situation",
+  "solve_for": ["list every symbol the problem actually asks for -- often just one, but include all of them if the problem asks multiple questions, e.g. [\\"a\\", \\"d\\"]. Empty list if it's only asking to model the situation, not compute a value."],
   "assumptions": ["list any assumptions you had to make, e.g. 'ignoring air resistance'"]
 }
 
@@ -40,6 +40,7 @@ Rules:
 - Use sympy.Eq(lhs, rhs) syntax for equations, e.g. "Eq(F, m*a)".
 - known_value should be a plain number string if given in the problem, else null.
 - Every symbol used in "equations" must appear in "variables".
+- solve_for must be a JSON array of single symbol names (never a comma-joined string like "a, d" -- use ["a", "d"]).
 - If the problem has multiple valid equations (e.g. a system), include all of them.
 - Do not solve the equation here -- extraction only.
 """
@@ -73,9 +74,25 @@ class ProblemModel:
     problem_domain: str
     variables: list[Variable]
     equations: list[Equation]
-    solve_for: str | None
+    solve_for: list[str]
     assumptions: list[str]
     raw_json: dict = field(default_factory=dict)
+
+
+def _normalize_solve_for(raw) -> list[str]:
+    """Tolerates a model returning a single string, a comma-joined string
+    ("a, d"), a list, or null -- always returns a clean list of bare symbol
+    names."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [s.strip() for s in raw.split(",") if s.strip()]
+    if isinstance(raw, list):
+        out = []
+        for item in raw:
+            out.extend(_normalize_solve_for(item))
+        return out
+    return []
 
 
 def _local_dict(variables: list[Variable]) -> dict:
@@ -121,7 +138,7 @@ def build_model(json_payload: dict) -> ProblemModel:
         problem_domain=json_payload.get("problem_domain", "unspecified"),
         variables=variables,
         equations=equations,
-        solve_for=json_payload.get("solve_for"),
+        solve_for=_normalize_solve_for(json_payload.get("solve_for")),
         assumptions=json_payload.get("assumptions", []),
         raw_json=json_payload,
     )

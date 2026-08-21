@@ -96,14 +96,27 @@ class LMStudioClient:
         return resp.choices[0].message.content
 
 
-def extract_json(raw: str) -> dict:
-    """Best-effort JSON extraction for models that wrap JSON in prose/fences."""
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.strip("`")
-        if raw.lower().startswith("json"):
-            raw = raw[4:]
-    start, end = raw.find("{"), raw.rfind("}")
-    if start == -1 or end == -1:
-        raise ValueError(f"No JSON object found in model output:\n{raw}")
-    return json.loads(raw[start : end + 1])
+def extract_json(raw: str) -> dict | list:
+    """Best-effort JSON extraction for models that wrap JSON in prose/fences.
+    Handles both object ({...}) and array ([...]) roots, since different
+    call sites in this app expect different shapes (extraction wants an
+    object, scenarios/narration want an array)."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.lstrip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+        text = text.rstrip("`")
+    text = text.strip()
+
+    first_curly = text.find("{")
+    first_square = text.find("[")
+    candidates = [i for i in (first_curly, first_square) if i != -1]
+    if not candidates:
+        raise ValueError(f"No JSON object or array found in model output:\n{raw}")
+    start = min(candidates)
+    closing = "}" if text[start] == "{" else "]"
+    end = text.rfind(closing)
+    if end == -1 or end < start:
+        raise ValueError(f"Unterminated JSON in model output:\n{raw}")
+    return json.loads(text[start : end + 1])

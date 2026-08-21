@@ -28,12 +28,12 @@ from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel
 
 INDEPENDENT_SOLVE_PROMPT = """Solve this problem yourself, from scratch, showing minimal work. \
-End your response with a single line in EXACTLY this format (no units, no extra text):
-FINAL_NUMERIC_ANSWER: <number>
+The problem asks for these quantities: {targets}. \
+End your response with one line per quantity, EXACTLY in this format (no units, no extra text), \
+one per line:
+FINAL_NUMERIC_ANSWER[<symbol>]: <number>
 
-If the problem has no single final number (e.g. it asks you to just model a relationship), \
-respond with:
-FINAL_NUMERIC_ANSWER: N/A
+If a quantity can't be reduced to a single number, use N/A for its value.
 
 Problem:
 {problem}
@@ -50,8 +50,8 @@ class CheckResult:
 @dataclass
 class VerificationReport:
     checks: list[CheckResult] = field(default_factory=list)
-    sympy_numeric_answer: float | None = None
-    llm_independent_answer: float | None = None
+    sympy_numeric_answers: dict[str, float] = field(default_factory=dict)
+    llm_independent_answers: dict[str, float] = field(default_factory=dict)
     passed: bool = True
     failure_reason: str | None = None
 
@@ -78,18 +78,19 @@ def _structural_checks(model: ProblemModel, report: VerificationReport):
     else:
         report.add("Equation parsing", True, "All equations parsed to valid SymPy expressions.")
 
-    # 2. solve_for symbol is actually used
+    # 2. every solve_for symbol is actually used somewhere
     if model.solve_for:
         used = set()
         for e in model.equations:
             if e.sympy_eq is not None:
                 used |= {s.name for s in e.sympy_eq.free_symbols}
-        if model.solve_for not in used:
+        missing = [t for t in model.solve_for if t not in used]
+        if missing:
             report.add("Target variable present", False,
-                        f"'{model.solve_for}' does not appear in any derived equation.")
+                        f"{', '.join(missing)} does not appear in any derived equation.")
         else:
             report.add("Target variable present", True,
-                        f"'{model.solve_for}' appears in the equations.")
+                        f"{', '.join(model.solve_for)} all appear in the equations.")
 
     # 3. determinacy: unknowns vs equations
     unknowns = [v.symbol for v in model.variables if v.known_value is None]
@@ -125,30 +126,41 @@ def _numeric_balance_check(model: ProblemModel, report: VerificationReport):
                         f"({'balances' if ok else 'DOES NOT balance'}).")
 
 
-def _solve_sympy(model: ProblemModel) -> float | None:
+def _solve_sympy(model: ProblemModel) -> dict[str, float]:
+    """Solves the whole equation system at once for every requested target --
+    important because targets can be coupled (e.g. displacement 'd' may
+    depend on an also-unknown acceleration 'a' solved from another equation
+    in the same system)."""
     if not model.solve_for:
-        return None
+        return {}
     subs = _known_substitutions(model)
     eqs = [e.sympy_eq.subs(subs) for e in model.equations if e.sympy_eq is not None]
-    target = sp.Symbol(model.solve_for)
+    targets = [sp.Symbol(t) for t in model.solve_for]
     try:
-        sol = sp.solve(eqs, target, dict=True)
+        sol = sp.solve(eqs, targets, dict=True)
         if not sol:
-            return None
-        val = sol[0].get(target)
-        return float(val) if val is not None and val.is_number else None
+            return {}
+        result = {}
+        for t, sym in zip(model.solve_for, targets):
+            val = sol[0].get(sym)
+            if val is not None and val.is_number:
+                result[t] = float(val)
+        return result
     except Exception:  # noqa: BLE001
-        return None
+        return {}
 
 
-def _extract_final_number(text: str) -> float | None:
-    m = re.search(r"FINAL_NUMERIC_ANSWER:\s*([\-0-9.eE]+|N/A)", text)
-    if not m or m.group(1) == "N/A":
-        return None
-    try:
-        return float(m.group(1))
-    except ValueError:
-        return None
+def _extract_final_numbers(text: str) -> dict[str, float]:
+    """Parses one or more `FINAL_NUMERIC_ANSWER[symbol]: value` lines."""
+    results = {}
+    for m in re.finditer(r"FINAL_NUMERIC_ANSWER\[(\w+)\]:\s*([\-0-9.eE]+|N/A)", text):
+        symbol, value = m.group(1), m.group(2)
+        if value != "N/A":
+            try:
+                results[symbol] = float(value)
+            except ValueError:
+                pass
+    return results
 
 
 def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> VerificationReport:
@@ -156,25 +168,31 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
     _structural_checks(model, report)
     _numeric_balance_check(model, report)
 
-    sympy_answer = _solve_sympy(model)
-    report.sympy_numeric_answer = sympy_answer
+    sympy_answers = _solve_sympy(model)
+    report.sympy_numeric_answers = sympy_answers
 
-    if model.solve_for and sympy_answer is not None:
+    if model.solve_for and sympy_answers:
         raw = client.chat(
             system="You are a careful independent problem solver.",
-            user=INDEPENDENT_SOLVE_PROMPT.format(problem=problem_text),
+            user=INDEPENDENT_SOLVE_PROMPT.format(
+                targets=", ".join(model.solve_for), problem=problem_text),
             temperature=0.0,
         )
-        llm_answer = _extract_final_number(raw)
-        report.llm_independent_answer = llm_answer
-        if llm_answer is not None:
-            rel_diff = abs(llm_answer - sympy_answer) / max(abs(sympy_answer), 1e-9)
+        llm_answers = _extract_final_numbers(raw)
+        report.llm_independent_answers = llm_answers
+
+        for target in model.solve_for:
+            sympy_val = sympy_answers.get(target)
+            llm_val = llm_answers.get(target)
+            if sympy_val is None or llm_val is None:
+                continue
+            rel_diff = abs(llm_val - sympy_val) / max(abs(sympy_val), 1e-9)
             agree = rel_diff < 0.02  # 2% tolerance for rounding differences
             report.add(
-                "Independent cross-check",
+                f"Independent cross-check: {target}",
                 agree,
-                f"Derived-equation answer = {sympy_answer:.6g}; independent re-solve = "
-                f"{llm_answer:.6g}. {'Agree.' if agree else 'DISAGREE -- derivation likely flawed.'}",
+                f"Derived-equation answer = {sympy_val:.6g}; independent re-solve = "
+                f"{llm_val:.6g}. {'Agree.' if agree else 'DISAGREE -- derivation likely flawed.'}",
             )
 
     if not report.passed:

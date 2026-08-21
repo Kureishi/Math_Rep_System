@@ -7,7 +7,7 @@ so it can't influence the math itself.
 import sympy as sp
 
 from config import settings
-from modules.llm_client import LMStudioClient
+from modules.llm_client import LMStudioClient, extract_json
 from modules.equation_engine import ProblemModel
 
 SCENARIO_PROMPT = """Here is a mathematical model derived from a problem:
@@ -32,11 +32,17 @@ def generate_alternative_scenarios(client: LMStudioClient, model: ProblemModel) 
         temperature=0.7,
     )
     try:
-        import json
-        text = raw.strip().strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:]
-        start, end = text.find("["), text.rfind("]")
-        return json.loads(text[start:end + 1])
-    except Exception:  # noqa: BLE001
-        return [{"scenario": raw, "mapping": ""}]
+        parsed = extract_json(raw)
+        if not isinstance(parsed, list):
+            raise ValueError(f"Expected a JSON array, got {type(parsed).__name__}")
+        # Tolerate entries missing a key rather than failing the whole batch.
+        return [
+            {"scenario": item.get("scenario", "(no scenario text returned)"),
+             "mapping": item.get("mapping", "")}
+            for item in parsed if isinstance(item, dict)
+        ]
+    except Exception as e:  # noqa: BLE001
+        # Surface a clear, honest failure instead of silently rendering the
+        # raw/fenced model output as if it were a real scenario.
+        return [{"error": f"Couldn't parse the model's scenario suggestions ({e}). "
+                           "Raw response is available for debugging.", "raw": raw}]

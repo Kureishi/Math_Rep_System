@@ -151,10 +151,10 @@ if model:
     with st.expander("Verification detail"):
         for c in report.checks:
             (st.write if c.passed else st.error)(f"{'✅' if c.passed else '❌'} **{c.label}**: {c.detail}")
-        if report.sympy_numeric_answer is not None:
-            st.write(f"Derived-equation answer: `{report.sympy_numeric_answer:.6g}`")
-        if report.llm_independent_answer is not None:
-            st.write(f"Independent cross-check answer: `{report.llm_independent_answer:.6g}`")
+        for target, val in report.sympy_numeric_answers.items():
+            st.write(f"Derived-equation answer for `{target}`: `{val:.6g}`")
+        for target, val in report.llm_independent_answers.items():
+            st.write(f"Independent cross-check for `{target}`: `{val:.6g}`")
 
     st.subheader(f"Domain: {model.problem_domain}")
 
@@ -188,21 +188,23 @@ if model:
                 value=float(default), key=f"var_{v.symbol}",
             )
 
-    # ---- step-by-step solution
-    if st.session_state["steps"]:
+    # ---- step-by-step solution (one section per requested target)
+    steps_by_target = st.session_state["steps"] or {}
+    if steps_by_target:
         st.markdown("### Step-by-step solution")
-        for i, step in enumerate(st.session_state["steps"], start=1):
-            st.markdown(f"**Step {i}: {step.description}**")
-            st.latex(step.expression)
-            if step.explanation:
-                st.caption(step.explanation)
+        for target_name, steps in steps_by_target.items():
+            st.markdown(f"#### Solving for `{target_name}`")
+            for i, step in enumerate(steps, start=1):
+                st.markdown(f"**Step {i}: {step.description}**")
+                st.latex(step.expression)
+                if step.explanation:
+                    st.caption(step.explanation)
 
-        if report.sympy_numeric_answer is not None and model.solve_for:
-            c1, c2 = st.columns([1, 3])
-            with c1:
-                if st.button(f"➕ Extract {model.solve_for} to workspace"):
-                    unit = next((v.unit for v in model.variables if v.symbol == model.solve_for), None)
-                    ws.store(model.solve_for, report.sympy_numeric_answer,
+            sympy_val = report.sympy_numeric_answers.get(target_name)
+            if sympy_val is not None:
+                if st.button(f"➕ Extract {target_name} to workspace", key=f"extract_{target_name}"):
+                    unit = next((v.unit for v in model.variables if v.symbol == target_name), None)
+                    ws.store(target_name, sympy_val,
                              source=f"Solved from: {problem_text[:60]}...", unit=unit)
                     st.rerun()
 
@@ -210,7 +212,12 @@ if model:
     if st.session_state["scenarios"]:
         st.markdown("### Where else this applies")
         for s in st.session_state["scenarios"]:
-            st.markdown(f"- **{s.get('scenario', '')}**  \n  _{s.get('mapping', '')}_")
+            if "error" in s:
+                st.warning(s["error"])
+                with st.expander("Raw model response"):
+                    st.code(s.get("raw", ""))
+            else:
+                st.markdown(f"- **{s.get('scenario', '')}**  \n  _{s.get('mapping', '')}_")
 
     # ---- interactive plot
     plottable = [e for e in model.equations if e.sympy_eq is not None
@@ -240,5 +247,11 @@ if model:
         x_range = st.slider("X-axis range", -50.0, 50.0,
                              (min(0.0, x_default - 10), x_default + 10))
 
-        fig = build_plot(model, eq_choice, x_symbol, param_values, x_range)
+        y_target = None
+        if model.solve_for:
+            candidates = [t for t in model.solve_for if t != x_symbol]
+            if candidates:
+                y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
+
+        fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target)
         st.plotly_chart(fig, use_container_width=True)
