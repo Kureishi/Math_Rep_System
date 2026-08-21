@@ -144,14 +144,29 @@ def build_model(json_payload: dict) -> ProblemModel:
     )
 
 
-def extract_model(client: LMStudioClient, problem_text: str, retry_reason: str | None = None) -> ProblemModel:
-    """One LLM round trip: problem text -> structured symbolic model."""
+def extract_model(client: LMStudioClient, problem_text: str, retry_reason: str | None = None,
+                   known_context: str | None = None) -> ProblemModel:
+    """One LLM round trip: problem text -> structured symbolic model.
+
+    known_context: optional text listing values already available from the
+    variable workspace (previously solved results), so the model can treat
+    e.g. "using d from the workspace" as a known numeric input rather than
+    an undefined reference it has to guess at or ask about.
+    """
     system = EXTRACTION_SYSTEM_PROMPT
     if retry_reason:
         system += VERIFY_RETRY_SYSTEM_SUFFIX.format(failure_reason=retry_reason)
 
+    user = problem_text
+    if known_context:
+        user += (
+            "\n\nThe following values are already known from earlier calculations. "
+            "If the problem references one of them (by name or by clear description), "
+            "treat it as a known_value input rather than an unknown:\n" + known_context
+        )
+
     from config import settings
-    raw = client.chat(system=system, user=problem_text,
+    raw = client.chat(system=system, user=user,
                        temperature=settings.temperature_extraction, json_mode=True)
     payload = extract_json(raw)
     return build_model(payload)

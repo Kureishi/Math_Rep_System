@@ -11,7 +11,7 @@ import streamlit as st
 import sympy as sp
 
 from config import settings
-from modules.llm_client import LMStudioClient
+from modules.llm_client import LMStudioClient, LLMOutputError
 from modules.ocr import ocr_extract
 from modules.equation_engine import extract_model, ProblemModel
 from modules.verifier import verify, VerificationReport
@@ -61,10 +61,23 @@ with st.sidebar:
     if ws.entries:
         for name, entry in list(ws.entries.items()):
             c1, c2 = st.columns([3, 1])
-            c1.write(f"**{name}** = {entry.value:.6g} {entry.unit or ''}  \n_{entry.source}_")
-            if c2.button("✕", key=f"rm_{name}"):
-                ws.remove(name)
-                st.rerun()
+            with c1:
+                new_name = st.text_input(
+                    "Name", value=name, key=f"wsname_{name}", label_visibility="collapsed",
+                )
+                st.caption(f"= {entry.value:.6g} {entry.unit or ''}  \n_{entry.source}_")
+            with c2:
+                if st.button("✕", key=f"rm_{name}"):
+                    ws.remove(name)
+                    st.rerun()
+            if new_name != name:
+                ok_rename, err = ws.rename(name, new_name)
+                if ok_rename:
+                    st.rerun()
+                else:
+                    st.warning(err)
+        st.caption("Rename a variable above to reuse it under a new name, or reference it by its "
+                    "current name in a new problem below (e.g. \"using d = ...\").")
     else:
         st.caption("No stored variables yet. Solve a problem and extract a value to reuse it here.")
 
@@ -112,26 +125,43 @@ solve_clicked = st.button("🔎 Represent & Solve", type="primary", disabled=not
 # ---------------------------------------------------------------- pipeline
 if solve_clicked and problem_text.strip():
     st.session_state["problem_text"] = problem_text
-    with st.spinner("Deriving equations from the problem statement..."):
-        model = extract_model(client, problem_text)
+    known_context = ws.as_context_string()
+    pipeline_failed = False
 
-    with st.spinner("Verifying the derivation..."):
-        report = verify(model, client, problem_text)
-        retries = 0
-        while not report.passed and retries < settings.max_verification_retries:
-            retries += 1
-            with st.spinner(f"Verification failed -- retrying derivation ({retries}/{settings.max_verification_retries})..."):
-                model = extract_model(client, problem_text, retry_reason=report.failure_reason)
-                report = verify(model, client, problem_text)
+    try:
+        with st.spinner("Deriving equations from the problem statement..."):
+            model = extract_model(client, problem_text, known_context=known_context)
 
-    with st.spinner("Computing step-by-step solution..."):
-        steps = compute_steps(model)
-        steps = narrate_steps(client, model, steps)
+        with st.spinner("Verifying the derivation..."):
+            report = verify(model, client, problem_text)
+            retries = 0
+            while not report.passed and retries < settings.max_verification_retries:
+                retries += 1
+                with st.spinner(f"Verification failed -- retrying derivation ({retries}/{settings.max_verification_retries})..."):
+                    model = extract_model(client, problem_text, retry_reason=report.failure_reason,
+                                           known_context=known_context)
+                    report = verify(model, client, problem_text)
 
-    with st.spinner("Generating alternative scenarios..."):
-        scenarios = generate_alternative_scenarios(client, model)
+        with st.spinner("Computing step-by-step solution..."):
+            steps = compute_steps(model)
+            steps = narrate_steps(client, model, steps)
 
-    st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios)
+        with st.spinner("Generating alternative scenarios..."):
+            scenarios = generate_alternative_scenarios(client, model)
+
+        st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios)
+
+    except LLMOutputError as e:
+        pipeline_failed = True
+        st.error(f"⚠️ {e}")
+        with st.expander("Raw model response (for debugging)"):
+            st.code(e.raw_output or "(empty response)")
+        st.info(
+            "This usually means the model asked a clarifying question, refused, or got confused "
+            "instead of returning structured JSON -- often because a referenced quantity (like a "
+            "workspace variable) wasn't clearly matched. Try rephrasing, or use a stronger reasoning "
+            "model for extraction."
+        )
 
 # ---------------------------------------------------------------- display
 model: ProblemModel | None = st.session_state["model"]
@@ -205,7 +235,7 @@ if model:
                 if st.button(f"➕ Extract {target_name} to workspace", key=f"extract_{target_name}"):
                     unit = next((v.unit for v in model.variables if v.symbol == target_name), None)
                     ws.store(target_name, sympy_val,
-                             source=f"Solved from: {problem_text[:60]}...", unit=unit)
+                             source=f"{problem_text[:60]}...", unit=unit)
                     st.rerun()
 
     # ---- alternative scenarios

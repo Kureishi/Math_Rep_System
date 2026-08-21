@@ -96,6 +96,15 @@ class LMStudioClient:
         return resp.choices[0].message.content
 
 
+class LLMOutputError(Exception):
+    """Raised when the model's response couldn't be parsed as expected.
+    Carries the raw output so the UI can show it for debugging instead of
+    just crashing with a bare traceback."""
+    def __init__(self, message: str, raw_output: str = ""):
+        super().__init__(message)
+        self.raw_output = raw_output
+
+
 def extract_json(raw: str) -> dict | list:
     """Best-effort JSON extraction for models that wrap JSON in prose/fences.
     Handles both object ({...}) and array ([...]) roots, since different
@@ -113,10 +122,19 @@ def extract_json(raw: str) -> dict | list:
     first_square = text.find("[")
     candidates = [i for i in (first_curly, first_square) if i != -1]
     if not candidates:
-        raise ValueError(f"No JSON object or array found in model output:\n{raw}")
+        raise LLMOutputError(
+            "The model didn't return any JSON -- it may have replied with a "
+            "clarifying question or plain prose instead of the structured "
+            "format the app requires.",
+            raw_output=raw,
+        )
     start = min(candidates)
     closing = "}" if text[start] == "{" else "]"
     end = text.rfind(closing)
     if end == -1 or end < start:
-        raise ValueError(f"Unterminated JSON in model output:\n{raw}")
-    return json.loads(text[start : end + 1])
+        raise LLMOutputError("The model's JSON output looks truncated (no closing bracket found).",
+                              raw_output=raw)
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError as e:
+        raise LLMOutputError(f"The model's JSON didn't parse ({e}).", raw_output=raw) from e
