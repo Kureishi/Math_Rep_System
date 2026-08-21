@@ -34,7 +34,16 @@ class LMStudioClient:
         except Exception as e:  # noqa: BLE001
             return False, f"LM Studio responded with an error: {e}"
 
-    def chat(self, system: str, user: str, temperature: float, json_mode: bool = False) -> str:
+    def list_models(self) -> list[str]:
+        """Models LM Studio currently has loaded/served -- ground truth for
+        what's actually runnable, as opposed to config.py's defaults."""
+        try:
+            return sorted(m.id for m in self._client.models.list().data)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def chat(self, system: str, user: str, temperature: float,
+              json_mode: bool = False, model: str | None = None) -> str:
         kwargs = {}
         if json_mode:
             # Most LM Studio-hosted models honor this; if a model doesn't,
@@ -42,7 +51,7 @@ class LMStudioClient:
             kwargs["response_format"] = {"type": "json_object"}
 
         resp = self._client.chat.completions.create(
-            model=settings.reasoning_model,
+            model=model or settings.reasoning_model,
             temperature=temperature,
             max_tokens=settings.max_tokens,
             messages=[
@@ -53,12 +62,13 @@ class LMStudioClient:
         )
         return resp.choices[0].message.content
 
-    def vision_extract(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
+    def vision_extract(self, image_bytes: bytes, mime_type: str = "image/png",
+                         model: str | None = None) -> str:
         """Ask a multimodal model to transcribe + lightly describe an image's
         problem statement (handles handwritten/photographed word problems)."""
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         resp = self._client.chat.completions.create(
-            model=settings.vision_model,
+            model=model or settings.vision_model,
             temperature=0.0,
             max_tokens=1024,
             messages=[

@@ -34,8 +34,28 @@ with st.sidebar:
     st.header("LM Studio")
     ok, msg = client.is_available()
     (st.success if ok else st.error)(msg)
-    st.caption(f"Reasoning model: `{settings.reasoning_model}`")
-    st.caption(f"Vision model: `{settings.vision_model}`")
+
+    loaded_models = client.list_models() if ok else []
+    if ok and not loaded_models:
+        st.warning("Connected, but no models are loaded. Load one in LM Studio's Developer tab.")
+    elif loaded_models:
+        # Fall back to whatever's actually loaded if config.py's default
+        # isn't among the currently-served models, instead of silently
+        # trying to call a model that doesn't exist.
+        default_reasoning = settings.reasoning_model if settings.reasoning_model in loaded_models else loaded_models[0]
+        settings.reasoning_model = st.selectbox(
+            "Reasoning model", loaded_models,
+            index=loaded_models.index(default_reasoning),
+            help="Used for equation extraction, verification cross-checks, narration, and scenarios.",
+        )
+
+        default_vision = settings.vision_model if settings.vision_model in loaded_models else loaded_models[0]
+        settings.vision_model = st.selectbox(
+            "Vision model", loaded_models,
+            index=loaded_models.index(default_vision),
+            help="Used to transcribe problem statements from uploaded images. Pick a multimodal "
+                 "model here -- a text-only model will error on image input; use OCR fallback instead.",
+        )
     st.divider()
     st.header("Variable Workspace")
     if ws.entries:
