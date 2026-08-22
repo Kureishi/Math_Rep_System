@@ -23,6 +23,9 @@ class Settings:
     # Verification behavior
     max_verification_retries: int = 2
     numeric_tolerance: float = 1e-6
+    cross_check_tolerance: float = 0.02  # 2% -- how far the independent re-solve
+                                          # can differ from the derived answer before
+                                          # verification flags a disagreement
 
     # Generation behavior
     temperature_extraction: float = 0.1   # low temp: we want faithful, reproducible math

@@ -377,7 +377,7 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
             if sympy_val is None or llm_val is None:
                 continue
             rel_diff = abs(llm_val - sympy_val) / max(abs(sympy_val), 1e-9)
-            tol = 0.02  # 2% tolerance for rounding differences
+            tol = settings.cross_check_tolerance
             ratio = rel_diff / tol
             agree = ratio < 1.0
             if agree:

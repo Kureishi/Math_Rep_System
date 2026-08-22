@@ -106,7 +106,8 @@ See `ARCHITECTURE.md` for the full design. In short:
   a native window instead of a browser tab -- the `modules/` package has no
   Streamlit dependency, so it's reusable as-is.
 - The verification tolerance, retry count, and temperatures are all in
-  `config.py`.
+  `config.py` -- or tune them live from the app's "⚙️ Advanced settings"
+  sidebar expander without restarting (see below).
 - `modules/ode_utils.py` centralizes ODE-solving (used by both
   `solver.py` and `verifier.py`) specifically to avoid a circular import
   between those two -- keep that pattern in mind if you add another
@@ -116,3 +117,41 @@ See `ARCHITECTURE.md` for the full design. In short:
   substitution (multi-variable feasible regions aren't visualized), and
   dimensional checking for ODEs (Derivative dimensional analysis isn't
   implemented, so ODE equations skip that check).
+
+## Advanced settings (in-app)
+
+The sidebar's "⚙️ Advanced settings" expander exposes the knobs that would
+otherwise only be editable in `config.py`, live, without a restart:
+
+- **Extraction / narration temperature** -- how much freedom the model has
+  when converting text into equations vs. writing step explanations.
+- **Max verification retries** -- how many times to re-prompt with the
+  failure reason before giving up.
+- **Numeric balance tolerance** -- how close a residual must be to zero to
+  count as "balances."
+- **Independent cross-check tolerance** -- how far the derived answer and
+  the independent re-solve can disagree before verification flags it.
+
+A "Reset to defaults" button restores `config.py`'s original values.
+Settings apply to the *next* problem you solve, and persist for the
+lifetime of the running app process (they're not saved back to disk).
+
+## Running the tests
+
+A pytest suite covers the extraction/verification/solving core -- the same
+mocked-client pattern (`tests/conftest.py`'s `FakeClient`) used throughout
+development, so no live LM Studio server is needed to run it:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Coverage includes: all three equation kinds (algebraic, inequality, ODE)
+end-to-end through extraction -> verification -> solving -> export;
+the confidence/margin system; the JSON-extraction robustness helpers
+(fenced code blocks, prose-wrapped JSON, truncated/invalid JSON); the
+dimensional-unit checker (including the "unrecognized unit silently
+mis-parsed" bug caught during development); workspace rename validation;
+and the history save/load/delete round trip. `tests/conftest.py` has the
+sample payloads and fixtures if you want to add more.

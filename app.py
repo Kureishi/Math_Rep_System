@@ -62,6 +62,55 @@ with st.sidebar:
             help="Used to transcribe problem statements from uploaded images. Pick a multimodal "
                  "model here -- a text-only model will error on image input; use OCR fallback instead.",
         )
+
+    with st.expander("⚙️ Advanced settings"):
+        st.caption("Tune verification strictness and generation behavior without editing config.py "
+                    "or restarting the app. Changes apply to the next problem you solve.")
+
+        settings.temperature_extraction = st.slider(
+            "Extraction temperature", 0.0, 1.0, settings.temperature_extraction, 0.05,
+            help="How much freedom the model has when converting text into equations. Lower is more "
+                 "deterministic and faithful to the problem; raise it only if extraction feels too rigid.",
+        )
+        settings.temperature_narration = st.slider(
+            "Narration temperature", 0.0, 1.0, settings.temperature_narration, 0.05,
+            help="Controls the wording of step-by-step explanations only -- never affects the math "
+                 "itself, since SymPy computes that independently.",
+        )
+        settings.max_verification_retries = st.number_input(
+            "Max verification retries", min_value=0, max_value=5,
+            value=settings.max_verification_retries, step=1,
+            help="How many times to re-prompt the model with the failure reason if self-verification "
+                 "fails, before giving up and showing the result with a warning.",
+        )
+        settings.numeric_tolerance = st.select_slider(
+            "Numeric balance tolerance",
+            options=[1e-9, 1e-6, 1e-3, 1e-2],
+            value=settings.numeric_tolerance if settings.numeric_tolerance in (1e-9, 1e-6, 1e-3, 1e-2) else 1e-6,
+            format_func=lambda x: f"{x:.0e}",
+            help="How close a residual must be to zero to count as 'balances' when checking an "
+                 "equation against known values. Tighter (smaller) catches more subtle errors but "
+                 "may flag harmless floating-point rounding as a failure.",
+        )
+        cross_check_pct = st.slider(
+            "Independent cross-check tolerance", 0.5, 10.0, settings.cross_check_tolerance * 100, 0.5,
+            format="%.1f%%",
+            help="How far apart the derived answer and the independent re-solve can be before "
+                 "verification flags a disagreement. Wider tolerates more model imprecision; "
+                 "narrower catches subtler derivation errors but may false-flag on rounding.",
+        )
+        settings.cross_check_tolerance = cross_check_pct / 100
+
+        if st.button("Reset to defaults"):
+            from config import Settings
+            defaults = Settings()
+            settings.temperature_extraction = defaults.temperature_extraction
+            settings.temperature_narration = defaults.temperature_narration
+            settings.max_verification_retries = defaults.max_verification_retries
+            settings.numeric_tolerance = defaults.numeric_tolerance
+            settings.cross_check_tolerance = defaults.cross_check_tolerance
+            st.rerun()
+
     st.divider()
     st.header("Variable Workspace")
     if ws.entries:
