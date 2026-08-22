@@ -68,9 +68,22 @@ See `ARCHITECTURE.md` for the full design. In short:
 4. **Alternative scenarios** -- a separate, low-stakes LLM call suggests
    other real-world contexts with the same mathematical structure.
 5. **Workspace & plotting** -- solved values can be pushed into a session
-   workspace for reuse in later calculations; any equation with a free
-   parameter can be plotted with Streamlit sliders controlling the other
-   variables live.
+   workspace for reuse in later calculations (reference them by name in a
+   new problem statement -- the model is automatically told their value);
+   any equation with a free parameter can be plotted with Streamlit sliders
+   controlling the other variables live.
+6. **Dimensional checking** -- alongside numeric-balance checking, each
+   equation is independently checked for physical-unit consistency via
+   `sympy.physics.units`, catching errors a numeric check can't (e.g.
+   equating a distance to a velocity, which could pass numerically by pure
+   coincidence but never passes dimensionally).
+7. **History** -- every solved problem is saved to a local SQLite file
+   (`data/history.db`, gitignored) and listed in the sidebar. Loading a
+   past problem restores everything -- equations, verification, steps,
+   scenarios -- with no new LLM calls.
+8. **Export** -- download any solved problem as Markdown (LaTeX equations
+   included) or a typeset PDF (equations rendered via matplotlib's
+   mathtext -- no system LaTeX install needed).
 
 ## Extending it
 

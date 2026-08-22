@@ -14,11 +14,13 @@ from config import settings
 from modules.llm_client import LMStudioClient, LLMOutputError
 from modules.ocr import ocr_extract
 from modules.equation_engine import extract_model, ProblemModel
-from modules.verifier import verify, VerificationReport
+from modules.verifier import verify, VerificationReport, confidence_label
 from modules.solver import compute_steps, narrate_steps
 from modules.scenarios import generate_alternative_scenarios
 from modules.plotter import plottable_free_symbols, build_plot
 from modules.workspace import Workspace
+from modules import history
+from modules.exporter import build_markdown, build_pdf_bytes
 
 st.set_page_config(page_title="Math Representation System", layout="wide")
 
@@ -26,7 +28,8 @@ st.set_page_config(page_title="Math Representation System", layout="wide")
 client = LMStudioClient()
 ws = Workspace(st.session_state)
 for key, default in [("problem_text", ""), ("model", None), ("report", None),
-                      ("steps", None), ("scenarios", None), ("extracted_from_image", "")]:
+                      ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
+                      ("pdf_bytes", None)]:
     st.session_state.setdefault(key, default)
 
 # ---------------------------------------------------------------- sidebar
@@ -80,6 +83,34 @@ with st.sidebar:
                     "current name in a new problem below (e.g. \"using d = ...\").")
     else:
         st.caption("No stored variables yet. Solve a problem and extract a value to reuse it here.")
+
+    st.divider()
+    st.header("History")
+    recent = history.list_recent()
+    if recent:
+        for entry in recent:
+            badge = "✅" if entry["passed"] else "⚠️"
+            label = entry["problem_text"][:45] + ("..." if len(entry["problem_text"]) > 45 else "")
+            c1, c2, c3 = st.columns([5, 1, 1])
+            with c1:
+                st.caption(f"{badge} **{entry['domain'] or '—'}** -- {entry['timestamp'][:16].replace('T', ' ')}")
+                st.caption(label)
+            with c2:
+                if st.button("↺", key=f"load_{entry['id']}", help="Load this problem"):
+                    loaded = history.load(entry["id"])
+                    if loaded is not None:
+                        p_text, l_model, l_report, l_steps, l_scenarios = loaded
+                        st.session_state.update(
+                            problem_text=p_text, model=l_model, report=l_report,
+                            steps=l_steps, scenarios=l_scenarios, pdf_bytes=None,
+                        )
+                        st.rerun()
+            with c3:
+                if st.button("✕", key=f"delhist_{entry['id']}", help="Delete from history"):
+                    history.delete(entry["id"])
+                    st.rerun()
+    else:
+        st.caption("No solved problems yet -- they'll be saved here automatically.")
 
 st.title("🧮 Math Representation System")
 st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
@@ -149,7 +180,9 @@ if solve_clicked and problem_text.strip():
         with st.spinner("Generating alternative scenarios..."):
             scenarios = generate_alternative_scenarios(client, model)
 
-        st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios)
+        st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios,
+                                 pdf_bytes=None)
+        history.save(problem_text, model, report, steps, scenarios)
 
     except LLMOutputError as e:
         pipeline_failed = True
@@ -171,8 +204,17 @@ if model:
     st.divider()
 
     # ---- verification banner
+    conf_label, worst_ratio = report.confidence()
     if report.passed:
-        st.success("✅ Self-check passed: symbolic checks and an independent re-solve agree.")
+        if conf_label in ("essentially exact", "comfortable margin"):
+            st.success(f"✅ Self-check passed with high confidence ({conf_label}) -- symbolic "
+                        "checks and an independent re-solve agree.")
+        else:
+            # technically passed, but at least one check was close to its own
+            # threshold -- worth flagging even though nothing failed outright
+            st.warning(f"✅ Self-check passed, but confidence is only '{conf_label}' -- at least "
+                        "one check came close to its tolerance. Worth a second look before "
+                        "trusting the result completely.")
     else:
         st.warning(
             "⚠️ Self-check found unresolved issues after retries -- review the equations below "
@@ -180,7 +222,11 @@ if model:
         )
     with st.expander("Verification detail"):
         for c in report.checks:
-            (st.write if c.passed else st.error)(f"{'✅' if c.passed else '❌'} **{c.label}**: {c.detail}")
+            icon = "✅" if c.passed else "❌"
+            margin_tag = ""
+            if c.passed and c.margin_ratio is not None:
+                margin_tag = f"  `confidence: {confidence_label(c.margin_ratio)}`"
+            (st.write if c.passed else st.error)(f"{icon} **{c.label}**: {c.detail}{margin_tag}")
         for target, val in report.sympy_numeric_answers.items():
             st.write(f"Derived-equation answer for `{target}`: `{val:.6g}`")
         for target, val in report.llm_independent_answers.items():
@@ -285,3 +331,25 @@ if model:
 
         fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target)
         st.plotly_chart(fig, use_container_width=True)
+
+    # ---- export
+    st.divider()
+    st.markdown("### Export")
+    scenarios_list = st.session_state["scenarios"] or []
+    export_problem_text = st.session_state["problem_text"]
+
+    c1, c2 = st.columns(2)
+    with c1:
+        md_content = build_markdown(export_problem_text, model, report, steps_by_target, scenarios_list)
+        st.download_button("📄 Download as Markdown", data=md_content,
+                            file_name="solved_problem.md", mime="text/markdown")
+    with c2:
+        if st.session_state["pdf_bytes"] is None:
+            if st.button("🖨️ Generate PDF"):
+                with st.spinner("Rendering PDF (typesetting equations)..."):
+                    st.session_state["pdf_bytes"] = build_pdf_bytes(
+                        export_problem_text, model, report, steps_by_target, scenarios_list)
+                st.rerun()
+        else:
+            st.download_button("⬇️ Download PDF", data=st.session_state["pdf_bytes"],
+                                file_name="solved_problem.pdf", mime="application/pdf")
