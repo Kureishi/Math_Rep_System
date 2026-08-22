@@ -32,7 +32,7 @@ UNIT_ALIASES: dict[str, sp.Expr] = {
     "km": u.kilometer, "kilometer": u.kilometer, "kilometers": u.kilometer,
     "cm": u.centimeter, "mm": u.millimeter,
     "ft": u.feet, "feet": u.feet, "foot": u.feet, "in": u.inch, "inch": u.inch,
-    "mi": u.mile, "mile": u.mile, "miles": u.mile,
+    "mi": u.mile, "mile": u.mile, "miles": u.mile, "mph": u.mile/u.hour,
     "s": u.second, "sec": u.second, "second": u.second, "seconds": u.second,
     "min": u.minute, "minute": u.minute, "minutes": u.minute,
     "hr": u.hour, "h": u.hour, "hour": u.hour, "hours": u.hour,

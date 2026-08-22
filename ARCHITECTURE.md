@@ -89,9 +89,45 @@ eqsolver/
     ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper
     ├── ocr.py                 # pytesseract fallback for non-vision models
     ├── equation_engine.py     # LLM extraction prompt + JSON -> SymPy parsing
-    ├── verifier.py             # structural + independent cross-check verification
-    ├── solver.py               # SymPy step trace + LLM narration
-    ├── scenarios.py            # alternative real-world context generator
-    ├── plotter.py               # Plotly figure builder for free-variable sweeps
-    └── workspace.py             # cross-problem variable memory (session_state)
+    │                          #   (equations / inequalities / ODEs, each kind
+    │                          #   parsed differently -- see target_kind())
+    ├── units_checker.py        # sympy.physics.units-based dimensional checks
+    ├── ode_utils.py             # shared dsolve() helper (solver.py + verifier.py
+    │                            #   both need it; lives here to avoid a circular import)
+    ├── verifier.py               # structural + numeric + dimensional + inequality +
+    │                             #   ODE (checkodesol) + independent cross-check verification
+    ├── solver.py                  # SymPy step trace per kind + LLM narration
+    ├── scenarios.py                # alternative real-world context generator
+    ├── plotter.py                   # 2D line + 3D surface Plotly figure builders
+    ├── workspace.py                  # cross-problem variable memory (session_state)
+    ├── history.py                     # SQLite-backed solved-problem history
+    └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
 ```
+
+## Coverage: equation kinds
+
+Every relation the extraction step produces is tagged with a `kind`:
+`"equation"`, `"inequality"`, or `"ode"`. This tag drives three separate
+code paths, not just a display label:
+
+- **Parsing** (`equation_engine.py`): equations parse via `sp.Eq`;
+  inequalities parse as a raw SymPy `Relational` (rejecting anything that
+  isn't a genuine comparison); ODEs parse with the unknown function bound
+  to `sp.Function(name)` instead of `sp.Symbol(name)`, so `Derivative(y(t), t)`
+  parses correctly.
+- **Verification** (`verifier.py`): equations get numeric-balance +
+  dimensional checks; inequalities get a "does the constraint actually
+  hold" check once all symbols are known; ODEs get `sp.checkodesol` --
+  an exact symbolic check that the solution satisfies the original
+  differential equation, not a numeric approximation.
+- **Solving** (`solver.py`): equations solve via `sp.solve` (whole system
+  at once, so coupled targets resolve correctly); inequalities solve via
+  `sp.reduce_inequalities` to produce a solution set; ODEs solve via
+  `sp.dsolve`, first for the general solution (shown as its own step),
+  then with initial conditions applied for the particular solution.
+
+`target_kind(model, name)` (in `equation_engine.py`) determines which path
+a given `solve_for` target actually takes, based on which kind of relation
+defines it -- this is what lets `compute_steps()` and `verify()` dispatch
+correctly even when a single problem mixes kinds (e.g. an equation and a
+constraint together).

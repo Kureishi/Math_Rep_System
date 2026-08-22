@@ -59,3 +59,52 @@ def build_plot(model: ProblemModel, eq: Equation, x_symbol: str,
     fig.add_hline(y=0, line_dash="dash", line_color="gray")
     fig.update_layout(xaxis_title=x_symbol, yaxis_title=f"{eq.name} residual (0 = satisfied)")
     return fig
+
+
+def build_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
+                         param_values: dict[str, float],
+                         x_range: tuple[float, float], y_range: tuple[float, float],
+                         z_target: str | None = None, resolution: int = 60) -> go.Figure:
+    """3D surface plot for an equation with two free plotting variables --
+    e.g. distance as a function of both acceleration AND time. Solves the
+    equation for z_target (if given and solvable) and evaluates it over an
+    (x, y) meshgrid; falls back to plotting the equation's residual surface
+    (zero-crossing = where the equation is satisfied) otherwise.
+    """
+    x, y = sp.Symbol(x_symbol), sp.Symbol(y_symbol)
+    xs = np.linspace(x_range[0], x_range[1], resolution)
+    ys = np.linspace(y_range[0], y_range[1], resolution)
+    X, Y = np.meshgrid(xs, ys)
+
+    subs = {sp.Symbol(k): v for k, v in param_values.items()}
+    fig = go.Figure()
+
+    if z_target and z_target not in (x_symbol, y_symbol):
+        target = sp.Symbol(z_target)
+        try:
+            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
+        except Exception:  # noqa: BLE001
+            solved = []
+        if solved:
+            f = sp.lambdify((x, y), solved[0][target], "numpy")
+            Z = np.real(np.array(f(X, Y), dtype=complex)) if not np.isscalar(f(X, Y)) else np.full_like(X, f(X, Y))
+            fig.add_trace(go.Surface(x=xs, y=ys, z=Z, colorscale="Viridis",
+                                       colorbar=dict(title=z_target)))
+            fig.update_layout(
+                scene=dict(xaxis_title=x_symbol, yaxis_title=y_symbol, zaxis_title=z_target),
+                margin=dict(l=0, r=0, t=30, b=0),
+            )
+            return fig
+
+    # fallback: residual surface, with a zero-plane the equation satisfies
+    residual = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+    f = sp.lambdify((x, y), residual, "numpy")
+    Z = np.real(np.array(f(X, Y), dtype=complex)) if not np.isscalar(f(X, Y)) else np.full_like(X, f(X, Y))
+    fig.add_trace(go.Surface(x=xs, y=ys, z=Z, colorscale="RdBu",
+                               colorbar=dict(title=f"{eq.name} residual")))
+    fig.update_layout(
+        scene=dict(xaxis_title=x_symbol, yaxis_title=y_symbol,
+                    zaxis_title=f"{eq.name} residual (0 = satisfied)"),
+        margin=dict(l=0, r=0, t=30, b=0),
+    )
+    return fig

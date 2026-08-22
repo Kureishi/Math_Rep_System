@@ -9,15 +9,18 @@ Requires LM Studio running locally with its server started
 """
 import streamlit as st
 import sympy as sp
+import numpy as np
+import plotly.graph_objects as go
 
 from config import settings
 from modules.llm_client import LMStudioClient, LLMOutputError
 from modules.ocr import ocr_extract
-from modules.equation_engine import extract_model, ProblemModel
-from modules.verifier import verify, VerificationReport, confidence_label
+from modules.equation_engine import extract_model, ProblemModel, target_kind
+from modules.verifier import verify, VerificationReport, confidence_label, _known_substitutions
 from modules.solver import compute_steps, narrate_steps
+from modules.ode_utils import solve_ode
 from modules.scenarios import generate_alternative_scenarios
-from modules.plotter import plottable_free_symbols, build_plot
+from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot
 from modules.workspace import Workspace
 from modules import history
 from modules.exporter import build_markdown, build_pdf_bytes
@@ -236,6 +239,7 @@ if model:
 
     # ---- equations + derivations
     st.markdown("### Derived equations")
+    KIND_BADGES = {"equation": "🟢 equation", "inequality": "🟡 inequality", "ode": "🔵 differential equation"}
     for eq in model.equations:
         cols = st.columns([2, 3])
         with cols[0]:
@@ -244,7 +248,7 @@ if model:
             else:
                 st.error(f"Failed to parse: {eq.raw_expression}")
         with cols[1]:
-            st.markdown(f"**{eq.name}**")
+            st.markdown(f"**{eq.name}**  `{KIND_BADGES.get(eq.kind, eq.kind)}`")
             st.write(eq.derivation)
 
     if model.assumptions:
@@ -255,14 +259,21 @@ if model:
     # ---- variables (editable, modification support)
     st.markdown("### Variables")
     edited_values = {}
-    var_cols = st.columns(min(4, max(1, len(model.variables))))
-    for i, v in enumerate(model.variables):
-        with var_cols[i % len(var_cols)]:
-            default = v.known_value if v.known_value is not None else 0.0
-            edited_values[v.symbol] = st.number_input(
-                f"{v.symbol} — {v.meaning} ({v.unit or 'unitless'})",
-                value=float(default), key=f"var_{v.symbol}",
-            )
+    scalar_vars = [v for v in model.variables if not v.is_function]
+    function_vars = [v for v in model.variables if v.is_function]
+    if scalar_vars:
+        var_cols = st.columns(min(4, max(1, len(scalar_vars))))
+        for i, v in enumerate(scalar_vars):
+            with var_cols[i % len(var_cols)]:
+                default = v.known_value if v.known_value is not None else 0.0
+                edited_values[v.symbol] = st.number_input(
+                    f"{v.symbol} — {v.meaning} ({v.unit or 'unitless'})",
+                    value=float(default), key=f"var_{v.symbol}",
+                )
+    if function_vars:
+        st.caption("Functions (solved as differential equations, not editable as plain numbers):")
+        for v in function_vars:
+            st.caption(f"`{v.symbol}` — {v.meaning} ({v.unit or 'unitless'})")
 
     # ---- step-by-step solution (one section per requested target)
     steps_by_target = st.session_state["steps"] or {}
@@ -295,8 +306,52 @@ if model:
             else:
                 st.markdown(f"- **{s.get('scenario', '')}**  \n  _{s.get('mapping', '')}_")
 
-    # ---- interactive plot
-    plottable = [e for e in model.equations if e.sympy_eq is not None
+    # ---- ODE solution: plot + evaluate-at-a-point
+    ode_solutions = solve_ode(model)
+    if ode_solutions:
+        st.markdown("### Differential equation solution")
+        for func_name, sol in ode_solutions.items():
+            st.latex(sp.latex(sol))
+            applied = sol.lhs  # e.g. y(t)
+            indep_sym = applied.args[0]
+            rhs_sub = sol.rhs.subs(_known_substitutions(model))
+            remaining = sorted(rhs_sub.free_symbols - {indep_sym}, key=str)
+
+            param_vals = {}
+            if remaining:
+                st.caption("Remaining parameters:")
+                pcols = st.columns(min(4, len(remaining)))
+                for i, s in enumerate(remaining):
+                    with pcols[i % len(pcols)]:
+                        param_vals[s] = st.slider(str(s), 0.01, 20.0, 1.0, key=f"odeparam_{func_name}_{s}")
+            rhs_final = rhs_sub.subs(param_vals)
+
+            try:
+                f = sp.lambdify(indep_sym, rhs_final, "numpy")
+                t_range = st.slider(f"{indep_sym} range", 0.0, 100.0, (0.0, 10.0),
+                                     key=f"oderange_{func_name}")
+                xs = np.linspace(t_range[0], t_range[1], 300)
+                ys = np.real(np.array(f(xs), dtype=complex))
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name=f"{func_name}({indep_sym})"))
+                fig.update_layout(xaxis_title=str(indep_sym), yaxis_title=func_name)
+                st.plotly_chart(fig, use_container_width=True)
+
+                eval_point = st.number_input(f"Evaluate {func_name} at {indep_sym} =",
+                                               value=float(t_range[1]), key=f"odeeval_{func_name}")
+                eval_value = float(np.real(complex(f(eval_point))))
+                st.write(f"**{func_name}({indep_sym}={eval_point:g}) = {eval_value:.6g}**")
+                if st.button(f"➕ Extract this value to workspace", key=f"odeextract_{func_name}"):
+                    unit = next((v.unit for v in model.variables if v.symbol == func_name), None)
+                    ws.store(f"{func_name}_at_{eval_point:g}", eval_value,
+                             source=f"{st.session_state['problem_text'][:60]}...", unit=unit)
+                    st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.caption(f"Couldn't plot this solution numerically: {e}")
+
+    # ---- interactive plot (algebraic equations only -- inequalities and
+    # ODEs are visualized in their own dedicated sections above)
+    plottable = [e for e in model.equations if e.kind == "equation" and e.sympy_eq is not None
                  and len(plottable_free_symbols(e, set())) >= 1]
     if plottable:
         st.markdown("### Interactive plot")
@@ -304,33 +359,75 @@ if model:
         eq_choice = next(e for e in plottable if e.name == eq_choice_name)
         free_syms = plottable_free_symbols(eq_choice, set())
 
-        x_symbol = st.selectbox("X-axis variable", free_syms)
-        other_syms = [s for s in free_syms if s != x_symbol]
+        plot_mode = "2D line"
+        if len(free_syms) >= 2:
+            plot_mode = st.radio("Plot type", ["2D line", "3D surface"], horizontal=True)
 
-        param_values = {}
-        if other_syms:
-            st.caption("Adjust the remaining parameters -- the plot updates live:")
-            pcols = st.columns(min(4, len(other_syms)))
-            for i, s in enumerate(other_syms):
-                default = edited_values.get(s, 1.0) or 1.0
-                with pcols[i % len(pcols)]:
-                    param_values[s] = st.slider(
-                        s, min_value=float(default) - 10, max_value=float(default) + 10,
-                        value=float(default), key=f"slider_{s}",
-                    )
+        if plot_mode == "3D surface" and len(free_syms) >= 2:
+            x_symbol = st.selectbox("X-axis variable", free_syms, key="surf_x")
+            y_candidates = [s for s in free_syms if s != x_symbol]
+            y_symbol = st.selectbox("Y-axis variable", y_candidates, key="surf_y")
+            other_syms = [s for s in free_syms if s not in (x_symbol, y_symbol)]
 
-        x_default = edited_values.get(x_symbol, 10.0) or 10.0
-        x_range = st.slider("X-axis range", -50.0, 50.0,
-                             (min(0.0, x_default - 10), x_default + 10))
+            param_values = {}
+            if other_syms:
+                st.caption("Adjust the remaining parameters:")
+                pcols = st.columns(min(4, len(other_syms)))
+                for i, s in enumerate(other_syms):
+                    default = edited_values.get(s, 1.0) or 1.0
+                    with pcols[i % len(pcols)]:
+                        param_values[s] = st.slider(
+                            s, min_value=float(default) - 10, max_value=float(default) + 10,
+                            value=float(default), key=f"surf_slider_{s}",
+                        )
 
-        y_target = None
-        if model.solve_for:
-            candidates = [t for t in model.solve_for if t != x_symbol]
-            if candidates:
-                y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
+            x_default = edited_values.get(x_symbol, 10.0) or 10.0
+            y_default = edited_values.get(y_symbol, 10.0) or 10.0
+            x_range = st.slider("X-axis range", -50.0, 50.0,
+                                 (min(0.0, x_default - 10), x_default + 10), key="surf_xr")
+            y_range = st.slider("Y-axis range", -50.0, 50.0,
+                                 (min(0.0, y_default - 10), y_default + 10), key="surf_yr")
 
-        fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target)
-        st.plotly_chart(fig, use_container_width=True)
+            z_target = None
+            if model.solve_for:
+                z_candidates = [t for t in model.solve_for
+                                 if t not in (x_symbol, y_symbol) and target_kind(model, t) == "equation"]
+                if z_candidates:
+                    z_target = st.selectbox("Z-axis target (solve equation for)", z_candidates)
+
+            fig = build_surface_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
+                                       z_target=z_target)
+            st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            x_symbol = st.selectbox("X-axis variable", free_syms, key="line_x")
+            other_syms = [s for s in free_syms if s != x_symbol]
+
+            param_values = {}
+            if other_syms:
+                st.caption("Adjust the remaining parameters -- the plot updates live:")
+                pcols = st.columns(min(4, len(other_syms)))
+                for i, s in enumerate(other_syms):
+                    default = edited_values.get(s, 1.0) or 1.0
+                    with pcols[i % len(pcols)]:
+                        param_values[s] = st.slider(
+                            s, min_value=float(default) - 10, max_value=float(default) + 10,
+                            value=float(default), key=f"slider_{s}",
+                        )
+
+            x_default = edited_values.get(x_symbol, 10.0) or 10.0
+            x_range = st.slider("X-axis range", -50.0, 50.0,
+                                 (min(0.0, x_default - 10), x_default + 10), key="line_xr")
+
+            y_target = None
+            if model.solve_for:
+                candidates = [t for t in model.solve_for
+                               if t != x_symbol and target_kind(model, t) == "equation"]
+                if candidates:
+                    y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
+
+            fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target)
+            st.plotly_chart(fig, use_container_width=True)
 
     # ---- export
     st.divider()

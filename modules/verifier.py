@@ -22,10 +22,11 @@ much harder test to pass by accident.
 from dataclasses import dataclass, field
 import re
 import sympy as sp
+from sympy.core.function import AppliedUndef
 
 from config import settings
 from modules.llm_client import LMStudioClient
-from modules.equation_engine import ProblemModel
+from modules.equation_engine import ProblemModel, target_kind, symbols_and_functions_used
 from modules.units_checker import parse_unit, dimension_of, dims_equivalent, UnitParseError
 
 INDEPENDENT_SOLVE_PROMPT = """Solve this problem yourself, from scratch, showing minimal work. \
@@ -116,12 +117,11 @@ def _structural_checks(model: ProblemModel, report: VerificationReport):
         report.add("Equation parsing", True, "All equations parsed to valid SymPy expressions.",
                     margin_ratio=0.0)
 
-    # 2. every solve_for symbol is actually used somewhere
+    # 2. every solve_for symbol/function is actually used somewhere
     if model.solve_for:
         used = set()
         for e in model.equations:
-            if e.sympy_eq is not None:
-                used |= {s.name for s in e.sympy_eq.free_symbols}
+            used |= symbols_and_functions_used(e)
         missing = [t for t in model.solve_for if t not in used]
         if missing:
             report.add("Target variable present", False,
@@ -131,9 +131,13 @@ def _structural_checks(model: ProblemModel, report: VerificationReport):
                         f"{', '.join(model.solve_for)} all appear in the equations.",
                         margin_ratio=0.0)
 
-    # 3. determinacy: unknowns vs equations
-    unknowns = [v.symbol for v in model.variables if v.known_value is None]
-    n_eqs = len([e for e in model.equations if e.sympy_eq is not None])
+    # 3. determinacy: unknowns vs equations (algebraic relations only --
+    # inequalities and ODEs have their own solvability semantics, checked
+    # separately in _inequality_checks / the ODE solution check)
+    unknowns = [v.symbol for v in model.variables
+                if v.known_value is None and not v.is_function
+                and target_kind(model, v.symbol) != "inequality"]
+    n_eqs = len([e for e in model.equations if e.kind == "equation" and e.sympy_eq is not None])
     if len(unknowns) > n_eqs and n_eqs > 0:
         report.add("Determinacy", False,
                     f"{len(unknowns)} unknown(s) ({', '.join(unknowns)}) but only "
@@ -155,7 +159,7 @@ def _numeric_balance_check(model: ProblemModel, report: VerificationReport):
     """
     subs = _known_substitutions(model)
     for eq in model.equations:
-        if eq.sympy_eq is None:
+        if eq.kind != "equation" or eq.sympy_eq is None:
             continue
         free = eq.sympy_eq.free_symbols
         if free and free.issubset(subs.keys()):
@@ -213,8 +217,8 @@ def _dimensional_checks(model: ProblemModel, report: VerificationReport):
         )
 
     for eq in model.equations:
-        if eq.sympy_eq is None:
-            continue
+        if eq.sympy_eq is None or eq.kind == "ode":
+            continue  # Derivative-based dimensional analysis isn't supported here
         names = {s.name for s in eq.sympy_eq.free_symbols}
         if not names or not names.issubset(units_map.keys()):
             continue  # can't fully check this equation -- some symbol has no known unit
@@ -237,22 +241,90 @@ def _dimensional_checks(model: ProblemModel, report: VerificationReport):
                         f"Dimensionally invalid: {e}")
 
 
+def _inequality_checks(model: ProblemModel, report: VerificationReport):
+    """When every symbol in an inequality-kind constraint has a known
+    value, substitutes them in and checks whether the constraint actually
+    holds -- e.g. flags a derived "v <= 25" constraint that's violated by
+    the problem's own stated numbers."""
+    subs = _known_substitutions(model)
+    for eq in model.equations:
+        if eq.kind != "inequality" or eq.sympy_eq is None:
+            continue
+        free = eq.sympy_eq.free_symbols
+        if not free or not free.issubset(subs.keys()):
+            continue
+        substituted = eq.sympy_eq.subs(subs)
+        try:
+            truth = bool(substituted)
+        except TypeError:
+            continue  # couldn't reduce to a definite True/False -- skip silently
+        report.add(
+            f"Constraint satisfied: {eq.name}", truth,
+            f"With known values substituted, the constraint becomes {substituted} "
+            f"({'holds' if truth else 'DOES NOT hold -- inconsistent with the given numbers'}).",
+            margin_ratio=0.0 if truth else None,
+        )
+
+
+def _ode_checks(model: ProblemModel, report: VerificationReport):
+    """ODE-specific verification: rather than a numeric residual, this
+    substitutes the solved solution back into the ORIGINAL differential
+    equation via sp.checkodesol -- an exact symbolic check (not a numeric
+    approximation) that the solution actually satisfies the equation it
+    was derived from. This replaces the numeric-balance check for ODEs,
+    which doesn't apply to a relation between a function and its derivative."""
+    ode_eqs = [e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]
+    if not ode_eqs:
+        return
+
+    from modules.ode_utils import solve_ode
+    solutions = solve_ode(model)
+
+    for eq in ode_eqs:
+        funcs = eq.sympy_eq.atoms(AppliedUndef)
+        if not funcs:
+            continue
+        func_name = str(next(iter(funcs)).func)
+        solution = solutions.get(func_name)
+        if solution is None:
+            report.add(f"ODE solved: {eq.name}", False,
+                        "SymPy's dsolve() could not find a closed-form solution for this equation.")
+            continue
+        try:
+            ok, remainder = sp.checkodesol(eq.sympy_eq, solution)
+            detail = (
+                f"Solution {solution} verified by substituting back into the original "
+                "differential equation (exact symbolic check, not a numeric approximation)."
+                if ok else
+                f"Substituting the solution back into the ODE leaves a nonzero remainder "
+                f"({remainder}) -- the solution does not actually satisfy the equation."
+            )
+            report.add(f"ODE solution check: {eq.name}", bool(ok), detail,
+                        margin_ratio=0.0 if ok else None)
+        except Exception as e:  # noqa: BLE001
+            report.add(f"ODE solution check: {eq.name}", False, f"Could not verify: {e}")
+
+
 def _solve_sympy(model: ProblemModel) -> dict[str, float]:
-    """Solves the whole equation system at once for every requested target --
-    important because targets can be coupled (e.g. displacement 'd' may
-    depend on an also-unknown acceleration 'a' solved from another equation
-    in the same system)."""
-    if not model.solve_for:
+    """Solves the whole EQUATION-kind system at once for every algebraic
+    target -- important because targets can be coupled (e.g. displacement
+    'd' may depend on an also-unknown acceleration 'a' solved from another
+    equation in the same system). Inequality and ODE targets are handled
+    by their own checks and are deliberately excluded here."""
+    algebraic_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
+    if not algebraic_targets:
         return {}
     subs = _known_substitutions(model)
-    eqs = [e.sympy_eq.subs(subs) for e in model.equations if e.sympy_eq is not None]
-    targets = [sp.Symbol(t) for t in model.solve_for]
+    eqs = [e.sympy_eq.subs(subs) for e in model.equations if e.kind == "equation" and e.sympy_eq is not None]
+    if not eqs:
+        return {}
+    targets = [sp.Symbol(t) for t in algebraic_targets]
     try:
         sol = sp.solve(eqs, targets, dict=True)
         if not sol:
             return {}
         result = {}
-        for t, sym in zip(model.solve_for, targets):
+        for t, sym in zip(algebraic_targets, targets):
             val = sol[0].get(sym)
             if val is not None and val.is_number:
                 result[t] = float(val)
@@ -279,21 +351,27 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
     _structural_checks(model, report)
     _numeric_balance_check(model, report)
     _dimensional_checks(model, report)
+    _inequality_checks(model, report)
+    _ode_checks(model, report)
 
     sympy_answers = _solve_sympy(model)
     report.sympy_numeric_answers = sympy_answers
 
-    if model.solve_for and sympy_answers:
+    if sympy_answers:
+        # only ask about targets we actually have an algebraic answer for --
+        # inequality/ODE targets are verified separately above and would
+        # just confuse this prompt (they often have no single number)
+        algebraic_targets = list(sympy_answers.keys())
         raw = client.chat(
             system="You are a careful independent problem solver.",
             user=INDEPENDENT_SOLVE_PROMPT.format(
-                targets=", ".join(model.solve_for), problem=problem_text),
+                targets=", ".join(algebraic_targets), problem=problem_text),
             temperature=0.0,
         )
         llm_answers = _extract_final_numbers(raw)
         report.llm_independent_answers = llm_answers
 
-        for target in model.solve_for:
+        for target in algebraic_targets:
             sympy_val = sympy_answers.get(target)
             llm_val = llm_answers.get(target)
             if sympy_val is None or llm_val is None:
