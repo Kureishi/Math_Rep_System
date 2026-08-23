@@ -27,7 +27,7 @@ from sympy.core.function import AppliedUndef
 from config import settings
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel, target_kind, symbols_and_functions_used
-from modules.units_checker import parse_unit, dimension_of, dims_equivalent, UnitParseError
+from modules.units_checker import parse_unit, dimension_of, dims_equivalent, UnitParseError, make_dimension_placeholder
 
 INDEPENDENT_SOLVE_PROMPT = """Solve this problem yourself, from scratch, showing minimal work. \
 The problem asks for these quantities: {targets}. \
@@ -217,12 +217,19 @@ def _dimensional_checks(model: ProblemModel, report: VerificationReport):
         )
 
     for eq in model.equations:
-        if eq.sympy_eq is None or eq.kind == "ode":
-            continue  # Derivative-based dimensional analysis isn't supported here
+        if eq.sympy_eq is None:
+            continue
+        if eq.kind == "ode":
+            continue  # handled separately by _ode_dimensional_checks below
         names = {s.name for s in eq.sympy_eq.free_symbols}
         if not names or not names.issubset(units_map.keys()):
             continue  # can't fully check this equation -- some symbol has no known unit
-        subs = {sp.Symbol(name): units_map[name] for name in names}
+        # each DISTINCT symbol gets its OWN placeholder quantity (same
+        # dimension, different object) -- see make_dimension_placeholder's
+        # docstring for why reusing one canonical unit object across
+        # different symbols would risk a false "a - b" cancellation
+        subs = {sp.Symbol(name): make_dimension_placeholder(dimension_of(units_map[name]))
+                for name in names}
         try:
             lhs_dim = dimension_of(eq.sympy_eq.lhs.subs(subs))
             rhs_dim = dimension_of(eq.sympy_eq.rhs.subs(subs))
@@ -239,6 +246,82 @@ def _dimensional_checks(model: ProblemModel, report: VerificationReport):
             # dimensions together, e.g. "v + a" without multiplying a by t
             report.add(f"Dimensional consistency: {eq.name}", False,
                         f"Dimensionally invalid: {e}")
+
+    _ode_dimensional_checks(model, report, units_map)
+
+
+def _ode_dimensional_substitute(expr: sp.Basic, deriv_atoms: set,
+                                  subs_funcs: dict, subs_symbols: dict) -> sp.Basic:
+    """Replaces each Derivative(f(t), t, ...) node with unit(f)/unit(t)**n
+    BEFORE substituting bare function applications and plain symbols --
+    order matters, since once a Derivative node is replaced there's nothing
+    left inside it to double-substitute. Operates on a single side (.lhs or
+    .rhs) of an equation, never the wrapped Eq itself: substituting into a
+    whole Eq can trigger premature auto-evaluation to a bare True/False
+    once both sides become fully concrete (e.g. Eq(g/yr, -g/yr) auto-
+    resolves to False before dimensions are ever compared), which loses
+    the .lhs/.rhs structure the dimension check needs."""
+    subs_derivs = {}
+    for d in deriv_atoms:
+        if d.expr not in subs_funcs:
+            continue
+        denom = 1
+        for var, n in d.variable_count:
+            denom *= subs_symbols.get(var, 1) ** n
+        subs_derivs[d] = subs_funcs[d.expr] / denom
+    return expr.subs(subs_derivs).subs(subs_funcs).subs(subs_symbols)
+
+
+def _ode_dimensional_checks(model: ProblemModel, report: VerificationReport, units_map: dict[str, sp.Expr]):
+    """Dimensional consistency for ODEs: the dimension of d^n(f)/dx^n is
+    dim(f)/dim(x)**n. Every declared function (is_function=True variable)
+    gets its own unit substituted in for bare applications; each Derivative
+    node gets that unit divided by the independent variable's unit raised
+    to the derivative's order. Skips (rather than fails) any equation
+    referencing a function or symbol with no declared/recognized unit."""
+    ode_eqs = [e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]
+    if not ode_eqs:
+        return
+
+    func_units = {v.symbol: units_map[v.symbol] for v in model.variables
+                  if v.is_function and v.symbol in units_map}
+
+    for eq in ode_eqs:
+        deriv_atoms = eq.sympy_eq.atoms(sp.Derivative)
+        applied_funcs = eq.sympy_eq.atoms(AppliedUndef)
+        func_names_used = {str(f.func) for f in applied_funcs}
+        plain_symbol_names = {s.name for s in eq.sympy_eq.free_symbols}
+
+        # every function AND every plain symbol involved needs a known unit
+        if not func_names_used.issubset(func_units.keys()):
+            continue
+        if not plain_symbol_names.issubset(units_map.keys()):
+            continue
+
+        subs_funcs = {f: make_dimension_placeholder(dimension_of(func_units[str(f.func)]))
+                       for f in applied_funcs}
+        subs_symbols = {sp.Symbol(name): make_dimension_placeholder(dimension_of(units_map[name]))
+                         for name in plain_symbol_names}
+
+        try:
+            lhs_sub = _ode_dimensional_substitute(eq.sympy_eq.lhs, deriv_atoms, subs_funcs, subs_symbols)
+            rhs_sub = _ode_dimensional_substitute(eq.sympy_eq.rhs, deriv_atoms, subs_funcs, subs_symbols)
+            lhs_dim = dimension_of(lhs_sub)
+            rhs_dim = dimension_of(rhs_sub)
+            ok = dims_equivalent(lhs_dim, rhs_dim)
+            report.add(
+                f"Dimensional consistency: {eq.name}", ok,
+                f"LHS dimension = {lhs_dim}, RHS dimension = {rhs_dim}."
+                + ("" if ok else " NOT equivalent -- the differential equation is physically "
+                                  "inconsistent regardless of what numbers are plugged in."),
+                margin_ratio=0.0 if ok else None,
+            )
+        except ValueError as e:
+            report.add(f"Dimensional consistency: {eq.name}", False, f"Dimensionally invalid: {e}")
+        except Exception as e:  # noqa: BLE001
+            report.add(f"Dimensional consistency: {eq.name}", True,
+                        f"Skipped -- could not evaluate dimensions for this ODE ({e}).",
+                        margin_ratio=0.0)
 
 
 def _inequality_checks(model: ProblemModel, report: VerificationReport):
@@ -269,40 +352,77 @@ def _inequality_checks(model: ProblemModel, report: VerificationReport):
 def _ode_checks(model: ProblemModel, report: VerificationReport):
     """ODE-specific verification: rather than a numeric residual, this
     substitutes the solved solution back into the ORIGINAL differential
-    equation via sp.checkodesol -- an exact symbolic check (not a numeric
-    approximation) that the solution actually satisfies the equation it
-    was derived from. This replaces the numeric-balance check for ODEs,
-    which doesn't apply to a relation between a function and its derivative."""
+    equation(s) -- an exact symbolic check (not a numeric approximation)
+    that the solution actually satisfies the equation(s) it was derived
+    from. This replaces the numeric-balance check for ODEs, which doesn't
+    apply to a relation between a function and its derivative.
+
+    Coupled systems (e.g. a decay chain A -> B) are verified as a group:
+    checkodesol alone only knows about one function/equation at a time and
+    gives false negatives on a coupled system, since it doesn't substitute
+    the OTHER function's solution in before checking. verify_coupled_solution
+    substitutes every function's solution into every equation in its group
+    simultaneously, which is the correct check for coupling.
+    """
+    from modules.ode_utils import solve_ode, group_coupled_odes, verify_coupled_solution
+
     ode_eqs = [e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]
     if not ode_eqs:
         return
 
-    from modules.ode_utils import solve_ode
     solutions = solve_ode(model)
+    groups = group_coupled_odes(ode_eqs)
 
-    for eq in ode_eqs:
-        funcs = eq.sympy_eq.atoms(AppliedUndef)
-        if not funcs:
+    for group in groups:
+        names_in_group = ", ".join(sorted({
+            str(next(iter(e.sympy_eq.atoms(AppliedUndef))).func) for e in group
+        }))
+
+        # if any equation in the group has no solution at all, nothing to verify
+        missing = [e for e in group
+                   if str(next(iter(e.sympy_eq.atoms(AppliedUndef))).func) not in solutions]
+        if missing:
+            for e in missing:
+                report.add(f"ODE solved: {e.name}", False,
+                            "SymPy's dsolve()/dsolve_system() could not find a closed-form "
+                            "solution for this equation.")
             continue
-        func_name = str(next(iter(funcs)).func)
-        solution = solutions.get(func_name)
-        if solution is None:
-            report.add(f"ODE solved: {eq.name}", False,
-                        "SymPy's dsolve() could not find a closed-form solution for this equation.")
-            continue
-        try:
-            ok, remainder = sp.checkodesol(eq.sympy_eq, solution)
-            detail = (
-                f"Solution {solution} verified by substituting back into the original "
-                "differential equation (exact symbolic check, not a numeric approximation)."
-                if ok else
-                f"Substituting the solution back into the ODE leaves a nonzero remainder "
-                f"({remainder}) -- the solution does not actually satisfy the equation."
-            )
-            report.add(f"ODE solution check: {eq.name}", bool(ok), detail,
-                        margin_ratio=0.0 if ok else None)
-        except Exception as e:  # noqa: BLE001
-            report.add(f"ODE solution check: {eq.name}", False, f"Could not verify: {e}")
+
+        if len(group) == 1:
+            eq = group[0]
+            func_name = str(next(iter(eq.sympy_eq.atoms(AppliedUndef))).func)
+            solution = solutions[func_name]
+            try:
+                ok, remainder = sp.checkodesol(eq.sympy_eq, solution)
+                detail = (
+                    f"Solution {solution} verified by substituting back into the original "
+                    "differential equation (exact symbolic check, not a numeric approximation)."
+                    if ok else
+                    f"Substituting the solution back into the ODE leaves a nonzero remainder "
+                    f"({remainder}) -- the solution does not actually satisfy the equation."
+                )
+                report.add(f"ODE solution check: {eq.name}", bool(ok), detail,
+                            margin_ratio=0.0 if ok else None)
+            except Exception as e:  # noqa: BLE001
+                report.add(f"ODE solution check: {eq.name}", False, f"Could not verify: {e}")
+        else:
+            try:
+                ok, residual = verify_coupled_solution(group, solutions)
+                group_label = " & ".join(e.name for e in group)
+                detail = (
+                    f"Coupled solution for {names_in_group} verified by substituting all "
+                    "functions' solutions into every equation in the group simultaneously "
+                    "(exact symbolic check)."
+                    if ok else
+                    f"Substituting the coupled solutions back leaves a nonzero remainder "
+                    f"({residual}) in at least one equation -- the system's solution is "
+                    "inconsistent."
+                )
+                report.add(f"Coupled ODE system check: {group_label}", bool(ok), detail,
+                            margin_ratio=0.0 if ok else None)
+            except Exception as e:  # noqa: BLE001
+                report.add(f"Coupled ODE system check: {names_in_group}", False,
+                            f"Could not verify: {e}")
 
 
 def _solve_sympy(model: ProblemModel) -> dict[str, float]:

@@ -8,8 +8,11 @@ the numbers happened to match. This module substitutes each symbol's *unit*
 (not its value) and checks that both sides of every equation -- and every
 additive term within a side -- share the same physical dimension.
 """
+import itertools
+
 import sympy as sp
 from sympy.physics import units as u
+from sympy.physics.units import Quantity
 from sympy.physics.units.systems.si import SI
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, convert_xor
 
@@ -93,3 +96,28 @@ def dimension_of(expr: sp.Expr):
 
 def dims_equivalent(dim_a, dim_b) -> bool:
     return SI.get_dimension_system().equivalent_dims(dim_a, dim_b)
+
+
+_placeholder_counter = itertools.count()
+
+
+def make_dimension_placeholder(dim) -> sp.Expr:
+    """A fresh, uniquely-named Quantity carrying exactly the given
+    dimension (scale factor 1). Used instead of substituting the same
+    canonical unit object (e.g. the module-level u.meter) for two
+    DIFFERENT symbols that happen to share a unit string.
+
+    Why this matters: if two distinct symbols 'a' and 'b' both have unit
+    "m" and both get substituted with the literal same u.meter object,
+    SymPy sees them as interchangeable -- so checking the dimension of
+    "a - b" silently collapses to "meter - meter = 0" (a bare, dimension-
+    less zero) before the dimension is ever computed, hiding a check that
+    should have correctly reported "length" for that difference. Giving
+    each distinct symbol its own placeholder object (same dimension, but
+    not the same object) prevents that false cancellation while still
+    correctly validating that same-dimension terms combine and
+    different-dimension terms don't."""
+    q = Quantity(f"_dim_ph_{next(_placeholder_counter)}")
+    SI.set_quantity_dimension(q, dim)
+    SI.set_quantity_scale_factor(q, sp.Integer(1))
+    return q

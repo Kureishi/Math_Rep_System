@@ -108,3 +108,54 @@ def build_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
         margin=dict(l=0, r=0, t=30, b=0),
     )
     return fig
+
+
+def build_feasible_region_plot(constraints: list[Equation], x_symbol: str, y_symbol: str,
+                                 param_values: dict[str, float],
+                                 x_range: tuple[float, float], y_range: tuple[float, float],
+                                 resolution: int = 300) -> go.Figure:
+    """Shades the region of the (x, y) plane where ALL given inequality
+    constraints hold simultaneously -- e.g. a budget constraint AND a time
+    constraint AND non-negativity, all at once. Each constraint's boolean
+    Relational is lambdified directly (sympy/numpy natively evaluate
+    Relational objects elementwise over arrays) and combined with a
+    logical AND across the whole constraint set.
+    """
+    x, y = sp.Symbol(x_symbol), sp.Symbol(y_symbol)
+    xs = np.linspace(x_range[0], x_range[1], resolution)
+    ys = np.linspace(y_range[0], y_range[1], resolution)
+    X, Y = np.meshgrid(xs, ys)
+
+    subs = {sp.Symbol(k): v for k, v in param_values.items()}
+    feasible = np.ones_like(X, dtype=bool)
+    skipped = []
+
+    for c in constraints:
+        if c.sympy_eq is None:
+            continue
+        substituted = c.sympy_eq.subs(subs)
+        free = substituted.free_symbols
+        if not free.issubset({x, y}):
+            skipped.append(c.name)  # still has an unsubstituted symbol -- can't evaluate this one
+            continue
+        try:
+            f = sp.lambdify((x, y), substituted, "numpy")
+            mask = np.asarray(f(X, Y), dtype=bool)
+            feasible &= mask
+        except Exception:  # noqa: BLE001
+            skipped.append(c.name)
+
+    fig = go.Figure()
+    fig.add_trace(go.Heatmap(
+        x=xs, y=ys, z=feasible.astype(int),
+        colorscale=[[0, "rgba(240,240,240,0.3)"], [1, "rgba(94,234,212,0.55)"]],
+        showscale=False, hoverinfo="skip",
+    ))
+    fig.update_layout(
+        xaxis_title=x_symbol, yaxis_title=y_symbol,
+        title="Shaded region = every constraint satisfied simultaneously",
+    )
+    if skipped:
+        fig.update_layout(title=f"Shaded = feasible region (skipped: {', '.join(skipped)} -- "
+                                  "still has an unresolved symbol)")
+    return fig

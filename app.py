@@ -20,10 +20,11 @@ from modules.verifier import verify, VerificationReport, confidence_label, _know
 from modules.solver import compute_steps, narrate_steps
 from modules.ode_utils import solve_ode
 from modules.scenarios import generate_alternative_scenarios
-from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot
+from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot
+from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot
 from modules.workspace import Workspace
 from modules import history
-from modules.exporter import build_markdown, build_pdf_bytes
+from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot
 
 st.set_page_config(page_title="Math Representation System", layout="wide")
 
@@ -32,8 +33,34 @@ client = LMStudioClient()
 ws = Workspace(st.session_state)
 for key, default in [("problem_text", ""), ("model", None), ("report", None),
                       ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
-                      ("pdf_bytes", None)]:
+                      ("pdf_bytes", None), ("plot_snapshots", {})]:
     st.session_state.setdefault(key, default)
+
+
+def snapshot_button(key: str, title: str, caption: str, render_fn):
+    """Renders a small 'include this plot in the report' control under a
+    plot. render_fn is a zero-arg callable producing PNG bytes -- kept
+    lazy so the (potentially slow) matplotlib re-render only happens when
+    the user actually opts in, not on every script rerun."""
+    existing = st.session_state["plot_snapshots"].get(key)
+    if existing:
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            st.caption(f"✅ Included in the exported report as \"{existing.title}\"")
+        with c2:
+            if st.button("Remove", key=f"remove_snap_{key}"):
+                del st.session_state["plot_snapshots"][key]
+                st.session_state["pdf_bytes"] = None  # cached PDF is now stale
+                st.rerun()
+    else:
+        if st.button("📸 Include this plot in the report", key=f"include_snap_{key}"):
+            try:
+                png = render_fn()
+                st.session_state["plot_snapshots"][key] = PlotSnapshot(title=title, caption=caption, png_bytes=png)
+                st.session_state["pdf_bytes"] = None
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Couldn't capture a snapshot of this plot: {e}")
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
@@ -154,7 +181,7 @@ with st.sidebar:
                         p_text, l_model, l_report, l_steps, l_scenarios = loaded
                         st.session_state.update(
                             problem_text=p_text, model=l_model, report=l_report,
-                            steps=l_steps, scenarios=l_scenarios, pdf_bytes=None,
+                            steps=l_steps, scenarios=l_scenarios, pdf_bytes=None, plot_snapshots={},
                         )
                         st.rerun()
             with c3:
@@ -233,7 +260,7 @@ if solve_clicked and problem_text.strip():
             scenarios = generate_alternative_scenarios(client, model)
 
         st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios,
-                                 pdf_bytes=None)
+                                 pdf_bytes=None, plot_snapshots={})
         history.save(problem_text, model, report, steps, scenarios)
 
     except LLMOutputError as e:
@@ -384,7 +411,21 @@ if model:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name=f"{func_name}({indep_sym})"))
                 fig.update_layout(xaxis_title=str(indep_sym), yaxis_title=func_name)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
+
+                ode_caption = (
+                    f"ODE solution for {func_name}({indep_sym}) | range: {indep_sym} in "
+                    f"[{t_range[0]:g}, {t_range[1]:g}]"
+                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_vals.items())
+                       if param_vals else "")
+                )
+                snapshot_button(
+                    key=f"ode_{func_name}",
+                    title=f"{func_name}({indep_sym}) solution curve",
+                    caption=ode_caption,
+                    render_fn=lambda rf=rhs_final, ind=indep_sym, tr=t_range, fn=func_name:
+                        snapshot_ode_plot(fn, ind, rf, tr),
+                )
 
                 eval_point = st.number_input(f"Evaluate {func_name} at {indep_sym} =",
                                                value=float(t_range[1]), key=f"odeeval_{func_name}")
@@ -446,7 +487,23 @@ if model:
 
             fig = build_surface_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
                                        z_target=z_target)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
+
+            surf_caption = (
+                f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}] | "
+                f"y={y_symbol} [{y_range[0]:g}, {y_range[1]:g}]"
+                + (f" | z solved for: {z_target}" if z_target else "")
+                + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
+                   if param_values else "")
+            )
+            snapshot_button(
+                key=f"surface_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                title=f"{eq_choice.name}: {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
+                caption=surf_caption,
+                render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                 xr=x_range, yr=y_range, zt=z_target:
+                    snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt),
+            )
 
         else:
             x_symbol = st.selectbox("X-axis variable", free_syms, key="line_x")
@@ -476,17 +533,94 @@ if model:
                     y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
 
             fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
+
+            line_caption = (
+                f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}]"
+                + (f" | y solved for: {y_target}" if y_target else "")
+                + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
+                   if param_values else "")
+            )
+            snapshot_button(
+                key=f"line_{eq_choice.name}_{x_symbol}",
+                title=f"{eq_choice.name}: {y_target or 'residual'} vs {x_symbol}",
+                caption=line_caption,
+                render_fn=lambda ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target:
+                    snapshot_line_plot(ec, xs, pv, xr, y_target=yt),
+            )
+
+    # ---- feasible region (multiple inequality constraints, 2 free variables)
+    inequality_eqs = [e for e in model.equations if e.kind == "inequality" and e.sympy_eq is not None]
+    if len(inequality_eqs) >= 1:
+        all_ineq_symbols = set()
+        for e in inequality_eqs:
+            all_ineq_symbols |= {s.name for s in e.sympy_eq.free_symbols}
+        # only known-fixed symbols get sliders; the rest are candidate plot axes
+        ineq_free_syms = sorted(all_ineq_symbols)
+        if len(ineq_free_syms) >= 2:
+            st.markdown("### Feasible region")
+            st.caption("Shades where every selected constraint holds at once -- e.g. a budget "
+                        "AND a time limit AND non-negativity, simultaneously.")
+            selected_constraints = st.multiselect(
+                "Constraints to include", [e.name for e in inequality_eqs],
+                default=[e.name for e in inequality_eqs], key="region_constraints",
+            )
+            region_x = st.selectbox("X-axis variable", ineq_free_syms, key="region_x")
+            region_y_candidates = [s for s in ineq_free_syms if s != region_x]
+            region_y = st.selectbox("Y-axis variable", region_y_candidates, key="region_y")
+            other_ineq_syms = [s for s in ineq_free_syms if s not in (region_x, region_y)]
+
+            region_params = {}
+            if other_ineq_syms:
+                st.caption("Fix the remaining constraint parameters:")
+                rcols = st.columns(min(4, len(other_ineq_syms)))
+                for i, s in enumerate(other_ineq_syms):
+                    default = edited_values.get(s, 1.0) or 1.0
+                    with rcols[i % len(rcols)]:
+                        region_params[s] = st.number_input(s, value=float(default), key=f"region_param_{s}")
+
+            rx_default = edited_values.get(region_x, 10.0) or 10.0
+            ry_default = edited_values.get(region_y, 10.0) or 10.0
+            region_x_range = st.slider("X-axis range", -50.0, 50.0,
+                                         (min(0.0, rx_default - 10), rx_default + 10), key="region_xr")
+            region_y_range = st.slider("Y-axis range", -50.0, 50.0,
+                                         (min(0.0, ry_default - 10), ry_default + 10), key="region_yr")
+
+            chosen = [e for e in inequality_eqs if e.name in selected_constraints]
+            if chosen:
+                fig = build_feasible_region_plot(chosen, region_x, region_y, region_params,
+                                                   region_x_range, region_y_range)
+                st.plotly_chart(fig, width='stretch')
+
+                region_caption = (
+                    f"Constraints: {', '.join(c.name for c in chosen)} | x={region_x} "
+                    f"[{region_x_range[0]:g}, {region_x_range[1]:g}] | y={region_y} "
+                    f"[{region_y_range[0]:g}, {region_y_range[1]:g}]"
+                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in region_params.items())
+                       if region_params else "")
+                )
+                snapshot_button(
+                    key=f"region_{region_x}_{region_y}",
+                    title="Feasible region",
+                    caption=region_caption,
+                    render_fn=lambda ch=chosen, rx=region_x, ry=region_y, rp=region_params,
+                                     rxr=region_x_range, ryr=region_y_range:
+                        snapshot_feasible_region(ch, rx, ry, rp, rxr, ryr),
+                )
 
     # ---- export
     st.divider()
     st.markdown("### Export")
     scenarios_list = st.session_state["scenarios"] or []
     export_problem_text = st.session_state["problem_text"]
+    plot_snapshots_list = list(st.session_state["plot_snapshots"].values())
+    if plot_snapshots_list:
+        st.caption(f"{len(plot_snapshots_list)} plot(s) will be included in the exported report.")
 
     c1, c2 = st.columns(2)
     with c1:
-        md_content = build_markdown(export_problem_text, model, report, steps_by_target, scenarios_list)
+        md_content = build_markdown(export_problem_text, model, report, steps_by_target, scenarios_list,
+                                      plot_snapshots=plot_snapshots_list)
         st.download_button("📄 Download as Markdown", data=md_content,
                             file_name="solved_problem.md", mime="text/markdown")
     with c2:
@@ -494,7 +628,8 @@ if model:
             if st.button("🖨️ Generate PDF"):
                 with st.spinner("Rendering PDF (typesetting equations)..."):
                     st.session_state["pdf_bytes"] = build_pdf_bytes(
-                        export_problem_text, model, report, steps_by_target, scenarios_list)
+                        export_problem_text, model, report, steps_by_target, scenarios_list,
+                        plot_snapshots=plot_snapshots_list)
                 st.rerun()
         else:
             st.download_button("⬇️ Download PDF", data=st.session_state["pdf_bytes"],

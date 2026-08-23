@@ -139,6 +139,48 @@ ODE_JSON = """{
 }"""
 
 
+COUPLED_ODE_JSON = """{
+  "problem_domain": "decay chain",
+  "problem_type": "ode",
+  "independent_variable": "t",
+  "variables": [
+    {"symbol": "A", "meaning": "parent isotope", "known_value": null, "unit": "g", "is_function": true},
+    {"symbol": "B", "meaning": "daughter isotope", "known_value": null, "unit": "g", "is_function": true},
+    {"symbol": "t", "meaning": "time", "known_value": null, "unit": "years", "is_function": false},
+    {"symbol": "k1", "meaning": "A decay rate", "known_value": "0.5", "unit": "1/year", "is_function": false},
+    {"symbol": "k2", "meaning": "B decay rate", "known_value": "0.2", "unit": "1/year", "is_function": false}
+  ],
+  "equations": [
+    {"name": "A decay", "kind": "ode", "expression": "Eq(Derivative(A(t), t), -k1*A(t))", "derivation": "x"},
+    {"name": "B production/decay", "kind": "ode",
+     "expression": "Eq(Derivative(B(t), t), k1*A(t) - k2*B(t))", "derivation": "x"}
+  ],
+  "initial_conditions": [
+    {"expression": "A(0)", "value": "1000"},
+    {"expression": "B(0)", "value": "0"}
+  ],
+  "solve_for": ["A", "B"],
+  "assumptions": []
+}"""
+
+MULTI_CONSTRAINT_JSON = """{
+  "problem_domain": "resource allocation",
+  "problem_type": "algebraic",
+  "variables": [
+    {"symbol": "x", "meaning": "units of product A", "known_value": null, "unit": null},
+    {"symbol": "y", "meaning": "units of product B", "known_value": null, "unit": null}
+  ],
+  "equations": [
+    {"name": "budget constraint", "kind": "inequality", "expression": "x + y <= 10", "derivation": "x"},
+    {"name": "time constraint", "kind": "inequality", "expression": "2*x + y <= 15", "derivation": "x"},
+    {"name": "x non-negative", "kind": "inequality", "expression": "x >= 0", "derivation": "x"},
+    {"name": "y non-negative", "kind": "inequality", "expression": "y >= 0", "derivation": "x"}
+  ],
+  "solve_for": [],
+  "assumptions": []
+}"""
+
+
 @pytest.fixture
 def kinematics_json():
     return KINEMATICS_JSON
@@ -162,3 +204,13 @@ def inequality_json():
 @pytest.fixture
 def ode_json():
     return ODE_JSON
+
+
+@pytest.fixture
+def coupled_ode_json():
+    return COUPLED_ODE_JSON
+
+
+@pytest.fixture
+def multi_constraint_json():
+    return MULTI_CONSTRAINT_JSON

@@ -12,7 +12,9 @@ renders a large, practically-relevant subset of LaTeX without needing a
 system TeX installation, so each equation/step is rendered to a small
 in-memory PNG and embedded in the PDF.
 """
+import base64
 import io
+from dataclasses import dataclass
 from datetime import datetime
 
 import sympy as sp
@@ -27,10 +29,25 @@ from modules.verifier import VerificationReport
 from modules.solver import SolutionStep
 
 
+@dataclass
+class PlotSnapshot:
+    """A user-chosen static capture of an interactive plot, for inclusion
+    in an exported report -- the interactive version lives only in the
+    browser session, so this is the opt-in way to get a specific view
+    (with whatever parameter values were selected at the time) into a
+    document. `caption` should describe exactly what's shown, e.g. which
+    equation, which axes, and what any fixed slider values were, since a
+    static image alone doesn't carry that context."""
+    title: str
+    caption: str
+    png_bytes: bytes
+
+
 # ---------------------------------------------------------------- Markdown
 
 def build_markdown(problem_text: str, model: ProblemModel, report: VerificationReport,
-                    steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict]) -> str:
+                    steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict],
+                    plot_snapshots: list[PlotSnapshot] | None = None) -> str:
     L = []
     L.append("# Math Representation System -- Solved Problem")
     L.append(f"*Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
@@ -90,6 +107,18 @@ def build_markdown(problem_text: str, model: ProblemModel, report: VerificationR
                     L.append("")
                     L.append(f"_{s.explanation}_")
                 L.append("")
+
+    if plot_snapshots:
+        L.append("## Plots")
+        L.append("")
+        for snap in plot_snapshots:
+            b64 = base64.b64encode(snap.png_bytes).decode("ascii")
+            L.append(f"**{snap.title}**")
+            L.append("")
+            L.append(f"![{snap.title}](data:image/png;base64,{b64})")
+            L.append("")
+            L.append(f"_{snap.caption}_")
+            L.append("")
 
     if scenarios and not any("error" in s for s in scenarios):
         L.append("## Where else this applies")
@@ -156,7 +185,8 @@ def _add_equation(pdf: FPDF, latex_str: str, fontsize: int = 13, max_h: float = 
 
 
 def build_pdf_bytes(problem_text: str, model: ProblemModel, report: VerificationReport,
-                     steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict]) -> bytes:
+                     steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict],
+                     plot_snapshots: list[PlotSnapshot] | None = None) -> bytes:
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -230,6 +260,22 @@ def build_pdf_bytes(problem_text: str, model: ProblemModel, report: Verification
                     pdf.set_font("Helvetica", "I", 9)
                     pdf.multi_cell(0, 5, _safe(s.explanation), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 pdf.ln(1)
+
+    if plot_snapshots:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.multi_cell(0, 8, "Plots", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        for snap in plot_snapshots:
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.multi_cell(0, 6, _safe(snap.title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            try:
+                pdf.image(io.BytesIO(snap.png_bytes), w=170)
+            except Exception as e:  # noqa: BLE001
+                pdf.set_font("Helvetica", "I", 9)
+                pdf.multi_cell(0, 5, _safe(f"(couldn't embed image: {e})"),
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.multi_cell(0, 5, _safe(snap.caption), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(2)
 
     if scenarios and not any("error" in s for s in scenarios):
         pdf.set_font("Helvetica", "B", 13)

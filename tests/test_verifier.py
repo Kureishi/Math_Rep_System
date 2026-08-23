@@ -147,3 +147,52 @@ def test_extract_model_end_to_end_with_workspace_context(fake_client_factory):
     assert len(client.calls) == 1
     _, user_msg = client.calls[0]
     assert "d = 84 m" in user_msg
+
+
+def test_ode_dimensional_check_passes_when_consistent(ode_json, fake_client_factory):
+    model = build_model(json.loads(ode_json))
+    report = verify(model, fake_client_factory(), "x")
+    dim_check = next(c for c in report.checks if "Dimensional consistency" in c.label)
+    assert dim_check.passed
+
+
+def test_ode_dimensional_check_catches_wrong_rate_constant_unit(fake_client_factory):
+    """k given in grams instead of a rate (1/year) -- dN/dt has dimension
+    mass/time, but k*N would have dimension mass*mass = mass^2. This is
+    exactly the class of unit-mixup a numeric check can't catch, since
+    the numbers could still "work" while the physics is nonsense."""
+    model = build_model({
+        "problem_domain": "decay", "problem_type": "ode", "independent_variable": "t",
+        "variables": [
+            {"symbol": "N", "meaning": "mass", "known_value": None, "unit": "g", "is_function": True},
+            {"symbol": "t", "meaning": "time", "known_value": None, "unit": "years", "is_function": False},
+            {"symbol": "k", "meaning": "rate", "known_value": "0.1", "unit": "g", "is_function": False},
+        ],
+        "equations": [{"name": "decay (bad units)", "kind": "ode",
+                       "expression": "Eq(Derivative(N(t), t), -k*N(t))", "derivation": "x"}],
+        "initial_conditions": [{"expression": "N(0)", "value": "500"}],
+        "solve_for": ["N"], "assumptions": [],
+    })
+    report = verify(model, fake_client_factory(), "x")
+    dim_check = next(c for c in report.checks if "Dimensional consistency" in c.label)
+    assert not dim_check.passed
+    assert not report.passed
+
+
+def test_ode_dimensional_check_skips_gracefully_without_units(fake_client_factory):
+    model = build_model({
+        "problem_domain": "decay", "problem_type": "ode", "independent_variable": "t",
+        "variables": [
+            {"symbol": "N", "meaning": "mass", "known_value": None, "unit": None, "is_function": True},
+            {"symbol": "t", "meaning": "time", "known_value": None, "unit": None, "is_function": False},
+            {"symbol": "k", "meaning": "rate", "known_value": "0.1", "unit": None, "is_function": False},
+        ],
+        "equations": [{"name": "decay (no units)", "kind": "ode",
+                       "expression": "Eq(Derivative(N(t), t), -k*N(t))", "derivation": "x"}],
+        "initial_conditions": [{"expression": "N(0)", "value": "500"}],
+        "solve_for": ["N"], "assumptions": [],
+    })
+    report = verify(model, fake_client_factory(), "x")
+    dim_checks = [c for c in report.checks if "Dimensional consistency" in c.label]
+    assert dim_checks == []  # skipped entirely, not treated as a failure
+    assert report.passed

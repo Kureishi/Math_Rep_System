@@ -117,17 +117,63 @@ def _inequality_steps_for_target(model: ProblemModel, target_name: str, subs: di
 
 def _ode_steps_for_target(model: ProblemModel, target_name: str,
                             particular_solution: sp.Eq) -> list[SolutionStep]:
-    ode_eq = next((e for e in model.equations
-                    if e.kind == "ode" and e.sympy_eq is not None
-                    and target_name in symbols_and_functions_used(e)), None)
+    from modules.ode_utils import group_coupled_odes
+
+    ode_eqs = [e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]
+    ode_eq = next((e for e in ode_eqs if target_name in symbols_and_functions_used(e)), None)
     steps: list[SolutionStep] = []
     if ode_eq is None:
         return steps
 
-    steps.append(SolutionStep(description="State the differential equation",
-                                expression=sp.latex(ode_eq.sympy_eq)))
+    group = next((g for g in group_coupled_odes(ode_eqs) if ode_eq in g), [ode_eq])
+    is_coupled = len(group) > 1
+
+    if is_coupled:
+        for e in group:
+            steps.append(SolutionStep(description=f"State the differential equation: {e.name}",
+                                        expression=sp.latex(e.sympy_eq)))
+    else:
+        steps.append(SolutionStep(description="State the differential equation",
+                                    expression=sp.latex(ode_eq.sympy_eq)))
 
     func_applied = next(iter(ode_eq.sympy_eq.atoms(AppliedUndef)))
+
+    if is_coupled:
+        from sympy.solvers.ode.systems import dsolve_system
+        applied_funcs = []
+        seen = set()
+        for e in group:
+            for f in e.sympy_eq.atoms(AppliedUndef):
+                if str(f.func) not in seen:
+                    seen.add(str(f.func))
+                    applied_funcs.append(f)
+        t = next(iter(applied_funcs[0].args))
+        try:
+            general_sols = dsolve_system([e.sympy_eq for e in group], funcs=applied_funcs, t=t)[0]
+        except Exception:  # noqa: BLE001
+            general_sols = None
+
+        if general_sols is not None:
+            general_this_target = next((s for s in general_sols if str(s.lhs.func) == target_name), None)
+            if general_this_target is not None:
+                steps.append(SolutionStep(
+                    description=f"Solve the coupled system for the general solution of {target_name}",
+                    expression=sp.latex(general_this_target)))
+
+        matching_ics = [ic for ic in model.initial_conditions
+                         if ic.sympy_eq is not None and ic.sympy_eq.lhs.atoms(AppliedUndef)
+                         and str(next(iter(ic.sympy_eq.lhs.atoms(AppliedUndef))).func) in seen]
+        if matching_ics:
+            ic_text = ", ".join(f"{ic.raw_expression} = {ic.value:g}" for ic in matching_ics)
+            steps.append(SolutionStep(
+                description=f"Apply initial condition(s) across the coupled system: {ic_text}",
+                expression=sp.latex(particular_solution)))
+        else:
+            steps.append(SolutionStep(description=f"Particular solution for {target_name}",
+                                        expression=sp.latex(particular_solution)))
+        return steps
+
+    # standalone (uncoupled) ODE -- unchanged from before
     try:
         general_sol = sp.dsolve(ode_eq.sympy_eq, func_applied)
     except Exception:  # noqa: BLE001
