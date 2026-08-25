@@ -174,7 +174,6 @@ See `ARCHITECTURE.md` for the full design. In short:
     equation kind was needed. The app shows each declared vector's
     numeric components, magnitude, and direction once its components
     are filled in.
-<<<<<<< HEAD
 12. **Curve/data fitting** (`modules/curve_fitting.py`) -- a genuinely
     different pipeline, reachable via the "📈 Curve fitting" mode at the
     top of the app: input is a table of (x, y) numbers (pasted or
@@ -202,8 +201,6 @@ See `ARCHITECTURE.md` for the full design. In short:
     for `x >= 0`), this module does its own targeted sampling and
     reports *which* tested points agreed and disagreed rather than a
     bare "undetermined."
-=======
->>>>>>> e3ab651c15f0ca938979b7c9a06c3ea6fb7febce
 
 ## Extending it
 

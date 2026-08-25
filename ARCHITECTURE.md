@@ -97,10 +97,6 @@ eqsolver/
     │                            #   verifier.py both need it; lives here to avoid a
     │                            #   circular import)
     ├── recurrence_utils.py       # shared rsolve() helper, same circular-import reason
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> e3ab651c15f0ca938979b7c9a06c3ea6fb7febce
     ├── matrix_utils.py            # A x = b representation + rank-based classification
     │                              #   (unique/infinite/inconsistent) + eigenvalues for
     │                              #   genuine linear systems (>=2 equations, >=2 shared
@@ -110,7 +106,6 @@ eqsolver/
     │                              #   bound into equation_engine's local_dict so vector
     │                              #   quantities (forces, displacements) parse and reduce to
     │                              #   scalars via genuine sp.Matrix objects, not LLM pre-decomposition
-<<<<<<< HEAD
     ├── curve_fitting.py            # sibling pipeline: CSV/pasted (x,y) data -> fitted symbolic
     │                              #   model + R²/RMSE/residuals. numpy-only (polyfit after
     │                              #   linearizing, or lstsq for linear-in-parameters custom
@@ -118,10 +113,6 @@ eqsolver/
     ├── equivalence.py               # standalone "are these two expressions the same" utility,
     │                              #   built on sp.Expr.equals() with a numeric-sampling fallback
     │                              #   that reports WHERE two expressions agree/disagree
-=======
-=======
->>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
->>>>>>> e3ab651c15f0ca938979b7c9a06c3ea6fb7febce
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions
