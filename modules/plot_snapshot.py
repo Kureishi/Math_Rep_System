@@ -157,3 +157,21 @@ def snapshot_ode_plot(func_name: str, indep_symbol: sp.Symbol, rhs_expr: sp.Expr
     ax.set_ylabel(func_name)
     ax.grid(alpha=0.3)
     return _finish(fig)
+
+
+def snapshot_recurrence_plot(func_name: str, indep_symbol: sp.Symbol, closed_form: sp.Expr,
+                               n_range: tuple[int, int]) -> bytes:
+    """Discrete markers (a stem plot), not a connected line -- a recurrence
+    is only defined at integer indices, so drawing a continuous curve
+    through the points would visually imply values exist in between that
+    the problem never actually defines."""
+    ns = np.arange(n_range[0], n_range[1] + 1)
+    f = sp.lambdify(indep_symbol, closed_form, "numpy")
+    ys = np.real(np.array([complex(f(n)) for n in ns]))
+
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    ax.stem(ns, ys, basefmt=" ")
+    ax.set_xlabel(str(indep_symbol))
+    ax.set_ylabel(func_name)
+    ax.grid(alpha=0.3)
+    return _finish(fig)

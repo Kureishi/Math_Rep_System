@@ -15,13 +15,16 @@ import plotly.graph_objects as go
 from config import settings
 from modules.llm_client import LMStudioClient, LLMOutputError
 from modules.ocr import ocr_extract
-from modules.equation_engine import extract_model, ProblemModel, target_kind
+from modules.equation_engine import extract_model, ProblemModel, target_kind, symbols_and_functions_used
+from sympy.core.function import AppliedUndef
 from modules.verifier import verify, VerificationReport, confidence_label, _known_substitutions
 from modules.solver import compute_steps, narrate_steps
 from modules.ode_utils import solve_ode
+from modules.recurrence_utils import solve_recurrence, _independent_variable
+from modules.optimization_utils import solve_optimization
 from modules.scenarios import generate_alternative_scenarios
 from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot
-from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot
+from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot
 from modules.workspace import Workspace
 from modules import history
 from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot
@@ -315,7 +318,8 @@ if model:
 
     # ---- equations + derivations
     st.markdown("### Derived equations")
-    KIND_BADGES = {"equation": "🟢 equation", "inequality": "🟡 inequality", "ode": "🔵 differential equation"}
+    KIND_BADGES = {"equation": "🟢 equation", "inequality": "🟡 inequality",
+                    "ode": "🔵 differential equation", "recurrence": "🟣 recurrence relation"}
     for eq in model.equations:
         cols = st.columns([2, 3])
         with cols[0]:
@@ -326,6 +330,32 @@ if model:
         with cols[1]:
             st.markdown(f"**{eq.name}**  `{KIND_BADGES.get(eq.kind, eq.kind)}`")
             st.write(eq.derivation)
+
+    opt_result = solve_optimization(model) if model.objective is not None else None
+
+    if model.objective is not None:
+        st.markdown("### Objective")
+        if model.objective.sympy_expr is not None:
+            direction_word = "Minimize" if model.objective.direction == "minimize" else "Maximize"
+            st.latex(f"\\text{{{direction_word}: }} {sp.latex(model.objective.sympy_expr)}")
+            st.caption(f"Over: {', '.join(model.objective.optimize_over)}")
+
+            if opt_result is not None:
+                if opt_result.error:
+                    st.error(opt_result.error)
+                else:
+                    method = "Lagrange multipliers (constrained)" if opt_result.used_lagrange else \
+                        ("constraint substitution" if opt_result.eliminated_vars else "direct calculus")
+                    st.caption(f"Method: {method}")
+                    for pt, cls in zip(opt_result.critical_points, opt_result.classifications):
+                        pretty_pt = ", ".join(f"{k}={float(v):.6g}" if v.is_number else f"{k}={v}"
+                                                for k, v in pt.items())
+                        st.write(f"**{pretty_pt}** -- {cls}")
+                    for note in opt_result.feasibility_notes:
+                        st.warning(note)
+        else:
+            st.error(f"Failed to parse objective: {model.objective.raw_expression} "
+                      f"({model.objective.parse_error})")
 
     if model.assumptions:
         st.markdown("**Assumptions made:**")
@@ -370,6 +400,15 @@ if model:
                     ws.store(target_name, sympy_val,
                              source=f"{problem_text[:60]}...", unit=unit)
                     st.rerun()
+            elif (target_kind(model, target_name) == "optimization" and opt_result
+                    and not opt_result.error and opt_result.critical_points):
+                opt_val = opt_result.critical_points[0].get(target_name)
+                if opt_val is not None and opt_val.is_number:
+                    if st.button(f"➕ Extract {target_name} to workspace", key=f"extract_opt_{target_name}"):
+                        unit = next((v.unit for v in model.variables if v.symbol == target_name), None)
+                        ws.store(target_name, float(opt_val),
+                                 source=f"{problem_text[:60]}...", unit=unit)
+                        st.rerun()
 
     # ---- alternative scenarios
     if st.session_state["scenarios"]:
@@ -432,6 +471,71 @@ if model:
                 eval_value = float(np.real(complex(f(eval_point))))
                 st.write(f"**{func_name}({indep_sym}={eval_point:g}) = {eval_value:.6g}**")
                 if st.button(f"➕ Extract this value to workspace", key=f"odeextract_{func_name}"):
+                    unit = next((v.unit for v in model.variables if v.symbol == func_name), None)
+                    ws.store(f"{func_name}_at_{eval_point:g}", eval_value,
+                             source=f"{st.session_state['problem_text'][:60]}...", unit=unit)
+                    st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.caption(f"Couldn't plot this solution numerically: {e}")
+
+    # ---- recurrence solution: discrete plot + evaluate-at-a-point
+    recurrence_solutions = solve_recurrence(model)
+    if recurrence_solutions:
+        st.markdown("### Recurrence (sequence) solution")
+        for func_name, closed_form in recurrence_solutions.items():
+            rec_eq = next((e for e in model.equations if e.kind == "recurrence"
+                            and func_name in symbols_and_functions_used(e)), None)
+            indep_sym = None
+            if rec_eq is not None:
+                funcs = rec_eq.sympy_eq.atoms(AppliedUndef) if hasattr(rec_eq.sympy_eq, "atoms") else set()
+                indep_sym = _independent_variable(funcs)
+            if indep_sym is None:
+                indep_sym = sp.Symbol(model.independent_variable or "n")
+
+            st.latex(f"{func_name}({indep_sym}) = {sp.latex(closed_form)}")
+            closed_form_sub = closed_form.subs(_known_substitutions(model))
+            remaining = sorted(closed_form_sub.free_symbols - {indep_sym}, key=str)
+
+            param_vals = {}
+            if remaining:
+                st.caption("Remaining parameters:")
+                pcols = st.columns(min(4, len(remaining)))
+                for i, s in enumerate(remaining):
+                    with pcols[i % len(pcols)]:
+                        param_vals[s] = st.slider(str(s), 0.01, 20.0, 1.0, key=f"recparam_{func_name}_{s}")
+            closed_form_final = closed_form_sub.subs(param_vals)
+
+            try:
+                f = sp.lambdify(indep_sym, closed_form_final, "numpy")
+                n_range = st.slider(f"{indep_sym} range (terms shown)", 0, 100, (0, 10),
+                                      key=f"recrange_{func_name}")
+                ns = np.arange(n_range[0], n_range[1] + 1)
+                ys = np.real(np.array([complex(f(n)) for n in ns]))
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ns, y=ys, mode="markers", name=f"{func_name}({indep_sym})",
+                                           marker=dict(size=8)))
+                fig.update_layout(xaxis_title=str(indep_sym), yaxis_title=func_name)
+                st.plotly_chart(fig, width='stretch')
+
+                rec_caption = (
+                    f"Recurrence solution for {func_name}({indep_sym}) | range: {indep_sym} in "
+                    f"[{n_range[0]}, {n_range[1]}]"
+                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_vals.items())
+                       if param_vals else "")
+                )
+                snapshot_button(
+                    key=f"recurrence_{func_name}",
+                    title=f"{func_name}({indep_sym}) sequence",
+                    caption=rec_caption,
+                    render_fn=lambda cf=closed_form_final, ind=indep_sym, nr=n_range, fn=func_name:
+                        snapshot_recurrence_plot(fn, ind, cf, nr),
+                )
+
+                eval_point = st.number_input(f"Evaluate {func_name} at {indep_sym} =",
+                                               value=int(n_range[1]), step=1, key=f"receval_{func_name}")
+                eval_value = float(np.real(complex(f(eval_point))))
+                st.write(f"**{func_name}({indep_sym}={eval_point:g}) = {eval_value:.6g}**")
+                if st.button(f"➕ Extract this value to workspace", key=f"recextract_{func_name}"):
                     unit = next((v.unit for v in model.variables if v.symbol == func_name), None)
                     ws.store(f"{func_name}_at_{eval_point:g}", eval_value,
                              source=f"{st.session_state['problem_text'][:60]}...", unit=unit)

@@ -202,11 +202,78 @@ def _ode_steps_for_target(model: ProblemModel, target_name: str,
 
 # ---------------------------------------------------------------- dispatch
 
+def _recurrence_steps_for_target(model: ProblemModel, target_name: str,
+                                    closed_form: sp.Expr) -> list[SolutionStep]:
+    from modules.recurrence_utils import _independent_variable
+
+    rec_eq = next((e for e in model.equations
+                    if e.kind == "recurrence" and e.sympy_eq is not None
+                    and target_name in symbols_and_functions_used(e)), None)
+    steps: list[SolutionStep] = []
+    if rec_eq is None:
+        return steps
+
+    steps.append(SolutionStep(description="State the recurrence (difference equation)",
+                                expression=sp.latex(rec_eq.sympy_eq)))
+
+    matching_ics = [ic for ic in model.initial_conditions
+                     if ic.sympy_eq is not None and ic.sympy_eq.lhs.atoms(AppliedUndef)
+                     and str(next(iter(ic.sympy_eq.lhs.atoms(AppliedUndef))).func) == target_name]
+    if matching_ics:
+        ic_text = ", ".join(f"{ic.raw_expression} = {ic.value:g}" for ic in matching_ics)
+        steps.append(SolutionStep(description=f"Solve via rsolve() with initial condition(s): {ic_text}",
+                                    expression=f"{target_name}(n) = {sp.latex(closed_form)}"))
+    else:
+        steps.append(SolutionStep(description="Solve for the general closed-form solution",
+                                    expression=f"{target_name}(n) = {sp.latex(closed_form)}"))
+    return steps
+
+
+def _optimization_steps_for_target(model: ProblemModel, target_name: str,
+                                     opt_result) -> list[SolutionStep]:
+    obj = model.objective
+    steps: list[SolutionStep] = []
+    if obj is None or not opt_result.critical_points:
+        return steps
+
+    direction_word = "Minimize" if obj.direction == "minimize" else "Maximize"
+    steps.append(SolutionStep(description=f"{direction_word} the objective",
+                                expression=sp.latex(obj.sympy_expr)))
+
+    if opt_result.eliminated_vars:
+        for var_name, expr in opt_result.eliminated_vars.items():
+            steps.append(SolutionStep(
+                description=f"Use a constraint to eliminate {var_name}",
+                expression=f"{var_name} = {sp.latex(expr)}",
+            ))
+        if opt_result.reduced_objective is not None:
+            steps.append(SolutionStep(description="Objective after substitution",
+                                        expression=sp.latex(opt_result.reduced_objective)))
+
+    if opt_result.used_lagrange:
+        steps.append(SolutionStep(
+            description="Form the Lagrangian and solve where its gradient is zero "
+                        "(equality-constrained optimization)",
+            expression=f"{target_name} = {sp.latex(opt_result.critical_points[0].get(target_name, '?'))}",
+        ))
+    else:
+        steps.append(SolutionStep(
+            description="Set the derivative(s) to zero and solve for the critical point",
+            expression=f"{target_name} = {sp.latex(opt_result.critical_points[0].get(target_name, '?'))}",
+        ))
+        steps.append(SolutionStep(
+            description="Classify via the second-derivative/Hessian test",
+            expression=opt_result.classifications[0],
+        ))
+
+    return steps
+
+
 def compute_steps(model: ProblemModel) -> dict[str, list[SolutionStep]]:
     """Deterministic SymPy trace per target, dispatched by what kind of
-    relation actually defines that target (equation / inequality / ode).
-    Returns a dict keyed by target name since a problem may ask for more
-    than one quantity."""
+    relation actually defines that target (equation / inequality / ode /
+    recurrence / optimization). Returns a dict keyed by target name since
+    a problem may ask for more than one quantity."""
     if not model.solve_for:
         return {}
 
@@ -214,10 +281,30 @@ def compute_steps(model: ProblemModel) -> dict[str, list[SolutionStep]]:
     ode_solutions = solve_ode(model)
     all_steps: dict[str, list[SolutionStep]] = {}
 
+    recurrence_solutions = None
+    opt_result = None
+
     for target_name in model.solve_for:
         kind = target_kind(model, target_name)
         if kind == "ode" and target_name in ode_solutions:
             all_steps[target_name] = _ode_steps_for_target(model, target_name, ode_solutions[target_name])
+        elif kind == "recurrence":
+            if recurrence_solutions is None:
+                from modules.recurrence_utils import solve_recurrence
+                recurrence_solutions = solve_recurrence(model)
+            if target_name in recurrence_solutions:
+                all_steps[target_name] = _recurrence_steps_for_target(
+                    model, target_name, recurrence_solutions[target_name])
+            else:
+                all_steps[target_name] = []
+        elif kind == "optimization":
+            if opt_result is None:
+                from modules.optimization_utils import solve_optimization
+                opt_result = solve_optimization(model)
+            if opt_result is not None and not opt_result.error:
+                all_steps[target_name] = _optimization_steps_for_target(model, target_name, opt_result)
+            else:
+                all_steps[target_name] = []
         elif kind == "inequality":
             all_steps[target_name] = _inequality_steps_for_target(model, target_name, subs)
         else:
