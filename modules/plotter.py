@@ -161,6 +161,7 @@ def build_feasible_region_plot(constraints: list[Equation], x_symbol: str, y_sym
     return fig
 
 
+<<<<<<< HEAD
 def build_fit_plot(xs: list[float], ys: list[float], fit_expr, x_label: str = "x", y_label: str = "y") -> go.Figure:
     """Scatter of the raw data points plus the fitted curve evaluated
     over a fine grid spanning (and slightly padding) the data's x-range."""
@@ -180,6 +181,8 @@ def build_fit_plot(xs: list[float], ys: list[float], fit_expr, x_label: str = "x
     return fig
 
 
+=======
+>>>>>>> e3ab651c15f0ca938979b7c9a06c3ea6fb7febce
 def build_vector_plot(vectors: list[tuple[str, list[float]]]) -> go.Figure:
     """Draws one or more vectors as arrows from the origin -- 2D (2
     components) or 3D (3 components). Mixed dimensionality isn't
