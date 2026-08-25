@@ -159,3 +159,58 @@ def build_feasible_region_plot(constraints: list[Equation], x_symbol: str, y_sym
         fig.update_layout(title=f"Shaded = feasible region (skipped: {', '.join(skipped)} -- "
                                   "still has an unresolved symbol)")
     return fig
+
+
+def build_fit_plot(xs: list[float], ys: list[float], fit_expr, x_label: str = "x", y_label: str = "y") -> go.Figure:
+    """Scatter of the raw data points plus the fitted curve evaluated
+    over a fine grid spanning (and slightly padding) the data's x-range."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=xs, y=ys, mode="markers", name="data", marker=dict(size=8)))
+    if fit_expr is not None:
+        lo, hi = min(xs), max(xs)
+        pad = (hi - lo) * 0.05 if hi > lo else 1.0
+        grid = np.linspace(lo - pad, hi + pad, 300)
+        f = sp.lambdify(sp.Symbol("x"), fit_expr, "numpy")
+        try:
+            yfit = np.broadcast_to(np.asarray(f(grid), dtype=float), grid.shape)
+            fig.add_trace(go.Scatter(x=grid, y=yfit, mode="lines", name="fit"))
+        except Exception:  # noqa: BLE001
+            pass
+    fig.update_layout(xaxis_title=x_label, yaxis_title=y_label)
+    return fig
+
+
+def build_vector_plot(vectors: list[tuple[str, list[float]]]) -> go.Figure:
+    """Draws one or more vectors as arrows from the origin -- 2D (2
+    components) or 3D (3 components). Mixed dimensionality isn't
+    supported (all vectors passed together must share the same
+    dimension); callers should group by dimension before calling this.
+    """
+    if not vectors:
+        return go.Figure()
+    dim = len(vectors[0][1])
+    fig = go.Figure()
+
+    if dim == 2:
+        for name, comps in vectors:
+            x, y = comps
+            fig.add_trace(go.Scatter(
+                x=[0, x], y=[0, y], mode="lines+markers+text",
+                line=dict(width=3), marker=dict(size=[0, 8], symbol=["circle", "arrow-bar-up"]),
+                text=["", name], textposition="top right", name=name,
+            ))
+        fig.update_layout(xaxis_title="x", yaxis_title="y",
+                            xaxis=dict(zeroline=True), yaxis=dict(zeroline=True, scaleanchor="x"))
+    elif dim == 3:
+        for name, comps in vectors:
+            x, y, z = comps
+            fig.add_trace(go.Scatter3d(
+                x=[0, x], y=[0, y], z=[0, z], mode="lines+markers+text",
+                line=dict(width=6), marker=dict(size=[0, 4]),
+                text=["", name], name=name,
+            ))
+        fig.update_layout(scene=dict(xaxis_title="x", yaxis_title="y", zaxis_title="z"),
+                            margin=dict(l=0, r=0, t=30, b=0))
+    else:
+        raise ValueError(f"build_vector_plot() only supports 2D or 3D vectors, got {dim}D")
+    return fig

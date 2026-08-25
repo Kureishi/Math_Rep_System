@@ -15,13 +15,20 @@ import plotly.graph_objects as go
 from config import settings
 from modules.llm_client import LMStudioClient, LLMOutputError
 from modules.ocr import ocr_extract
-from modules.equation_engine import extract_model, ProblemModel, target_kind
+from modules.equation_engine import extract_model, ProblemModel, target_kind, symbols_and_functions_used
+from sympy.core.function import AppliedUndef
 from modules.verifier import verify, VerificationReport, confidence_label, _known_substitutions
 from modules.solver import compute_steps, narrate_steps
 from modules.ode_utils import solve_ode
+from modules.recurrence_utils import solve_recurrence, _independent_variable
+from modules.optimization_utils import solve_optimization
+from modules.matrix_utils import linear_system_view
+from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
-from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot
-from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot
+from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot
+from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot, snapshot_fit_plot
+from modules.curve_fitting import fit_curve, best_fit, parse_xy_csv, BUILTIN_FAMILIES
+from modules.equivalence import check_equivalence
 from modules.workspace import Workspace
 from modules import history
 from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot
@@ -62,7 +69,134 @@ def snapshot_button(key: str, title: str, caption: str, render_fn):
             except Exception as e:  # noqa: BLE001
                 st.error(f"Couldn't capture a snapshot of this plot: {e}")
 
-# ---------------------------------------------------------------- sidebar
+def render_curve_fitting_tab():
+    """Sibling pipeline to the word-problem solver: input is a table of
+    numbers (typed in or uploaded as CSV), not LLM-extracted text, and
+    the output is a fitted symbolic model plus fit-quality metrics
+    (R-squared, RMSE, residuals) rather than a verified derivation."""
+    st.subheader("📈 Curve / data fitting")
+    st.caption("Upload or paste (x, y) data and fit a symbolic model to it.")
+
+    upload_col, paste_col = st.columns(2)
+    csv_text = None
+    with upload_col:
+        uploaded_csv = st.file_uploader("Upload a 2-column CSV (x, y)", type=["csv"], key="fit_csv_upload")
+        if uploaded_csv is not None:
+            csv_text = uploaded_csv.getvalue().decode("utf-8", errors="replace")
+    with paste_col:
+        pasted = st.text_area("...or paste CSV text", height=100,
+                               placeholder="x,y\n1,2.1\n2,3.9\n3,6.2\n4,7.8\n",
+                               key="fit_csv_paste")
+        if pasted.strip():
+            csv_text = pasted
+
+    if not csv_text:
+        st.info("Provide data via upload or paste to fit a curve.")
+        return
+
+    try:
+        xs, ys, x_label, y_label = parse_xy_csv(csv_text)
+    except ValueError as e:
+        st.error(f"Couldn't read the data: {e}")
+        return
+
+    st.caption(f"Parsed {len(xs)} data points ({x_label} vs {y_label}).")
+
+    family = st.selectbox(
+        "Model family", list(BUILTIN_FAMILIES) + ["custom", "best fit (try all)"],
+        format_func=lambda f: {"linear": "Linear (y = a·x + b)", "polynomial": "Polynomial",
+                                 "exponential": "Exponential (y = a·e^(b·x))", "power": "Power (y = a·x^b)",
+                                 "logarithmic": "Logarithmic (y = a·ln(x) + b)", "custom": "Custom (linear-in-parameters)",
+                                 "best fit (try all)": "Best fit -- try every built-in family"}.get(f, f),
+    )
+
+    degree = 2
+    expr_str, param_names = None, None
+    if family == "polynomial":
+        degree = st.number_input("Degree", min_value=2, max_value=10, value=2, step=1)
+    elif family == "custom":
+        expr_str = st.text_input("Model expression in x and named parameters",
+                                   placeholder="a*sin(x) + b*x + c")
+        params_raw = st.text_input("Parameter names (comma-separated)", placeholder="a, b, c")
+        param_names = [p.strip() for p in params_raw.split(",") if p.strip()]
+
+    if not st.button("Fit", type="primary"):
+        return
+
+    if family == "best fit (try all)":
+        results = best_fit(xs, ys)
+        if not results:
+            st.error("No built-in family could fit this data (check for non-positive x/y values, "
+                      "which rule out exponential/power/logarithmic).")
+            return
+        ranked = sorted(results.items(), key=lambda kv: kv[1].r_squared, reverse=True)
+        st.write("Ranked by R² (higher is better):")
+        for fam, res in ranked:
+            st.write(f"- **{fam}**: R² = {res.r_squared:.5f}, RMSE = {res.rmse:.5g}")
+        best_family, result = ranked[0]
+        st.success(f"Best fit: **{best_family}**")
+    else:
+        result = fit_curve(xs, ys, family, degree=degree, expr_str=expr_str, param_names=param_names)
+
+    if result.error:
+        st.error(result.error)
+        return
+
+    st.latex(f"y = {sp.latex(result.expr)}")
+    m1, m2 = st.columns(2)
+    m1.metric("R²", f"{result.r_squared:.5f}")
+    m2.metric("RMSE", f"{result.rmse:.5g}")
+
+    fig = build_fit_plot(xs, ys, result.expr, x_label, y_label)
+    st.plotly_chart(fig, width='stretch')
+
+    with st.expander("Residuals"):
+        for x, y, r in zip(xs, ys, result.residuals):
+            st.write(f"x={x:g}, y={y:g}, residual={r:.4g}")
+
+    png = snapshot_fit_plot(xs, ys, result.expr, x_label, y_label)
+    st.download_button("Download plot as PNG", data=png, file_name="curve_fit.png", mime="image/png")
+
+
+def render_equivalence_tab():
+    """Standalone building block: 'are these two expressions the same',
+    not a representation capability of its own."""
+    st.subheader("🔁 Check equivalence")
+    st.caption("See whether two symbolic expressions are the same, and if not, why.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        expr1_str = st.text_input("Expression 1", placeholder="sin(x)**2 + cos(x)**2")
+    with c2:
+        expr2_str = st.text_input("Expression 2", placeholder="1")
+    extra_syms_raw = st.text_input("Extra symbol names (comma-separated, optional)", placeholder="a, b")
+
+    if not st.button("Check", type="primary"):
+        return
+    if not expr1_str.strip() or not expr2_str.strip():
+        st.warning("Enter both expressions.")
+        return
+
+    extra_symbols = [s.strip() for s in extra_syms_raw.split(",") if s.strip()]
+    result = check_equivalence(expr1_str, expr2_str, extra_symbols)
+
+    if result.error:
+        st.error(result.error)
+        return
+
+    if result.equivalent is True:
+        st.success("✅ Equivalent")
+    elif result.equivalent is False:
+        st.error("❌ Not equivalent")
+    else:
+        st.warning("⚠️ Undetermined")
+
+    st.caption(f"Method: {result.method}")
+    st.write(result.detail)
+    if result.difference_simplified is not None:
+        st.latex(r"\text{difference (simplified)} = " + sp.latex(result.difference_simplified))
+
+
 with st.sidebar:
     st.header("LM Studio")
     ok, msg = client.is_available()
@@ -194,6 +328,21 @@ with st.sidebar:
 st.title("🧮 Math Representation System")
 st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
 
+# ---------------------------------------------------------------- mode selector
+# Curve fitting and equivalence checking are sibling/standalone tools --
+# gated with an early st.stop() rather than wrapping the (large,
+# deeply-indented) word-problem pipeline below in its own tab block, so
+# adding them doesn't require touching that pipeline's indentation at all.
+mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence"],
+                  horizontal=True, label_visibility="collapsed")
+
+if mode == "📈 Curve fitting":
+    render_curve_fitting_tab()
+    st.stop()
+elif mode == "🔁 Check equivalence":
+    render_equivalence_tab()
+    st.stop()
+
 # ---------------------------------------------------------------- input
 tab_text, tab_image = st.tabs(["Text input", "Image input"])
 problem_text = ""
@@ -315,7 +464,8 @@ if model:
 
     # ---- equations + derivations
     st.markdown("### Derived equations")
-    KIND_BADGES = {"equation": "🟢 equation", "inequality": "🟡 inequality", "ode": "🔵 differential equation"}
+    KIND_BADGES = {"equation": "🟢 equation", "inequality": "🟡 inequality",
+                    "ode": "🔵 differential equation", "recurrence": "🟣 recurrence relation"}
     for eq in model.equations:
         cols = st.columns([2, 3])
         with cols[0]:
@@ -326,6 +476,63 @@ if model:
         with cols[1]:
             st.markdown(f"**{eq.name}**  `{KIND_BADGES.get(eq.kind, eq.kind)}`")
             st.write(eq.derivation)
+
+    opt_result = solve_optimization(model) if model.objective is not None else None
+
+    if model.objective is not None:
+        st.markdown("### Objective")
+        if model.objective.sympy_expr is not None:
+            direction_word = "Minimize" if model.objective.direction == "minimize" else "Maximize"
+            st.latex(f"\\text{{{direction_word}: }} {sp.latex(model.objective.sympy_expr)}")
+            st.caption(f"Over: {', '.join(model.objective.optimize_over)}")
+
+            if opt_result is not None:
+                if opt_result.error:
+                    st.error(opt_result.error)
+                else:
+                    method = "Lagrange multipliers (constrained)" if opt_result.used_lagrange else \
+                        ("constraint substitution" if opt_result.eliminated_vars else "direct calculus")
+                    st.caption(f"Method: {method}")
+                    for pt, cls in zip(opt_result.critical_points, opt_result.classifications):
+                        pretty_pt = ", ".join(f"{k}={float(v):.6g}" if v.is_number else f"{k}={v}"
+                                                for k, v in pt.items())
+                        st.write(f"**{pretty_pt}** -- {cls}")
+                    for note in opt_result.feasibility_notes:
+                        st.warning(note)
+        else:
+            st.error(f"Failed to parse objective: {model.objective.raw_expression} "
+                      f"({model.objective.parse_error})")
+
+    # ---- matrix representation, for genuine linear systems (>=2 equations,
+    # >=2 shared unknowns) -- an additional structural VIEW onto the same
+    # equations solver.py already solves via sp.solve(), not a separate answer
+    matrix_result = linear_system_view(model, _known_substitutions(model))
+    if matrix_result is not None:
+        st.markdown("### Matrix representation")
+        mcols = st.columns([1, 1, 1])
+        with mcols[0]:
+            st.caption("Coefficient matrix A")
+            st.latex(sp.latex(matrix_result.A))
+        with mcols[1]:
+            st.caption("Unknowns x")
+            st.latex(sp.latex(sp.Matrix([sp.Symbol(s) for s in matrix_result.symbols])))
+        with mcols[2]:
+            st.caption("Right-hand side b")
+            st.latex(sp.latex(matrix_result.b))
+
+        if matrix_result.is_square:
+            st.write(f"**det(A) = {sp.latex(matrix_result.determinant)}**"
+                      + (" -- singular" if matrix_result.determinant == 0 else ""))
+            if matrix_result.eigenvalues:
+                eig_text = ", ".join(
+                    f"{sp.latex(val)}" + (f" (×{mult})" if mult > 1 else "")
+                    for val, mult in matrix_result.eigenvalues.items())
+                st.latex(r"\text{Eigenvalues: } " + eig_text)
+
+        if matrix_result.consistent:
+            st.success(matrix_result.classification)
+        else:
+            st.error(matrix_result.classification)
 
     if model.assumptions:
         st.markdown("**Assumptions made:**")
@@ -351,6 +558,44 @@ if model:
         for v in function_vars:
             st.caption(f"`{v.symbol}` — {v.meaning} ({v.unit or 'unitless'})")
 
+    # ---- vector summary: for each declared vector variable, show its
+    # numeric components (from the editable panel above), magnitude, and
+    # unit vector once all its components are filled in
+    vector_vars = [v for v in model.variables if v.is_vector and v.components]
+    if vector_vars:
+        st.markdown("### Vectors")
+        edited_subs = {sp.Symbol(k): v for k, v in edited_values.items()}
+        plottable_by_dim: dict[int, list[tuple[str, list[float]]]] = {}
+        for v in vector_vars:
+            summary = vector_summary(v.symbol, v.components, edited_subs)
+            vcols = st.columns([2, 1, 1])
+            with vcols[0]:
+                comp_str = ", ".join(f"{c} = {val:g}" for c, val in
+                                       (summary["components"].items() if summary else []))
+                label = f"**{v.symbol}** — {v.meaning}"
+                st.write(f"{label} ({comp_str})" if comp_str else
+                          f"{label} (components: {', '.join(v.components)})")
+            with vcols[1]:
+                if summary and summary["magnitude"] is not None:
+                    st.metric("Magnitude", f"{summary['magnitude']:.4g} {v.unit or ''}")
+            with vcols[2]:
+                if summary and summary["magnitude"] not in (None, 0):
+                    unit_comps = [f"{c}/|{v.symbol}|" for c in v.components]
+                    st.caption("Direction: " + ", ".join(unit_comps))
+            if summary and len(v.components) in (2, 3):
+                plottable_by_dim.setdefault(len(v.components), []).append(
+                    (v.symbol, [summary["components"][c] for c in v.components]))
+
+        for dim, vecs in plottable_by_dim.items():
+            fig = build_vector_plot(vecs)
+            st.plotly_chart(fig, width='stretch')
+            snapshot_button(
+                key=f"vectors_{dim}d",
+                title=f"Vector diagram ({dim}D): " + ", ".join(name for name, _ in vecs),
+                caption=", ".join(f"{name} = {comps}" for name, comps in vecs),
+                render_fn=lambda vv=vecs: snapshot_vector_plot(vv),
+            )
+
     # ---- step-by-step solution (one section per requested target)
     steps_by_target = st.session_state["steps"] or {}
     if steps_by_target:
@@ -370,6 +615,15 @@ if model:
                     ws.store(target_name, sympy_val,
                              source=f"{problem_text[:60]}...", unit=unit)
                     st.rerun()
+            elif (target_kind(model, target_name) == "optimization" and opt_result
+                    and not opt_result.error and opt_result.critical_points):
+                opt_val = opt_result.critical_points[0].get(target_name)
+                if opt_val is not None and opt_val.is_number:
+                    if st.button(f"➕ Extract {target_name} to workspace", key=f"extract_opt_{target_name}"):
+                        unit = next((v.unit for v in model.variables if v.symbol == target_name), None)
+                        ws.store(target_name, float(opt_val),
+                                 source=f"{problem_text[:60]}...", unit=unit)
+                        st.rerun()
 
     # ---- alternative scenarios
     if st.session_state["scenarios"]:
@@ -432,6 +686,71 @@ if model:
                 eval_value = float(np.real(complex(f(eval_point))))
                 st.write(f"**{func_name}({indep_sym}={eval_point:g}) = {eval_value:.6g}**")
                 if st.button(f"➕ Extract this value to workspace", key=f"odeextract_{func_name}"):
+                    unit = next((v.unit for v in model.variables if v.symbol == func_name), None)
+                    ws.store(f"{func_name}_at_{eval_point:g}", eval_value,
+                             source=f"{st.session_state['problem_text'][:60]}...", unit=unit)
+                    st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.caption(f"Couldn't plot this solution numerically: {e}")
+
+    # ---- recurrence solution: discrete plot + evaluate-at-a-point
+    recurrence_solutions = solve_recurrence(model)
+    if recurrence_solutions:
+        st.markdown("### Recurrence (sequence) solution")
+        for func_name, closed_form in recurrence_solutions.items():
+            rec_eq = next((e for e in model.equations if e.kind == "recurrence"
+                            and func_name in symbols_and_functions_used(e)), None)
+            indep_sym = None
+            if rec_eq is not None:
+                funcs = rec_eq.sympy_eq.atoms(AppliedUndef) if hasattr(rec_eq.sympy_eq, "atoms") else set()
+                indep_sym = _independent_variable(funcs)
+            if indep_sym is None:
+                indep_sym = sp.Symbol(model.independent_variable or "n")
+
+            st.latex(f"{func_name}({indep_sym}) = {sp.latex(closed_form)}")
+            closed_form_sub = closed_form.subs(_known_substitutions(model))
+            remaining = sorted(closed_form_sub.free_symbols - {indep_sym}, key=str)
+
+            param_vals = {}
+            if remaining:
+                st.caption("Remaining parameters:")
+                pcols = st.columns(min(4, len(remaining)))
+                for i, s in enumerate(remaining):
+                    with pcols[i % len(pcols)]:
+                        param_vals[s] = st.slider(str(s), 0.01, 20.0, 1.0, key=f"recparam_{func_name}_{s}")
+            closed_form_final = closed_form_sub.subs(param_vals)
+
+            try:
+                f = sp.lambdify(indep_sym, closed_form_final, "numpy")
+                n_range = st.slider(f"{indep_sym} range (terms shown)", 0, 100, (0, 10),
+                                      key=f"recrange_{func_name}")
+                ns = np.arange(n_range[0], n_range[1] + 1)
+                ys = np.real(np.array([complex(f(n)) for n in ns]))
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ns, y=ys, mode="markers", name=f"{func_name}({indep_sym})",
+                                           marker=dict(size=8)))
+                fig.update_layout(xaxis_title=str(indep_sym), yaxis_title=func_name)
+                st.plotly_chart(fig, width='stretch')
+
+                rec_caption = (
+                    f"Recurrence solution for {func_name}({indep_sym}) | range: {indep_sym} in "
+                    f"[{n_range[0]}, {n_range[1]}]"
+                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_vals.items())
+                       if param_vals else "")
+                )
+                snapshot_button(
+                    key=f"recurrence_{func_name}",
+                    title=f"{func_name}({indep_sym}) sequence",
+                    caption=rec_caption,
+                    render_fn=lambda cf=closed_form_final, ind=indep_sym, nr=n_range, fn=func_name:
+                        snapshot_recurrence_plot(fn, ind, cf, nr),
+                )
+
+                eval_point = st.number_input(f"Evaluate {func_name} at {indep_sym} =",
+                                               value=int(n_range[1]), step=1, key=f"receval_{func_name}")
+                eval_value = float(np.real(complex(f(eval_point))))
+                st.write(f"**{func_name}({indep_sym}={eval_point:g}) = {eval_value:.6g}**")
+                if st.button(f"➕ Extract this value to workspace", key=f"recextract_{func_name}"):
                     unit = next((v.unit for v in model.variables if v.symbol == func_name), None)
                     ws.store(f"{func_name}_at_{eval_point:g}", eval_value,
                              source=f"{st.session_state['problem_text'][:60]}...", unit=unit)

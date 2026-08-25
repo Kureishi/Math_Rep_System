@@ -25,8 +25,10 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
 from modules.equation_engine import ProblemModel
-from modules.verifier import VerificationReport
+from modules.verifier import VerificationReport, _known_substitutions
 from modules.solver import SolutionStep
+from modules.matrix_utils import linear_system_view
+from modules.vector_utils import vector_summary
 
 
 @dataclass
@@ -85,6 +87,40 @@ def build_markdown(problem_text: str, model: ProblemModel, report: VerificationR
         kv = v.known_value if v.known_value is not None else "_(solved)_"
         L.append(f"| {v.symbol} | {v.meaning} | {kv} | {v.unit or ''} |")
     L.append("")
+
+    matrix_result = linear_system_view(model, _known_substitutions(model))
+    if matrix_result is not None:
+        L.append("## Matrix representation")
+        L.append("")
+        x_latex = sp.latex(sp.Matrix([sp.Symbol(s) for s in matrix_result.symbols]))
+        L.append(f"$$ {sp.latex(matrix_result.A)} {x_latex} = {sp.latex(matrix_result.b)} $$")
+        L.append("")
+        if matrix_result.is_square:
+            L.append(f"**det(A) = {sp.latex(matrix_result.determinant)}**")
+            L.append("")
+            if matrix_result.eigenvalues:
+                eig_text = ", ".join(
+                    f"{sp.latex(val)}" + (f" (x{mult})" if mult > 1 else "")
+                    for val, mult in matrix_result.eigenvalues.items())
+                L.append(f"Eigenvalues: {eig_text}")
+                L.append("")
+        L.append(matrix_result.classification)
+        L.append("")
+
+    vector_vars = [v for v in model.variables if v.is_vector and v.components]
+    if vector_vars:
+        L.append("## Vectors")
+        L.append("")
+        knowns = _known_substitutions(model)
+        for v in vector_vars:
+            summary = vector_summary(v.symbol, v.components, knowns)
+            if summary:
+                comp_str = ", ".join(f"{c}={val:g}" for c, val in summary["components"].items())
+                L.append(f"- **{v.symbol}** ({v.meaning}): {comp_str} -- "
+                          f"magnitude = {summary['magnitude']:.6g} {v.unit or ''}")
+            else:
+                L.append(f"- **{v.symbol}** ({v.meaning}): components {', '.join(v.components)}")
+        L.append("")
 
     L.append("## Verification detail")
     L.append("")
@@ -237,6 +273,42 @@ def build_pdf_bytes(problem_text: str, model: ProblemModel, report: Verification
         kv = v.known_value if v.known_value is not None else "(solved)"
         pdf.multi_cell(0, 5, _safe(f"{v.symbol} -- {v.meaning}: {kv} {v.unit or ''}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
+
+    matrix_result = linear_system_view(model, _known_substitutions(model))
+    if matrix_result is not None:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.multi_cell(0, 8, "Matrix representation", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        x_latex = sp.latex(sp.Matrix([sp.Symbol(s) for s in matrix_result.symbols]))
+        _add_equation(pdf, f"{sp.latex(matrix_result.A)} {x_latex} = {sp.latex(matrix_result.b)}",
+                       fontsize=12, max_h=16)
+        pdf.set_font("Helvetica", "", 10)
+        if matrix_result.is_square:
+            pdf.multi_cell(0, 5, _safe(f"det(A) = {matrix_result.determinant}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            if matrix_result.eigenvalues:
+                eig_text = ", ".join(f"{val}" + (f" (x{mult})" if mult > 1 else "")
+                                       for val, mult in matrix_result.eigenvalues.items())
+                pdf.multi_cell(0, 5, _safe(f"Eigenvalues: {eig_text}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(0, 5, _safe(matrix_result.classification), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
+
+    vector_vars = [v for v in model.variables if v.is_vector and v.components]
+    if vector_vars:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.multi_cell(0, 8, "Vectors", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 10)
+        knowns = _known_substitutions(model)
+        for v in vector_vars:
+            summary = vector_summary(v.symbol, v.components, knowns)
+            if summary:
+                comp_str = ", ".join(f"{c}={val:g}" for c, val in summary["components"].items())
+                pdf.multi_cell(0, 5, _safe(f"{v.symbol} ({v.meaning}): {comp_str} -- "
+                                            f"magnitude = {summary['magnitude']:.6g} {v.unit or ''}"),
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            else:
+                pdf.multi_cell(0, 5, _safe(f"{v.symbol} ({v.meaning}): components "
+                                            f"{', '.join(v.components)}"),
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
 
     pdf.set_font("Helvetica", "B", 13)
     pdf.multi_cell(0, 8, "Verification detail", new_x=XPos.LMARGIN, new_y=YPos.NEXT)

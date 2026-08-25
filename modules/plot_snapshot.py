@@ -157,3 +157,88 @@ def snapshot_ode_plot(func_name: str, indep_symbol: sp.Symbol, rhs_expr: sp.Expr
     ax.set_ylabel(func_name)
     ax.grid(alpha=0.3)
     return _finish(fig)
+
+
+def snapshot_recurrence_plot(func_name: str, indep_symbol: sp.Symbol, closed_form: sp.Expr,
+                               n_range: tuple[int, int]) -> bytes:
+    """Discrete markers (a stem plot), not a connected line -- a recurrence
+    is only defined at integer indices, so drawing a continuous curve
+    through the points would visually imply values exist in between that
+    the problem never actually defines."""
+    ns = np.arange(n_range[0], n_range[1] + 1)
+    f = sp.lambdify(indep_symbol, closed_form, "numpy")
+    ys = np.real(np.array([complex(f(n)) for n in ns]))
+
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    ax.stem(ns, ys, basefmt=" ")
+    ax.set_xlabel(str(indep_symbol))
+    ax.set_ylabel(func_name)
+    ax.grid(alpha=0.3)
+    return _finish(fig)
+
+
+def snapshot_vector_plot(vectors: list[tuple[str, list[float]]]) -> bytes:
+    """Static counterpart to plotter.build_vector_plot() -- arrows from
+    the origin, 2D via matplotlib.quiver or 3D via Axes3D.quiver. All
+    vectors passed together must share the same dimension (2 or 3)."""
+    if not vectors:
+        fig, ax = plt.subplots(figsize=(5, 5))
+        return _finish(fig)
+    dim = len(vectors[0][1])
+
+    if dim == 2:
+        fig, ax = plt.subplots(figsize=(5.5, 5.5))
+        xs = [c[0] for _, c in vectors]
+        ys = [c[1] for _, c in vectors]
+        colors = plt.cm.tab10.colors
+        for i, (name, comps) in enumerate(vectors):
+            x, y = comps
+            ax.quiver(0, 0, x, y, angles="xy", scale_units="xy", scale=1,
+                       color=colors[i % len(colors)], label=name)
+        span = max(1.0, max(abs(v) for v in xs + ys) * 1.3)
+        ax.set_xlim(-span, span)
+        ax.set_ylim(-span, span)
+        ax.axhline(0, color="gray", linewidth=0.8)
+        ax.axvline(0, color="gray", linewidth=0.8)
+        ax.set_aspect("equal")
+        ax.grid(alpha=0.3)
+        ax.legend()
+        return _finish(fig)
+
+    if dim == 3:
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot(111, projection="3d")
+        colors = plt.cm.tab10.colors
+        all_vals = [c for _, comps in vectors for c in comps]
+        span = max(1.0, max(abs(v) for v in all_vals) * 1.3)
+        for i, (name, comps) in enumerate(vectors):
+            x, y, z = comps
+            ax.quiver(0, 0, 0, x, y, z, color=colors[i % len(colors)], label=name)
+        ax.set_xlim(-span, span)
+        ax.set_ylim(-span, span)
+        ax.set_zlim(-span, span)
+        ax.legend()
+        return _finish(fig)
+
+    raise ValueError(f"snapshot_vector_plot() only supports 2D or 3D vectors, got {dim}D")
+
+
+def snapshot_fit_plot(xs: list[float], ys: list[float], fit_expr, x_label: str = "x", y_label: str = "y") -> bytes:
+    """Static counterpart to plotter.build_fit_plot()."""
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.scatter(xs, ys, label="data", zorder=3)
+    if fit_expr is not None:
+        lo, hi = min(xs), max(xs)
+        pad = (hi - lo) * 0.05 if hi > lo else 1.0
+        grid = np.linspace(lo - pad, hi + pad, 300)
+        f = sp.lambdify(sp.Symbol("x"), fit_expr, "numpy")
+        try:
+            yfit = np.broadcast_to(np.asarray(f(grid), dtype=float), grid.shape)
+            ax.plot(grid, yfit, color="C1", label="fit")
+        except Exception:  # noqa: BLE001
+            pass
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.grid(alpha=0.3)
+    ax.legend()
+    return _finish(fig)
