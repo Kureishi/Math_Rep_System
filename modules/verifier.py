@@ -592,6 +592,7 @@ def _optimization_checks(model: ProblemModel, report: VerificationReport):
         report.add("Feasibility vs. inequality constraints", False, note)
 
 
+<<<<<<< HEAD
 def _matrix_system_checks(model: ProblemModel, report: VerificationReport):
     """When the algebraic part of the model is a genuine linear system
     (>=2 equations, >=2 shared unknowns), reports the rank-based
@@ -628,6 +629,8 @@ def _matrix_system_checks(model: ProblemModel, report: VerificationReport):
         )
 
 
+=======
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
 def _solve_sympy(model: ProblemModel) -> dict[str, float]:
     """Solves the whole EQUATION-kind system at once for every algebraic
     target -- important because targets can be coupled (e.g. displacement
@@ -678,7 +681,10 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
     _ode_checks(model, report)
     _recurrence_checks(model, report)
     _optimization_checks(model, report)
+<<<<<<< HEAD
     _matrix_system_checks(model, report)
+=======
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
 
     sympy_answers = _solve_sympy(model)
     report.sympy_numeric_answers = sympy_answers

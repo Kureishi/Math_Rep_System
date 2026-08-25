@@ -22,11 +22,17 @@ from modules.solver import compute_steps, narrate_steps
 from modules.ode_utils import solve_ode
 from modules.recurrence_utils import solve_recurrence, _independent_variable
 from modules.optimization_utils import solve_optimization
+<<<<<<< HEAD
 from modules.matrix_utils import linear_system_view
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
 from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot
 from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot
+=======
+from modules.scenarios import generate_alternative_scenarios
+from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot
+from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
 from modules.workspace import Workspace
 from modules import history
 from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot
@@ -359,6 +365,7 @@ if model:
             st.error(f"Failed to parse objective: {model.objective.raw_expression} "
                       f"({model.objective.parse_error})")
 
+<<<<<<< HEAD
     # ---- matrix representation, for genuine linear systems (>=2 equations,
     # >=2 shared unknowns) -- an additional structural VIEW onto the same
     # equations solver.py already solves via sp.solve(), not a separate answer
@@ -390,6 +397,8 @@ if model:
         else:
             st.error(matrix_result.classification)
 
+=======
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
     if model.assumptions:
         st.markdown("**Assumptions made:**")
         for a in model.assumptions:

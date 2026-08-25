@@ -175,6 +175,7 @@ def snapshot_recurrence_plot(func_name: str, indep_symbol: sp.Symbol, closed_for
     ax.set_ylabel(func_name)
     ax.grid(alpha=0.3)
     return _finish(fig)
+<<<<<<< HEAD
 
 
 def snapshot_vector_plot(vectors: list[tuple[str, list[float]]]) -> bytes:
@@ -221,3 +222,5 @@ def snapshot_vector_plot(vectors: list[tuple[str, list[float]]]) -> bytes:
         return _finish(fig)
 
     raise ValueError(f"snapshot_vector_plot() only supports 2D or 3D vectors, got {dim}D")
+=======
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6

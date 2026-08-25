@@ -89,6 +89,7 @@ Rules by equation kind:
   the SAME applied-function style, e.g. Eq(a(n+1), a(n) + 5) or Eq(a(n+2), a(n+1) + a(n)) for a
   second-order recurrence -- no Derivative() involved, just shifted integer arguments.
 
+<<<<<<< HEAD
 Vector quantities (forces, displacements, velocities in 2D/3D, torque, work):
 - Mark the variable "is_vector": true and give "components": ["Fx", "Fy"] (2D) or
   ["Fx", "Fy", "Fz"] (3D) -- each component name must ALSO be listed as its own ordinary
@@ -109,6 +110,8 @@ Vector quantities (forces, displacements, velocities in 2D/3D, torque, work):
   via sp.solve as a scalar. Instead solve for a scalar derived from it (a component like "Fx",
   or a scalar equation's own LHS symbol, e.g. "Eq(F_mag, magnitude(F))" then solve_for ["F_mag"]).
 
+=======
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
 Objective/optimization rules:
 - Only include "objective" when the problem asks to minimize, maximize, or find an optimal value.
 - "optimize_over" lists the variable(s) being solved for at the optimum -- other symbols in the
@@ -227,7 +230,10 @@ def _local_dict(variables: list[Variable]) -> dict:
     local["Derivative"] = sp.Derivative
     local["diff"] = sp.Derivative
     local["Piecewise"] = sp.Piecewise
+<<<<<<< HEAD
     local.update(vector_local_dict())
+=======
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
     return local
 
 

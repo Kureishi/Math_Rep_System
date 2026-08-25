@@ -97,6 +97,7 @@ eqsolver/
     │                            #   verifier.py both need it; lives here to avoid a
     │                            #   circular import)
     ├── recurrence_utils.py       # shared rsolve() helper, same circular-import reason
+<<<<<<< HEAD
     ├── matrix_utils.py            # A x = b representation + rank-based classification
     │                              #   (unique/infinite/inconsistent) + eigenvalues for
     │                              #   genuine linear systems (>=2 equations, >=2 shared
@@ -106,6 +107,8 @@ eqsolver/
     │                              #   bound into equation_engine's local_dict so vector
     │                              #   quantities (forces, displacements) parse and reduce to
     │                              #   scalars via genuine sp.Matrix objects, not LLM pre-decomposition
+=======
+>>>>>>> 06e8a1bf8422d1758550ad4cd55c73cf5c90bff6
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions
