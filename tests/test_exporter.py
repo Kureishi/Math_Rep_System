@@ -32,7 +32,8 @@ def test_pdf_is_valid_and_nonempty(kinematics_json, fake_client_factory):
 def test_pdf_export_works_for_ode(ode_json, fake_client_factory):
     """ODE equations render LaTeX with \\left(...\\right) from function
     application notation -- confirms matplotlib's mathtext subset actually
-    supports this rather than silently falling back to broken plain text."""
+    supports this rather than silently falling back to broken plain text.
+    """
     model = build_model(json.loads(ode_json))
     client = fake_client_factory()
     report = verify(model, client, "decay problem")
@@ -66,3 +67,63 @@ def test_scenario_error_entries_excluded_from_export(kinematics_json, fake_clien
     scenarios = [{"error": "could not parse", "raw": "garbage"}]
     md = build_markdown("x", model, report, steps, scenarios)
     assert "Where else this applies" not in md
+
+
+def test_markdown_includes_matrix_representation_for_linear_system(fake_client_factory):
+    model = build_model({
+        "problem_domain": "circuit", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "x", "meaning": "x", "known_value": None, "unit": None},
+            {"symbol": "y", "meaning": "y", "known_value": None, "unit": None},
+        ],
+        "equations": [
+            {"name": "eq1", "kind": "equation", "expression": "Eq(2*x + 3*y, 8)", "derivation": ""},
+            {"name": "eq2", "kind": "equation", "expression": "Eq(x - y, 1)", "derivation": ""},
+        ],
+        "solve_for": ["x", "y"], "assumptions": [],
+    })
+    client = fake_client_factory()
+    report = verify(model, client, "a linear system")
+    steps = compute_steps(model)
+    md = build_markdown("a linear system", model, report, steps, [])
+    assert "## Matrix representation" in md
+    assert "det(A)" in md
+
+
+def test_pdf_includes_matrix_representation_for_linear_system(fake_client_factory):
+    model = build_model({
+        "problem_domain": "circuit", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "x", "meaning": "x", "known_value": None, "unit": None},
+            {"symbol": "y", "meaning": "y", "known_value": None, "unit": None},
+        ],
+        "equations": [
+            {"name": "eq1", "kind": "equation", "expression": "Eq(2*x + 3*y, 8)", "derivation": ""},
+            {"name": "eq2", "kind": "equation", "expression": "Eq(x - y, 1)", "derivation": ""},
+        ],
+        "solve_for": ["x", "y"], "assumptions": [],
+    })
+    client = fake_client_factory()
+    report = verify(model, client, "a linear system")
+    steps = compute_steps(model)
+    pdf_bytes = build_pdf_bytes("a linear system", model, report, steps, [])
+    assert pdf_bytes[:5] == b"%PDF-"
+    assert len(pdf_bytes) > 1000
+
+
+def test_markdown_includes_vector_summary():
+    model = build_model({
+        "problem_domain": "work-energy", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "Fx", "meaning": "force x", "known_value": "10", "unit": "N"},
+            {"symbol": "Fy", "meaning": "force y", "known_value": "0", "unit": "N"},
+            {"symbol": "F", "meaning": "force", "known_value": None, "unit": "N",
+             "is_vector": True, "components": ["Fx", "Fy"]},
+        ],
+        "equations": [], "solve_for": [], "assumptions": [],
+    })
+    from modules.verifier import VerificationReport
+    report = VerificationReport()
+    md = build_markdown("force problem", model, report, {}, [])
+    assert "## Vectors" in md
+    assert "magnitude = 10" in md

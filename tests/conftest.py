@@ -186,6 +186,55 @@ def kinematics_json():
     return KINEMATICS_JSON
 
 
+RECURRENCE_JSON = """{
+  "problem_domain": "savings", "problem_type": "recurrence", "independent_variable": "n",
+  "variables": [
+    {"symbol": "a", "meaning": "balance", "known_value": null, "unit": "USD", "is_function": true},
+    {"symbol": "n", "meaning": "year", "known_value": null, "unit": null, "is_function": false}
+  ],
+  "equations": [
+    {"name": "annual deposit", "kind": "recurrence", "expression": "Eq(a(n+1), a(n) + 500)", "derivation": "x"}
+  ],
+  "initial_conditions": [{"expression": "a(0)", "value": "1000"}],
+  "solve_for": ["a"], "assumptions": []
+}"""
+
+PIECEWISE_JSON = """{
+  "problem_domain": "tax", "problem_type": "algebraic",
+  "variables": [
+    {"symbol": "x", "meaning": "income", "known_value": "15000", "unit": "USD"},
+    {"symbol": "tax", "meaning": "tax owed", "known_value": null, "unit": "USD"}
+  ],
+  "equations": [
+    {"name": "tax bracket", "kind": "equation",
+     "expression": "Eq(tax, Piecewise((0.1*x, x <= 10000), (0.2*x - 1000, True)))", "derivation": "x"}
+  ],
+  "solve_for": ["tax"], "assumptions": []
+}"""
+
+OPTIMIZATION_UNCONSTRAINED_JSON = """{
+  "problem_domain": "min quadratic", "problem_type": "algebraic",
+  "variables": [{"symbol": "x", "meaning": "x", "known_value": null, "unit": null}],
+  "equations": [],
+  "objective": {"expression": "x**2 - 4*x + 7", "direction": "minimize", "optimize_over": ["x"]},
+  "solve_for": ["x"], "assumptions": []
+}"""
+
+OPTIMIZATION_CONSTRAINED_JSON = """{
+  "problem_domain": "min surface area", "problem_type": "algebraic",
+  "variables": [
+    {"symbol": "r", "meaning": "radius", "known_value": null, "unit": null},
+    {"symbol": "h", "meaning": "height", "known_value": null, "unit": null},
+    {"symbol": "V", "meaning": "volume", "known_value": "100", "unit": null}
+  ],
+  "equations": [
+    {"name": "volume", "kind": "equation", "expression": "Eq(V, pi*r**2*h)", "derivation": "x"}
+  ],
+  "objective": {"expression": "2*pi*r**2 + 2*pi*r*h", "direction": "minimize", "optimize_over": ["r"]},
+  "solve_for": ["r"], "assumptions": []
+}"""
+
+
 @pytest.fixture
 def kinematics_two_target_json():
     return KINEMATICS_TWO_TARGET_JSON
@@ -214,3 +263,23 @@ def coupled_ode_json():
 @pytest.fixture
 def multi_constraint_json():
     return MULTI_CONSTRAINT_JSON
+
+
+@pytest.fixture
+def recurrence_json():
+    return RECURRENCE_JSON
+
+
+@pytest.fixture
+def piecewise_json():
+    return PIECEWISE_JSON
+
+
+@pytest.fixture
+def optimization_unconstrained_json():
+    return OPTIMIZATION_UNCONSTRAINED_JSON
+
+
+@pytest.fixture
+def optimization_constrained_json():
+    return OPTIMIZATION_CONSTRAINED_JSON

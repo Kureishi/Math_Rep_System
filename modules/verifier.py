@@ -28,6 +28,7 @@ from config import settings
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel, target_kind, symbols_and_functions_used
 from modules.units_checker import parse_unit, dimension_of, dims_equivalent, UnitParseError, make_dimension_placeholder
+from modules.matrix_utils import linear_system_view
 
 INDEPENDENT_SOLVE_PROMPT = """Solve this problem yourself, from scratch, showing minimal work. \
 The problem asks for these quantities: {targets}. \
@@ -118,10 +119,17 @@ def _structural_checks(model: ProblemModel, report: VerificationReport):
                     margin_ratio=0.0)
 
     # 2. every solve_for symbol/function is actually used somewhere
+    # (either in an equation/inequality/ode/recurrence, OR as an
+    # optimize_over variable in the objective, which has no separate
+    # "equation" of its own to appear in)
     if model.solve_for:
         used = set()
         for e in model.equations:
             used |= symbols_and_functions_used(e)
+        if model.objective is not None:
+            used |= set(model.objective.optimize_over)
+            if model.objective.sympy_expr is not None:
+                used |= {s.name for s in model.objective.sympy_expr.free_symbols}
         missing = [t for t in model.solve_for if t not in used]
         if missing:
             report.add("Target variable present", False,
@@ -132,11 +140,11 @@ def _structural_checks(model: ProblemModel, report: VerificationReport):
                         margin_ratio=0.0)
 
     # 3. determinacy: unknowns vs equations (algebraic relations only --
-    # inequalities and ODEs have their own solvability semantics, checked
-    # separately in _inequality_checks / the ODE solution check)
+    # inequalities, ODEs/recurrences, and optimization targets all have
+    # their own solvability semantics, checked separately)
     unknowns = [v.symbol for v in model.variables
                 if v.known_value is None and not v.is_function
-                and target_kind(model, v.symbol) != "inequality"]
+                and target_kind(model, v.symbol) not in ("inequality", "optimization")]
     n_eqs = len([e for e in model.equations if e.kind == "equation" and e.sympy_eq is not None])
     if len(unknowns) > n_eqs and n_eqs > 0:
         report.add("Determinacy", False,
@@ -186,6 +194,39 @@ def _numeric_balance_check(model: ProblemModel, report: VerificationReport):
                             margin_ratio=0.0 if ok else None)
 
 
+def _dimension_of_side(expr: sp.Expr) -> tuple[sp.Basic, list[str]]:
+    """Returns (dimension, problem_notes) for one side of an equation.
+
+    Handles sp.Piecewise specially: sympy's own dimension machinery
+    silently mishandles it as a whole -- checking the dimension of a
+    Piecewise directly was observed to always report a bare Dimension(1)
+    regardless of what's actually inside the branches, rather than raising
+    or computing correctly. Instead, each branch's expression is checked
+    individually and all branches are required to agree with each other
+    (a tax formula shouldn't return dollars in one bracket and a
+    dimensionless number in another)."""
+    piecewise_atoms = expr.atoms(sp.Piecewise)
+    if not piecewise_atoms:
+        return dimension_of(expr), []
+
+    notes: list[str] = []
+    branch_dims = []
+    for pw in piecewise_atoms:
+        for branch_expr, _cond in pw.args:
+            try:
+                branch_dims.append(dimension_of(branch_expr))
+            except ValueError as e:
+                notes.append(f"a Piecewise branch ('{branch_expr}') is dimensionally invalid "
+                             f"internally: {e}")
+    if not branch_dims:
+        return dimension_of(expr), notes
+    first = branch_dims[0]
+    for d in branch_dims[1:]:
+        if not dims_equivalent(first, d):
+            notes.append(f"Piecewise branches disagree in dimension ({first} vs {d})")
+    return first, notes
+
+
 def _dimensional_checks(model: ProblemModel, report: VerificationReport):
     """Checks that both sides of each equation carry the same physical
     dimension, using declared variable units -- catches errors that are
@@ -231,16 +272,18 @@ def _dimensional_checks(model: ProblemModel, report: VerificationReport):
         subs = {sp.Symbol(name): make_dimension_placeholder(dimension_of(units_map[name]))
                 for name in names}
         try:
-            lhs_dim = dimension_of(eq.sympy_eq.lhs.subs(subs))
-            rhs_dim = dimension_of(eq.sympy_eq.rhs.subs(subs))
-            ok = dims_equivalent(lhs_dim, rhs_dim)
-            report.add(
-                f"Dimensional consistency: {eq.name}", ok,
-                f"LHS dimension = {lhs_dim}, RHS dimension = {rhs_dim}."
-                + ("" if ok else " NOT equivalent -- the equation is physically inconsistent "
-                                  "regardless of what numbers are plugged in."),
-                margin_ratio=0.0 if ok else None,  # dimension match is exact, not a matter of degree
-            )
+            lhs_dim, lhs_notes = _dimension_of_side(eq.sympy_eq.lhs.subs(subs))
+            rhs_dim, rhs_notes = _dimension_of_side(eq.sympy_eq.rhs.subs(subs))
+            notes = lhs_notes + rhs_notes
+            ok = dims_equivalent(lhs_dim, rhs_dim) and not notes
+            detail = f"LHS dimension = {lhs_dim}, RHS dimension = {rhs_dim}."
+            if notes:
+                detail += " " + " ".join(notes)
+            elif not ok:
+                detail += (" NOT equivalent -- the equation is physically inconsistent "
+                           "regardless of what numbers are plugged in.")
+            report.add(f"Dimensional consistency: {eq.name}", ok, detail,
+                        margin_ratio=0.0 if ok else None)
         except ValueError as e:
             # sympy raises this itself when a single side adds incompatible
             # dimensions together, e.g. "v + a" without multiplying a by t
@@ -425,6 +468,166 @@ def _ode_checks(model: ProblemModel, report: VerificationReport):
                             f"Could not verify: {e}")
 
 
+def _recurrence_checks(model: ProblemModel, report: VerificationReport):
+    """Verifies a recurrence's closed-form solution by substituting it
+    back into the original difference equation -- the discrete-time
+    sibling of _ode_checks, using verify_recurrence_solution (there's no
+    sympy built-in equivalent to checkodesol for recurrences)."""
+    recurrence_eqs = [e for e in model.equations if e.kind == "recurrence" and e.sympy_eq is not None]
+    if not recurrence_eqs:
+        return
+
+    from modules.recurrence_utils import solve_recurrence, verify_recurrence_solution, _independent_variable
+    solutions = solve_recurrence(model)
+
+    for eq in recurrence_eqs:
+        funcs = eq.sympy_eq.atoms(AppliedUndef)
+        if not funcs:
+            continue
+        func_name = str(next(iter(funcs)).func)
+        solution = solutions.get(func_name)
+        if solution is None:
+            report.add(f"Recurrence solved: {eq.name}", False,
+                        "SymPy's rsolve() could not find a closed-form solution for this recurrence.")
+            continue
+        indep = _independent_variable(funcs)
+        if indep is None:
+            report.add(f"Recurrence solution check: {eq.name}", False,
+                        "Could not determine the independent (index) variable.")
+            continue
+        try:
+            ok, residual = verify_recurrence_solution(eq.sympy_eq, func_name, solution, indep)
+            detail = (
+                f"Closed form {func_name}({indep}) = {solution} verified by substituting back into "
+                "the recurrence and confirming the identity holds."
+                if ok else
+                f"Substituting the closed form back into the recurrence leaves a nonzero residual "
+                f"({residual}) -- the solution does not actually satisfy it."
+            )
+            report.add(f"Recurrence solution check: {eq.name}", bool(ok), detail,
+                        margin_ratio=0.0 if ok else None)
+        except Exception as e:  # noqa: BLE001
+            report.add(f"Recurrence solution check: {eq.name}", False, f"Could not verify: {e}")
+
+
+def _optimization_checks(model: ProblemModel, report: VerificationReport):
+    """Verifies an optimization result two ways: (1) the gradient of the
+    (possibly constraint-reduced) objective is actually zero at the
+    claimed critical point -- the ground-truth check, analogous to
+    checkodesol for ODEs -- and (2) the claimed min/max classification
+    actually matches the requested direction. For Lagrange-based results,
+    checks the equality constraint(s) are satisfied at the point instead
+    of a second-order classification (which isn't computed in that path).
+    Any inequality-constraint feasibility notes from the solver are
+    surfaced as their own (honest, not hidden) check results."""
+    if model.objective is None:
+        return
+
+    from modules.optimization_utils import solve_optimization
+    result = solve_optimization(model)
+    if result is None:
+        return
+    if result.error:
+        report.add(f"Optimization solved: {model.objective.raw_expression}", False, result.error)
+        return
+    if not result.critical_points:
+        return
+
+    knowns = _known_substitutions(model)
+    obj_expr = model.objective.sympy_expr.subs(knowns)
+    optimize_vars = [sp.Symbol(name) for name in model.objective.optimize_over]
+    target_classification = "minimum" if model.objective.direction == "minimize" else "maximum"
+
+    for i, point in enumerate(result.critical_points):
+        full_point = {sp.Symbol(k): v for k, v in point.items()}
+        label_suffix = f" (point {i+1})" if len(result.critical_points) > 1 else ""
+
+        if not result.used_lagrange:
+            work_expr = result.reduced_objective if result.reduced_objective is not None else obj_expr
+            work_vars = [v for v in optimize_vars if v.name not in result.eliminated_vars] or optimize_vars
+            worst = 0.0
+            ok_grad = True
+            for v in work_vars:
+                try:
+                    grad_val = float(sp.diff(work_expr, v).subs(full_point))
+                except (TypeError, ValueError):
+                    grad_val, ok_grad = None, False
+                if grad_val is None or abs(grad_val) > 1e-6:
+                    ok_grad = False
+                worst = max(worst, abs(grad_val) if grad_val is not None else 1.0)
+            report.add(
+                f"Critical point verified{label_suffix}", ok_grad,
+                f"Gradient of the objective at {point} is "
+                + (f"~0 (max |component| = {worst:.2e})." if ok_grad else
+                    f"NOT zero (max |component| = {worst:.2e}) -- this may not actually be a critical point."),
+                margin_ratio=0.0 if ok_grad else None,
+            )
+            classification = result.classifications[i]
+            matches = classification == target_classification
+            report.add(
+                f"Classification matches requested direction{label_suffix}", matches,
+                f"{model.objective.direction.capitalize()} requested; classified as: {classification}."
+                + ("" if matches else " This does NOT match the requested direction -- worth "
+                                       "double-checking the problem setup."),
+            )
+        else:
+            equation_constraints = [e.sympy_eq for e in model.equations
+                                     if e.kind == "equation" and e.sympy_eq is not None]
+            all_ok = True
+            for eq in equation_constraints:
+                try:
+                    resid = float((eq.lhs - eq.rhs).subs(full_point).subs(knowns))
+                except (TypeError, ValueError):
+                    resid, all_ok = None, False
+                if resid is None or abs(resid) > 1e-6:
+                    all_ok = False
+            report.add(
+                f"Constraint satisfied at critical point{label_suffix}", all_ok,
+                f"Point {point} " + ("satisfies" if all_ok else "does NOT satisfy")
+                + " the equality constraint(s) used in the Lagrange system.",
+                margin_ratio=0.0 if all_ok else None,
+            )
+
+    for note in result.feasibility_notes:
+        report.add("Feasibility vs. inequality constraints", False, note)
+
+
+def _matrix_system_checks(model: ProblemModel, report: VerificationReport):
+    """When the algebraic part of the model is a genuine linear system
+    (>=2 equations, >=2 shared unknowns), reports the rank-based
+    classification explicitly -- singular/inconsistent/underdetermined
+    -- rather than letting sp.solve() silently return nothing with no
+    explanation. This is purely diagnostic (informational on success,
+    only flagged as failing when the system turns out inconsistent,
+    since "infinitely many solutions" isn't necessarily an error -- some
+    problems genuinely only ask for one component of a larger family)."""
+    knowns = _known_substitutions(model)
+    result = linear_system_view(model, knowns)
+    if result is None:
+        return
+
+    if not result.consistent:
+        report.add(
+            "Linear system consistency", False,
+            f"{len(result.symbols)}-unknown linear system in {', '.join(result.symbols)} is "
+            f"inconsistent (rank(A)={result.rank_A} < rank([A|b])={result.rank_augmented}) -- "
+            "no values satisfy all the equations simultaneously.",
+        )
+    elif result.is_square and result.determinant == 0:
+        report.add(
+            "Linear system consistency", True,
+            f"Coefficient matrix for {', '.join(result.symbols)} is singular (det(A) = 0) but "
+            "the system is still consistent -- " + result.classification,
+            margin_ratio=0.0,
+        )
+    else:
+        report.add(
+            "Linear system consistency", True,
+            f"{len(result.symbols)}-unknown linear system: {result.classification}",
+            margin_ratio=0.0,
+        )
+
+
 def _solve_sympy(model: ProblemModel) -> dict[str, float]:
     """Solves the whole EQUATION-kind system at once for every algebraic
     target -- important because targets can be coupled (e.g. displacement
@@ -473,6 +676,9 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
     _dimensional_checks(model, report)
     _inequality_checks(model, report)
     _ode_checks(model, report)
+    _recurrence_checks(model, report)
+    _optimization_checks(model, report)
+    _matrix_system_checks(model, report)
 
     sympy_answers = _solve_sympy(model)
     report.sympy_numeric_answers = sympy_answers

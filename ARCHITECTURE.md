@@ -89,16 +89,37 @@ eqsolver/
     ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper
     ├── ocr.py                 # pytesseract fallback for non-vision models
     ├── equation_engine.py     # LLM extraction prompt + JSON -> SymPy parsing
-    │                          #   (equations / inequalities / ODEs, each kind
-    │                          #   parsed differently -- see target_kind())
+    │                          #   (equations / inequalities / ODEs / recurrences,
+    │                          #   plus an optional optimization objective --
+    │                          #   see target_kind() for kind dispatch)
     ├── units_checker.py        # sympy.physics.units-based dimensional checks
-    ├── ode_utils.py             # shared dsolve() helper (solver.py + verifier.py
-    │                            #   both need it; lives here to avoid a circular import)
+    ├── ode_utils.py             # shared dsolve()/dsolve_system() helper (solver.py +
+    │                            #   verifier.py both need it; lives here to avoid a
+    │                            #   circular import)
+    ├── recurrence_utils.py       # shared rsolve() helper, same circular-import reason
+    ├── matrix_utils.py            # A x = b representation + rank-based classification
+    │                              #   (unique/infinite/inconsistent) + eigenvalues for
+    │                              #   genuine linear systems (>=2 equations, >=2 shared
+    │                              #   unknowns) -- an additional structural view, not a
+    │                              #   separate solve path (sp.solve() still produces the answer)
+    ├── vector_utils.py             # dot/cross/magnitude/unit/angle_between/distance/Point --
+    │                              #   bound into equation_engine's local_dict so vector
+    │                              #   quantities (forces, displacements) parse and reduce to
+    │                              #   scalars via genuine sp.Matrix objects, not LLM pre-decomposition
+    ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
+    │                              #   with a fresh-placeholder-safe fallback to Lagrange
+    │                              #   multipliers; imports verifier._known_substitutions
+    │                              #   at module level -- safe because verifier only
+    │                              #   imports back from here inside a function body)
     ├── verifier.py               # structural + numeric + dimensional + inequality +
-    │                             #   ODE (checkodesol) + independent cross-check verification
+    │                             #   ODE/recurrence (substitute-and-check) + optimization
+    │                             #   (gradient=0 + classification) + independent
+    │                             #   cross-check verification
     ├── solver.py                  # SymPy step trace per kind + LLM narration
     ├── scenarios.py                # alternative real-world context generator
-    ├── plotter.py                   # 2D line + 3D surface Plotly figure builders
+    ├── plotter.py                   # 2D line / 3D surface / feasible-region Plotly figures
+    ├── plot_snapshot.py              # matplotlib static re-renders of the above, for
+    │                                 #   the "include this plot in the report" export feature
     ├── workspace.py                  # cross-problem variable memory (session_state)
     ├── history.py                     # SQLite-backed solved-problem history
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
