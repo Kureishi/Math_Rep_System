@@ -26,11 +26,22 @@ new context. Respond as a JSON array of objects: [{{"scenario": "...", "mapping"
 def generate_alternative_scenarios(client: LMStudioClient, model: ProblemModel) -> list[dict]:
     eq_text = "\n".join(f"- {e.name}: {sp.latex(e.sympy_eq) if e.sympy_eq is not None else e.raw_expression}"
                          for e in model.equations)
-    raw = client.chat(
-        system="You are creative but mathematically precise.",
-        user=SCENARIO_PROMPT.format(domain=model.problem_domain, equations=eq_text),
-        temperature=0.7,
-    )
+    try:
+        raw = client.chat(
+            system="You are creative but mathematically precise.",
+            user=SCENARIO_PROMPT.format(domain=model.problem_domain, equations=eq_text),
+            temperature=0.7,
+        )
+    except Exception as e:  # noqa: BLE001
+        # This is a "nice to have" secondary feature -- the equations/
+        # verification/solution have already succeeded by the time this
+        # runs, so an API-level failure here (a model/engine error, a
+        # dropped connection, etc.) should degrade gracefully instead of
+        # taking the whole result down with it. Kept as the same
+        # {"error": ...} shape the parse-failure path below already
+        # returns, so callers only need to handle one fallback shape.
+        return [{"error": f"Couldn't reach the model to generate scenarios ({e}).", "raw": ""}]
+
     try:
         parsed = extract_json(raw)
         if not isinstance(parsed, list):

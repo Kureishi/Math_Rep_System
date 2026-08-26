@@ -71,6 +71,24 @@ def test_narrate_steps_degrades_gracefully_on_bad_json(kinematics_json, fake_cli
     assert all(s.explanation == "" for s in narrated["a"])  # just no explanation
 
 
+def test_narrate_steps_survives_api_error(kinematics_json):
+    """Regression test: an exception raised by client.chat() itself (e.g.
+    a BadRequestError from the LLM backend/engine) must not propagate --
+    the steps have already been computed and verified by the time
+    narration runs, so a failure here should degrade gracefully instead
+    of crashing the whole pipeline."""
+    model = build_model(json.loads(kinematics_json))
+    steps = compute_steps(model)
+
+    class RaisingClient:
+        def chat(self, **kwargs):
+            raise RuntimeError("Engine protocol predict stream returned an error")
+
+    narrated = narrate_steps(RaisingClient(), model, steps)
+    assert len(narrated["a"]) == len(steps["a"])  # steps preserved
+    assert all(s.explanation == "" for s in narrated["a"])  # just no explanation
+
+
 def test_no_solve_for_returns_empty_steps():
     model = build_model({
         "variables": [], "equations": [], "solve_for": [], "assumptions": [],

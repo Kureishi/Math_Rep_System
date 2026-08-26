@@ -341,18 +341,18 @@ def narrate_steps(client: LMStudioClient, model: ProblemModel,
         if not steps:
             continue
         steps_text = "\n".join(f"{i+1}. {s.description}: {s.expression}" for i, s in enumerate(steps))
-        raw = client.chat(
-            system="You explain math steps clearly and concisely for a student.",
-            user=NARRATION_PROMPT.format(target=target_name, steps=steps_text),
-            temperature=settings.temperature_narration,
-            json_mode=False,
-        )
         try:
+            raw = client.chat(
+                system="You explain math steps clearly and concisely for a student.",
+                user=NARRATION_PROMPT.format(target=target_name, steps=steps_text),
+                temperature=settings.temperature_narration,
+                json_mode=False,
+            )
             explanations = extract_json(raw)
             if isinstance(explanations, list):
                 for step, expl in zip(steps, explanations):
                     if isinstance(expl, str):
                         step.explanation = expl
         except Exception:  # noqa: BLE001
-            pass  # narration is a nice-to-have; steps remain valid without it
+            pass  # narration is a nice-to-have; steps remain valid without it (API errors included)
     return steps_by_target
