@@ -174,6 +174,60 @@ def test_verifier_flags_inconsistent_linear_system():
     assert not report.passed
 
 
+def test_sequentially_solvable_system_is_not_treated_as_a_matrix_system():
+    """Regression test: two equations that each introduce exactly one new
+    unknown in sequence (e.g. a kinematics problem where 'a' is fully
+    determined by one equation alone, and 'd' by a second equation once
+    'a' is known) should NOT trigger the matrix/eigenvalue machinery --
+    plain substitution is already the simplest path, and showing A x=b
+    here would just be a more roundabout way to reach the same answer.
+    This is different from a genuinely coupled system (see
+    test_unique_solution_square_system) where neither equation alone
+    isolates either unknown."""
+    model = _model(
+        equations=[
+            {"name": "acceleration definition", "kind": "equation",
+             "expression": "Eq(a, (v_f - v_i) / t)", "derivation": ""},
+            {"name": "displacement formula", "kind": "equation",
+             "expression": "Eq(d, 0.5*a*t**2 + t*v_i)", "derivation": ""},
+        ],
+        solve_for=["a", "d"],
+        variables=[
+            {"symbol": "v_f", "meaning": "final velocity", "known_value": "20", "unit": "m/s"},
+            {"symbol": "v_i", "meaning": "initial velocity", "known_value": "8", "unit": "m/s"},
+            {"symbol": "t", "meaning": "time", "known_value": "6", "unit": "s"},
+            {"symbol": "a", "meaning": "acceleration", "known_value": None, "unit": "m/s^2"},
+            {"symbol": "d", "meaning": "displacement", "known_value": None, "unit": "m"},
+        ],
+    )
+    knowns = _known_substitutions(model)
+    assert linear_system_view(model, knowns) is None
+
+
+def test_sequentially_solvable_system_solver_steps_stay_simple():
+    model = _model(
+        equations=[
+            {"name": "acceleration definition", "kind": "equation",
+             "expression": "Eq(a, (v_f - v_i) / t)", "derivation": ""},
+            {"name": "displacement formula", "kind": "equation",
+             "expression": "Eq(d, 0.5*a*t**2 + t*v_i)", "derivation": ""},
+        ],
+        solve_for=["a", "d"],
+        variables=[
+            {"symbol": "v_f", "meaning": "final velocity", "known_value": "20", "unit": "m/s"},
+            {"symbol": "v_i", "meaning": "initial velocity", "known_value": "8", "unit": "m/s"},
+            {"symbol": "t", "meaning": "time", "known_value": "6", "unit": "s"},
+            {"symbol": "a", "meaning": "acceleration", "known_value": None, "unit": "m/s^2"},
+            {"symbol": "d", "meaning": "displacement", "known_value": None, "unit": "m"},
+        ],
+    )
+    steps = compute_steps(model)
+    descriptions = [s.description for s in steps["a"]]
+    assert "Represent the system as A x = b" not in descriptions
+    assert "Determinant of the coefficient matrix" not in descriptions
+    assert "Classification" not in descriptions
+
+
 def test_solver_shows_matrix_representation_step():
     model = _model(
         equations=[

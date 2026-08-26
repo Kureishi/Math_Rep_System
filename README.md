@@ -158,7 +158,15 @@ See `ARCHITECTURE.md` for the full design. In short:
     -- rather than `sp.solve()`'s opaque "found nothing" for the latter
     two cases. This is purely an additional structural VIEW alongside
     the existing scalar solve path; the numeric answer for each target
-    is unchanged.
+    is unchanged. "Genuine system" specifically excludes anything
+    sequentially solvable by plain substitution -- e.g. `a = (v_f-v_i)/t`
+    followed by `d = 0.5*a*t^2 + t*v_i` merely shares the model with two
+    unknowns (`a`, `d`), but the first equation determines `a` completely
+    on its own, so no matrix view is shown for it. Only equations that
+    genuinely can't be resolved one unknown at a time (checked via
+    `matrix_utils._is_sequentially_solvable`, e.g. `2x+3y=8, x-y=1`,
+    where neither equation alone isolates either variable) get the A x=b
+    treatment.
 11. **Vectors and basic geometry** -- a variable can be declared
     `"is_vector": true` with a `"components"` list (e.g. a force `F`
     with components `Fx`, `Fy`), and used directly in equations via

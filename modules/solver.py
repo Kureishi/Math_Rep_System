@@ -50,10 +50,14 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
     for e, orig in zip(orig_eqs, eq_objs):
         steps.append(SolutionStep(description=f"Start from: {orig.name}", expression=sp.latex(e)))
 
-    # if this is genuinely part of a linear system (>=2 equations, >=2
-    # shared unknowns), show the explicit A x = b representation as its
-    # own step before falling through to the ordinary sp.solve() below --
-    # the numeric answer is unaffected, this only makes the structure visible
+    # if this is genuinely part of a coupled linear system (>=2 equations,
+    # >=2 shared unknowns, and NOT solvable one-equation-at-a-time by
+    # plain substitution -- see matrix_utils._is_sequentially_solvable),
+    # show the explicit A x = b representation as its own step before
+    # falling through to the ordinary sp.solve() below -- the numeric
+    # answer is unaffected, this only makes the structure visible when
+    # it's actually needed rather than whenever >=2 unknowns merely
+    # coexist somewhere in the model
     matrix_result = linear_system_view(model, subs)
     if matrix_result is not None and target_name in matrix_result.symbols:
         A_latex = sp.latex(matrix_result.A)

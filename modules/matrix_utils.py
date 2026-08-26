@@ -58,6 +58,41 @@ def _is_linear(exprs: list[sp.Expr], symbols: list[sp.Symbol]) -> bool:
         return False
 
 
+def _is_sequentially_solvable(exprs: list[sp.Expr], symbols: list[str]) -> bool:
+    """True if every unknown can be pinned down one at a time -- at each
+    step, some remaining equation has exactly one still-unresolved symbol
+    among `symbols`, so plain substitution/elimination (solve that one,
+    plug it into the rest, repeat) fully resolves the system without
+    ever needing two unknowns solved simultaneously. This is the actual
+    test for whether the matrix/eigenvalue machinery earns its keep --
+    NOT just "are there >=2 equations and >=2 unknowns somewhere in the
+    model", since e.g. "a = (v_f-v_i)/t" and "d = 0.5*a*t^2 + t*v_i" both
+    being present doesn't make solving for `a` a coupled problem: the
+    first equation determines `a` completely on its own, and `d` never
+    needed to enter the picture.
+
+    False means genuinely coupled -- e.g. 2x+3y=8, x-y=1, where neither
+    equation alone isolates x or y -- which is exactly when showing A x=b
+    (and eigenvalues, rank-based classification, etc.) adds real
+    information over "just substitute". Also correctly returns False
+    (i.e. "show the matrix view") for underdetermined/inconsistent
+    systems, since nothing there gets fully pinned down by substitution
+    either, and the rank-based classification is precisely what explains why."""
+    remaining_eqs = list(exprs)
+    remaining_syms = set(symbols)
+    progressed = True
+    while remaining_eqs and remaining_syms and progressed:
+        progressed = False
+        for i, ex in enumerate(remaining_eqs):
+            present = {s.name for s in ex.free_symbols} & remaining_syms
+            if len(present) == 1:
+                remaining_syms -= present
+                remaining_eqs.pop(i)
+                progressed = True
+                break
+    return not remaining_syms
+
+
 def build_linear_system(equations: list[Equation], unknown_symbols: list[str],
                          knowns: dict | None = None) -> tuple[sp.Matrix, sp.Matrix, list[str]] | None:
     """Builds A, b for A x = b from the given "equation"-kind relations,
@@ -66,7 +101,9 @@ def build_linear_system(equations: list[Equation], unknown_symbols: list[str],
     is substituted first so already-known variables don't show up as
     spurious matrix columns. Returns None if the result wouldn't be a
     genuine system (fewer than 2 equations, fewer than 2 shared unknowns,
-    or the relations aren't linear in those unknowns)."""
+    the relations aren't linear in those unknowns, OR the system is
+    sequentially solvable by plain substitution -- see
+    _is_sequentially_solvable for why that last case doesn't count)."""
     knowns = knowns or {}
     eqs = [e for e in equations if e.kind == "equation" and e.sympy_eq is not None]
     if len(eqs) < 2:
@@ -83,6 +120,9 @@ def build_linear_system(equations: list[Equation], unknown_symbols: list[str],
 
     sym_objs = [sp.Symbol(s) for s in syms]
     if not _is_linear(exprs, sym_objs):
+        return None
+
+    if _is_sequentially_solvable(exprs, syms):
         return None
 
     try:
