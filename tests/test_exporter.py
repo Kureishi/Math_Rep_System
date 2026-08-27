@@ -127,3 +127,44 @@ def test_markdown_includes_vector_summary():
     md = build_markdown("force problem", model, report, {}, [])
     assert "## Vectors" in md
     assert "magnitude = 10" in md
+
+
+def test_markdown_includes_confidence_report(kinematics_json, fake_client_factory):
+    model = build_model(json.loads(kinematics_json))
+    client = fake_client_factory(final_answers={"a": 2.0})
+    report = verify(model, client, "x")
+    steps = compute_steps(model)
+    md = build_markdown("x", model, report, steps, [])
+    assert "## Confidence report" in md
+    assert "Overall score:" in md
+
+
+def test_pdf_includes_confidence_report(kinematics_json, fake_client_factory):
+    model = build_model(json.loads(kinematics_json))
+    client = fake_client_factory(final_answers={"a": 2.0})
+    report = verify(model, client, "x")
+    steps = compute_steps(model)
+    pdf_bytes = build_pdf_bytes("x", model, report, steps, [])
+    assert pdf_bytes[:5] == b"%PDF-"
+
+
+def test_markdown_includes_domain_of_validity_section(fake_client_factory):
+    model = build_model({
+        "problem_domain": "kinematics", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "v_f", "meaning": "final velocity", "known_value": "20", "unit": "m/s"},
+            {"symbol": "v_i", "meaning": "initial velocity", "known_value": "8", "unit": "m/s"},
+            {"symbol": "t", "meaning": "time", "known_value": "0", "unit": "s"},
+            {"symbol": "a", "meaning": "acceleration", "known_value": None, "unit": "m/s^2"},
+        ],
+        "equations": [
+            {"name": "accel", "kind": "equation", "expression": "Eq(a, (v_f - v_i) / t)", "derivation": ""},
+        ],
+        "solve_for": ["a"], "assumptions": [],
+    })
+    client = fake_client_factory()
+    report = verify(model, client, "t=0 problem")
+    steps = compute_steps(model)
+    md = build_markdown("t=0 problem", model, report, steps, [])
+    assert "## Domain of validity" in md
+    assert "undefined with the given values" in md

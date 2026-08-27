@@ -54,7 +54,8 @@ matching this exact schema:
   "variables": [
     {"symbol": "v", "meaning": "velocity", "known_value": "20", "unit": "m/s", "is_function": false},
     {"symbol": "F", "meaning": "applied force", "known_value": null, "unit": "N",
-     "is_vector": true, "components": ["Fx", "Fy"]}
+     "is_vector": true, "components": ["Fx", "Fy"]},
+    {"symbol": "m", "meaning": "measured mass", "known_value": "5.0", "unit": "kg", "uncertainty": "0.1"}
   ],
   "equations": [
     {
@@ -109,6 +110,14 @@ Vector quantities (forces, displacements, velocities in 2D/3D, torque, work):
   via sp.solve as a scalar. Instead solve for a scalar derived from it (a component like "Fx",
   or a scalar equation's own LHS symbol, e.g. "Eq(F_mag, magnitude(F))" then solve_for ["F_mag"]).
 
+Measurement uncertainty:
+- If the problem states a quantity with an explicit +/- tolerance ("20 +/- 0.5 m/s") or a
+  stated measurement/instrument precision ("measured to within 2%", "accurate to +/-0.1 kg"),
+  set that variable's "uncertainty" field to the ABSOLUTE tolerance (convert a percentage to an
+  absolute value first, e.g. 2% of a 20 m/s reading is "0.4"). Leave "uncertainty" null/omitted
+  for any value the problem states as exact or doesn't mention a tolerance for -- don't invent
+  a plausible-sounding uncertainty for a quantity the problem gives as a plain number.
+
 Objective/optimization rules:
 - Only include "objective" when the problem asks to minimize, maximize, or find an optimal value.
 - "optimize_over" lists the variable(s) being solved for at the optimum -- other symbols in the
@@ -147,6 +156,7 @@ class Variable:
     is_function: bool = False
     is_vector: bool = False
     components: list[str] = field(default_factory=list)  # only meaningful if is_vector
+    uncertainty: float | None = None  # absolute +/- tolerance on known_value, e.g. measurement error
 
 
 @dataclass
@@ -324,6 +334,7 @@ def build_model(json_payload: dict) -> ProblemModel:
             is_function=bool(v.get("is_function", False)),
             is_vector=bool(v.get("is_vector", False)),
             components=list(v.get("components") or []),
+            uncertainty=(float(v["uncertainty"]) if v.get("uncertainty") not in (None, "") else None),
         )
         for v in json_payload.get("variables", [])
     ]

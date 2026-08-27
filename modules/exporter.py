@@ -122,6 +122,34 @@ def build_markdown(problem_text: str, model: ProblemModel, report: VerificationR
                 L.append(f"- **{v.symbol}** ({v.meaning}): components {', '.join(v.components)}")
         L.append("")
 
+    cr = report.confidence_report()
+    L.append("## Confidence report")
+    L.append("")
+    L.append(f"**Overall score: {cr.score:.0%}** ({cr.label}) -- {cr.passed_count}/{cr.total_count} "
+              f"checks passed.")
+    L.append("")
+    for cat, summary in cr.categories.items():
+        mark = "✅" if summary.all_passed else "❌"
+        L.append(f"- {mark} **{cat}:** {summary.passed}/{summary.total}")
+    L.append("")
+    if cr.critical_failures:
+        L.append("**Critical failures:**")
+        for c in cr.critical_failures:
+            L.append(f"- {c.label}: {c.detail}")
+        L.append("")
+
+    if report.domain_notes:
+        L.append("## Domain of validity")
+        L.append("")
+        for note in report.domain_notes:
+            if note.violated:
+                L.append(f"- ❌ **{note.equation}** -- undefined with the given values: " +
+                          "; ".join(r.description for r in note.violated))
+            ok = note.satisfied + note.pending
+            if ok:
+                L.append(f"- **{note.equation}** requires: " + "; ".join(r.description for r in ok))
+        L.append("")
+
     L.append("## Verification detail")
     L.append("")
     for c in report.checks:
@@ -307,6 +335,41 @@ def build_pdf_bytes(problem_text: str, model: ProblemModel, report: Verification
             else:
                 pdf.multi_cell(0, 5, _safe(f"{v.symbol} ({v.meaning}): components "
                                             f"{', '.join(v.components)}"),
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
+
+    cr = report.confidence_report()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.multi_cell(0, 8, "Confidence report", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.multi_cell(0, 5, _safe(f"Overall score: {cr.score:.0%} ({cr.label}) -- "
+                                f"{cr.passed_count}/{cr.total_count} checks passed."),
+                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    for cat, summary in cr.categories.items():
+        mark = "[OK]" if summary.all_passed else "[!!]"
+        pdf.multi_cell(0, 5, _safe(f"{mark} {cat}: {summary.passed}/{summary.total}"),
+                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if cr.critical_failures:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.multi_cell(0, 5, "Critical failures:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 10)
+        for c in cr.critical_failures:
+            pdf.multi_cell(0, 5, _safe(f"- {c.label}: {c.detail}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+
+    if report.domain_notes:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.multi_cell(0, 8, "Domain of validity", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 10)
+        for note in report.domain_notes:
+            if note.violated:
+                pdf.multi_cell(0, 5, _safe(f"[FAIL] {note.equation} -- undefined with the given "
+                                            "values: " + "; ".join(r.description for r in note.violated)),
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            ok = note.satisfied + note.pending
+            if ok:
+                pdf.multi_cell(0, 5, _safe(f"{note.equation} requires: " +
+                                            "; ".join(r.description for r in ok)),
                                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 

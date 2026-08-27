@@ -113,6 +113,12 @@ eqsolver/
     ├── equivalence.py               # standalone "are these two expressions the same" utility,
     │                              #   built on sp.Expr.equals() with a numeric-sampling fallback
     │                              #   that reports WHERE two expressions agree/disagree
+    ├── uncertainty.py               # first-order error propagation for algebraic targets --
+    │                              #   re-solves the un-substituted system symbolically to get a
+    │                              #   formula to differentiate against each known's uncertainty
+    ├── domain_utils.py              # domain-of-validity: walks an expression once, finds
+    │                              #   division/even-root/log/inverse-trig restrictions, checks
+    │                              #   them against the problem's specific known values
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

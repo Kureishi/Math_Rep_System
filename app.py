@@ -431,24 +431,44 @@ report: VerificationReport | None = st.session_state["report"]
 if model:
     st.divider()
 
-    # ---- verification banner
+    # ---- confidence report: an aggregated, category-grouped view over
+    # the raw check list, rather than making someone scan every check to
+    # get a sense of "how much should I trust this"
+    cr = report.confidence_report()
     conf_label, worst_ratio = report.confidence()
-    if report.passed:
-        if conf_label in ("essentially exact", "comfortable margin"):
-            st.success(f"✅ Self-check passed with high confidence ({conf_label}) -- symbolic "
-                        "checks and an independent re-solve agree.")
+
+    banner_cols = st.columns([1, 3])
+    with banner_cols[0]:
+        st.metric("Confidence", f"{cr.score:.0%}", help="1.0 = every check passed with an "
+                   "essentially-exact margin. Capped below 50% if any check failed outright, "
+                   "regardless of how many others passed.")
+    with banner_cols[1]:
+        if report.passed:
+            if conf_label in ("essentially exact", "comfortable margin"):
+                st.success(f"✅ Self-check passed with high confidence ({conf_label}) -- symbolic "
+                            "checks and an independent re-solve agree.")
+            else:
+                st.warning(f"✅ Self-check passed, but confidence is only '{conf_label}' -- at least "
+                            "one check came close to its tolerance. Worth a second look before "
+                            "trusting the result completely.")
         else:
-            # technically passed, but at least one check was close to its own
-            # threshold -- worth flagging even though nothing failed outright
-            st.warning(f"✅ Self-check passed, but confidence is only '{conf_label}' -- at least "
-                        "one check came close to its tolerance. Worth a second look before "
-                        "trusting the result completely.")
-    else:
-        st.warning(
-            "⚠️ Self-check found unresolved issues after retries -- review the equations below "
-            "carefully before trusting the result."
-        )
-    with st.expander("Verification detail"):
+            st.warning(
+                "⚠️ Self-check found unresolved issues after retries -- review the equations below "
+                "carefully before trusting the result."
+            )
+
+    cat_cols = st.columns(min(len(cr.categories), 5) or 1)
+    for i, (cat, summary) in enumerate(cr.categories.items()):
+        with cat_cols[i % len(cat_cols)]:
+            icon = "✅" if summary.all_passed else "❌"
+            st.caption(f"{icon} {cat}")
+            st.write(f"{summary.passed}/{summary.total}")
+
+    if cr.critical_failures:
+        st.error("**Critical checks that failed:** " +
+                  "; ".join(f"{c.label} -- {c.detail}" for c in cr.critical_failures))
+
+    with st.expander("Verification detail (raw check list)"):
         for c in report.checks:
             icon = "✅" if c.passed else "❌"
             margin_tag = ""
@@ -459,6 +479,22 @@ if model:
             st.write(f"Derived-equation answer for `{target}`: `{val:.6g}`")
         for target, val in report.llm_independent_answers.items():
             st.write(f"Independent cross-check for `{target}`: `{val:.6g}`")
+
+    # ---- domain of validity: when does each formula's derived relation
+    # actually make sense (never divide by zero, sqrt of a negative, log
+    # of a non-positive value, etc.) -- shown as its own panel even for
+    # restrictions that AREN'T currently violated, since knowing the
+    # boundary of a formula's validity is useful on its own
+    if report.domain_notes:
+        with st.expander("Domain of validity", expanded=any(n.violated for n in report.domain_notes)):
+            for note in report.domain_notes:
+                if note.violated:
+                    st.error(f"**{note.equation}** -- undefined with the given values: " +
+                              "; ".join(r.description for r in note.violated))
+                restrictions_ok = note.satisfied + note.pending
+                if restrictions_ok:
+                    descs = "; ".join(r.description for r in restrictions_ok)
+                    st.write(f"**{note.equation}** requires: {descs}")
 
     st.subheader(f"Domain: {model.problem_domain}")
 
@@ -553,6 +589,8 @@ if model:
                     f"{v.symbol} — {v.meaning} ({v.unit or 'unitless'})",
                     value=float(default), key=f"var_{v.symbol}",
                 )
+                if v.uncertainty:
+                    st.caption(f"± {v.uncertainty:g} {v.unit or ''} (stated measurement uncertainty)")
     if function_vars:
         st.caption("Functions (solved as differential equations, not editable as plain numbers):")
         for v in function_vars:

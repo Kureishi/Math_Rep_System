@@ -209,6 +209,58 @@ See `ARCHITECTURE.md` for the full design. In short:
     for `x >= 0`), this module does its own targeted sampling and
     reports *which* tested points agreed and disagreed rather than a
     bare "undetermined."
+14. **Uncertainty/error propagation** (`modules/uncertainty.py`) -- a
+    variable can carry an optional `"uncertainty"` field (an absolute
+    +/- tolerance -- see the extraction prompt's rules for converting a
+    stated percentage into one). For an algebraic target that depends on
+    such a variable, the solve steps get one extra "Propagate
+    measurement uncertainty" step: standard first-order error
+    propagation, `sigma_f^2 = sum_i (df/dxi)^2 * sigma_xi^2`, computed by
+    re-solving the UN-substituted system symbolically (see
+    `solve_symbolic_for_target`) so there's a formula left to
+    differentiate against each known. Reports not just the combined
+    uncertainty but which input dominates it (`dominant_source`) --
+    useful for knowing which measurement to tighten if the answer needs
+    to be more precise. Deliberately scoped to algebraic targets only,
+    same as the matrix-system detection: ODE/recurrence/optimization
+    solutions don't have an equally clean closed form to differentiate
+    in general.
+15. **Domain-of-validity tracking** (`modules/domain_utils.py`) -- walks
+    each derived equation's expression tree once, structurally
+    identifying where it's undefined (denominators that must not be
+    zero, even roots requiring a nonnegative argument, logs requiring a
+    positive argument, inverse sine/cosine requiring an argument in
+    [-1, 1]), then checks those conditions against the SPECIFIC known
+    values given in the problem. An actively-violated restriction (e.g.
+    dividing by a variable that happens to be 0) is reported as a
+    genuine verification FAILURE via `_domain_checks` in `verifier.py`
+    -- not a silent NaN three steps later. A restriction that's
+    satisfied, or can't yet be checked (involves a still-unknown
+    symbol), is still surfaced as an informational note in a dedicated
+    "Domain of validity" panel, since knowing a formula's boundary of
+    validity is useful even when today's inputs don't cross it.
+    Deliberately limited to these four structural sources rather than a
+    full domain solve (`sp.calculus.util.continuous_domain` only handles
+    one free variable at a time, and most formulas here have several) --
+    and deliberately excludes `tan()`-style infinitely-repeating
+    singularities, which would be more noise than signal for word
+    problems.
+16. **Confidence report** (`VerificationReport.confidence_report()` in
+    `modules/verifier.py`) -- aggregates the (often 10-20+) individual
+    checks that already run into one category-grouped view: a 0-1
+    overall score, a pass count per category (structural, dimensional,
+    independent cross-check, domain validity, matrix/system consistency,
+    and any ODE/recurrence/optimization/inequality-specific checks that
+    ran), and an explicit list of critical failures -- rather than
+    making a person scan a flat list of 15 checks to get a sense of "how
+    much should I trust this." The score is 1.0 only when every
+    margin-bearing check passed with an essentially-exact margin, and is
+    capped below 0.5 the moment ANY check fails outright, regardless of
+    how many others passed. Categories are inferred from each check's
+    existing label text (`_infer_category`) rather than requiring every
+    `report.add(...)` call site across the codebase to be updated with
+    an explicit category -- a lighter-touch way to get the aggregation
+    without an invasive refactor.
 
 ## Extending it
 

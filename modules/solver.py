@@ -20,6 +20,7 @@ from modules.equation_engine import ProblemModel, Equation, target_kind, symbols
 from modules.verifier import _known_substitutions  # reuse the same substitution logic
 from modules.ode_utils import solve_ode
 from modules.matrix_utils import linear_system_view
+from modules.uncertainty import uncertainty_for_target
 
 NARRATION_PROMPT = """Given this verified sequence of steps solving for {target}, \
 write a brief, clear explanation for each step in plain language (one short sentence per step). \
@@ -100,6 +101,20 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
         if result.is_number:
             steps.append(SolutionStep(description="Numeric result",
                                         expression=f"{target_name} = {sp.N(result, 6)}"))
+
+            # if any input this target depends on carries a stated
+            # measurement uncertainty, propagate it (first-order error
+            # propagation) and show it as one more step -- deliberately
+            # only runs when the numeric result is already in hand, since
+            # it re-solves the ORIGINAL (unsubstituted) system to get a
+            # symbolic formula to differentiate; see uncertainty.py
+            unc = uncertainty_for_target(model, target_name, subs)
+            if unc is not None:
+                rel_text = f" ({unc.relative_uncertainty:.2%})" if unc.relative_uncertainty is not None else ""
+                steps.append(SolutionStep(
+                    description="Propagate measurement uncertainty",
+                    expression=f"{target_name} = {unc.nominal:.6g} \\pm {unc.uncertainty:.4g}{rel_text}",
+                ))
     return steps
 
 

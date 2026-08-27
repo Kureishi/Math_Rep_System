@@ -29,6 +29,7 @@ from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel, target_kind, symbols_and_functions_used
 from modules.units_checker import parse_unit, dimension_of, dims_equivalent, UnitParseError, make_dimension_placeholder
 from modules.matrix_utils import linear_system_view
+from modules.domain_utils import domain_restrictions_for_equation, evaluate_restriction
 
 INDEPENDENT_SOLVE_PROMPT = """Solve this problem yourself, from scratch, showing minimal work. \
 The problem asks for these quantities: {targets}. \
@@ -73,10 +74,72 @@ _confidence_label = confidence_label
 
 
 @dataclass
+class DomainNote:
+    equation: str
+    restrictions: list  # list[domain_utils.DomainRestriction]
+    violated: list
+    satisfied: list
+    pending: list
+
+
+@dataclass
+class CategorySummary:
+    passed: int
+    total: int
+    all_passed: bool
+
+
+@dataclass
+class ConfidenceReport:
+    """An aggregated, at-a-glance view over a VerificationReport's raw
+    check list -- grouped by category (structural, dimensional,
+    independent cross-check, domain validity, matrix/system consistency,
+    ODE/recurrence/optimization/inequality-specific checks) with an
+    overall 0-1 score, rather than a flat list a person has to scan
+    check-by-check to get a sense of "how much should I trust this."""
+    passed: bool
+    score: float                          # 0 (no confidence) to 1 (fully confident)
+    label: str                             # from confidence_label(), or "failed"
+    passed_count: int
+    total_count: int
+    categories: dict[str, CategorySummary]
+    critical_failures: list  # list[CheckResult]
+
+
+_CATEGORY_KEYWORDS: list[tuple[str, str]] = [
+    ("independent cross-check", "Independent cross-check"),
+    ("domain validity", "Domain of validity"),
+    ("linear system consistency", "Matrix/system consistency"),
+    ("dimensional", "Dimensional consistency"),
+    ("numeric balance", "Numeric balance"),
+    ("equation parsing", "Structural"),
+    ("target variable present", "Structural"),
+    ("determinacy", "Structural"),
+    ("inequality", "Inequality"),
+    ("differential equation", "Differential equations"),
+    ("ode", "Differential equations"),
+    ("recurrence", "Recurrence relations"),
+    ("critical point", "Optimization"),
+    ("classification matches", "Optimization"),
+    ("constraint satisfied", "Optimization"),
+    ("feasibility", "Optimization"),
+]
+
+
+def _infer_category(label: str) -> str:
+    lower = label.lower()
+    for keyword, category in _CATEGORY_KEYWORDS:
+        if keyword in lower:
+            return category
+    return "Other"
+
+
+@dataclass
 class VerificationReport:
     checks: list[CheckResult] = field(default_factory=list)
     sympy_numeric_answers: dict[str, float] = field(default_factory=dict)
     llm_independent_answers: dict[str, float] = field(default_factory=dict)
+    domain_notes: list[DomainNote] = field(default_factory=list)
     passed: bool = True
     failure_reason: str | None = None
 
@@ -98,6 +161,36 @@ class VerificationReport:
             return "essentially exact", None  # only binary checks ran, and all passed
         worst = max(ratios)
         return _confidence_label(worst), worst
+
+    def confidence_report(self) -> ConfidenceReport:
+        """Aggregates self.checks into the category-grouped ConfidenceReport
+        described above. Computed on demand (not cached) since it's cheap
+        and the check list is finalized by the time anything asks for it."""
+        categories: dict[str, list[CheckResult]] = {}
+        for c in self.checks:
+            categories.setdefault(_infer_category(c.label), []).append(c)
+        cat_summary = {
+            cat: CategorySummary(passed=sum(1 for c in checks if c.passed), total=len(checks),
+                                   all_passed=all(c.passed for c in checks))
+            for cat, checks in categories.items()
+        }
+        label, worst = self.confidence()
+        if self.passed:
+            score = 1.0 if worst is None else max(0.0, 1.0 - worst)
+        else:
+            # still informative (how much of the suite passed), but capped
+            # below 0.5 -- ANY failing check means the result shouldn't be
+            # trusted regardless of how many other checks happened to pass
+            total = len(self.checks) or 1
+            passed_frac = sum(1 for c in self.checks if c.passed) / total
+            score = min(0.45, passed_frac * 0.5)
+        return ConfidenceReport(
+            passed=self.passed, score=score, label=label,
+            passed_count=sum(1 for c in self.checks if c.passed),
+            total_count=len(self.checks),
+            categories=cat_summary,
+            critical_failures=[c for c in self.checks if not c.passed],
+        )
 
 
 def _known_substitutions(model: ProblemModel) -> dict:
@@ -628,6 +721,58 @@ def _matrix_system_checks(model: ProblemModel, report: VerificationReport):
         )
 
 
+def _domain_checks(model: ProblemModel, report: VerificationReport):
+    """For each algebraic equation, finds structural domain restrictions
+    (division, even roots, logs, inverse trig -- see domain_utils) and
+    checks them against the known values given in THIS problem. An
+    actively-violated restriction (e.g. dividing by a variable that's
+    known to be 0) is a genuine correctness failure, not just a note --
+    the formula is undefined with the given inputs. A restriction that's
+    satisfied, or can't yet be checked because it involves a still-
+    unknown symbol, is recorded as an informational note (surfaced via
+    report.domain_notes) and reported as a passing check, matching how
+    the other informational/structural checks in this module work."""
+    knowns = _known_substitutions(model)
+    for eq in model.equations:
+        if eq.kind != "equation" or eq.sympy_eq is None:
+            continue
+        restrictions = domain_restrictions_for_equation(eq.sympy_eq)
+        if not restrictions:
+            continue
+
+        violated, satisfied, pending = [], [], []
+        for r in restrictions:
+            status = evaluate_restriction(r, knowns)
+            if status is False:
+                violated.append(r)
+            elif status is True:
+                satisfied.append(r)
+            else:
+                pending.append(r)
+
+        report.domain_notes.append(DomainNote(
+            equation=eq.name, restrictions=restrictions,
+            violated=violated, satisfied=satisfied, pending=pending,
+        ))
+
+        if violated:
+            report.add(
+                f"Domain validity: {eq.name}", False,
+                "Undefined with the given values -- violates: " +
+                "; ".join(r.description for r in violated),
+            )
+        else:
+            all_desc = "; ".join(r.description for r in (satisfied + pending))
+            status_note = (" (satisfied by the given values)." if satisfied and not pending else
+                            " (can't fully check yet -- involves a still-unknown symbol)."
+                            if pending else ".")
+            report.add(
+                f"Domain validity: {eq.name}", True,
+                f"Requires {all_desc}" + status_note,
+                margin_ratio=0.0,
+            )
+
+
 def _solve_sympy(model: ProblemModel) -> dict[str, float]:
     """Solves the whole EQUATION-kind system at once for every algebraic
     target -- important because targets can be coupled (e.g. displacement
@@ -679,6 +824,7 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
     _recurrence_checks(model, report)
     _optimization_checks(model, report)
     _matrix_system_checks(model, report)
+    _domain_checks(model, report)
 
     sympy_answers = _solve_sympy(model)
     report.sympy_numeric_answers = sympy_answers
