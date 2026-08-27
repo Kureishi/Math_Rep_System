@@ -21,6 +21,7 @@ from modules.verifier import _known_substitutions  # reuse the same substitution
 from modules.ode_utils import solve_ode
 from modules.matrix_utils import linear_system_view
 from modules.uncertainty import uncertainty_for_target
+from modules.physical_validity import filter_physically_valid
 
 NARRATION_PROMPT = """Given this verified sequence of steps solving for {target}, \
 write a brief, clear explanation for each step in plain language (one short sentence per step). \
@@ -94,8 +95,42 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
     except Exception:  # noqa: BLE001
         solutions = []
 
-    if solutions and target in solutions[0]:
-        result = sp.simplify(solutions[0][target])
+    # sp.solve() returns however many branches the equation has (a
+    # quadratic in the target gives two), in whatever order its internal
+    # algorithm happens to produce -- NOT sorted by which one is
+    # physically meaningful. Filtering by each unknown's declared domain
+    # (Variable.domain) picks out the branch that's actually a sensible
+    # answer instead of always taking branch [0] unconditionally, which
+    # for e.g. a projectile time-of-flight equation can silently be a
+    # negative time. See physical_validity.py.
+    chosen = solutions[0] if solutions else None
+    if len(solutions) > 1:
+        filter_result = filter_physically_valid(model, solutions, [target, *other_targets])
+        if filter_result.checked_any_domain and filter_result.discarded:
+            for sol, reasons in filter_result.discarded:
+                steps.append(SolutionStep(
+                    description="Discard a non-physical root",
+                    expression="; ".join(reasons),
+                ))
+            if len(filter_result.valid) == 1:
+                chosen = filter_result.valid[0]
+            elif filter_result.valid:
+                # more than one branch still survives filtering -- can't
+                # pick a single "the" answer without more info, so note
+                # the ambiguity explicitly rather than silently guessing
+                chosen = filter_result.valid[0]
+                steps.append(SolutionStep(
+                    description="Multiple physically valid solutions remain",
+                    expression=f"{len(filter_result.valid)} branches still satisfy every declared "
+                                "domain -- showing the first; the problem may be genuinely ambiguous.",
+                ))
+            # if filtering discarded EVERY branch, fall back to the
+            # original solutions[0] (chosen already defaults to that) --
+            # better to show a possibly-wrong-signed answer with the
+            # discard reasoning visible than to show no answer at all
+
+    if chosen is not None and target in chosen:
+        result = sp.simplify(chosen[target])
         steps.append(SolutionStep(description=f"Isolate and simplify to solve for {target_name}",
                                     expression=f"{target_name} = {sp.latex(result)}"))
         if result.is_number:

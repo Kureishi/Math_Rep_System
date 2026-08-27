@@ -261,6 +261,52 @@ See `ARCHITECTURE.md` for the full design. In short:
     `report.add(...)` call site across the codebase to be updated with
     an explicit category -- a lighter-touch way to get the aggregation
     without an invasive refactor.
+17. **Runnable code export** (`modules/code_export.py`) -- "get this as
+    Python" for any algebraic, ODE-closed-form, or recurrence-closed-
+    form target: renders the derived formula as actual Python SOURCE
+    TEXT via `sp.pycode` (not `sp.lambdify`, which builds a live
+    compiled closure that can't be saved to a file or read by a
+    person). Reuses `uncertainty.solve_symbolic_for_target` to get a
+    formula purely in terms of named inputs (re-solving the
+    UN-substituted system, since by the time the ordinary step trace
+    calls `sp.solve()` the knowns are already plain numbers with no
+    symbolic trace left). A coupled target (e.g. displacement depending
+    on an also-unknown acceleration) exports correctly reduced to only
+    the genuinely-known inputs, since the whole system is solved
+    together. "Get all formulas as one Python file" bundles every
+    target into one module with a demo `__main__` block calling each
+    function with the problem's own known values. Deliberately excludes
+    optimization results (a single numeric critical point isn't a
+    general-purpose formula to export).
+18. **Physical-validity filtering** (`modules/physical_validity.py`) --
+    when `sp.solve()` returns more than one root (a quadratic
+    time-of-flight equation is the textbook case), the raw result has no
+    notion of which branch is physically meaningful; the solver used to
+    always take branch `[0]` unconditionally, which for the classic
+    `-4.9*t**2 + 20*t + 1.5 = 0` genuinely returns a NEGATIVE time
+    first. A variable can now be declared with a `"domain"` field
+    (`"nonnegative"`, `"positive"`, `"nonpositive"`, `"negative"`); when
+    a target has multiple roots, each is checked against every declared
+    domain, non-conforming roots are discarded with an explicit reason
+    shown as a solve step ("Discard a non-physical root"), and the
+    remaining (physically valid) root is used as the answer. If no
+    domain is declared, behavior is unchanged from before this feature
+    existed -- this is opt-in, matching how vectors/uncertainty are
+    opt-in, not a silent behavior change for every existing problem.
+19. **Unit conversion sweep** (`modules/unit_conversion.py`) -- once an
+    answer's unit is known, offers it in a handful of common alternate
+    units for the same dimension (m/s <-> km/h <-> mph <-> ft/s, m <->
+    ft <-> mi <-> km, kg <-> lb <-> g, etc.), shown in an "Also equals
+    ..." expander and included in exported reports. Built entirely on
+    `units_checker.py`'s existing unit-parsing/dimension
+    infrastructure (`parse_unit`, `dimension_of`, `dims_equivalent`) --
+    no second unit-string format to keep in sync. Deliberately excludes
+    Celsius/Fahrenheit/Kelvin conversions: those are AFFINE (value *
+    scale + offset), not pure multiplicative scale factors, and
+    `sympy.physics.units.convert_to()` only handles the multiplicative
+    case -- silently applying it would produce a wrong number that
+    looks plausible, so temperature-scale conversion is left out rather
+    than faked.
 
 ## Extending it
 

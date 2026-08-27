@@ -29,6 +29,7 @@ from modules.verifier import VerificationReport, _known_substitutions
 from modules.solver import SolutionStep
 from modules.matrix_utils import linear_system_view
 from modules.vector_utils import vector_summary
+from modules.unit_conversion import sweep_conversions
 
 
 @dataclass
@@ -121,6 +122,20 @@ def build_markdown(problem_text: str, model: ProblemModel, report: VerificationR
             else:
                 L.append(f"- **{v.symbol}** ({v.meaning}): components {', '.join(v.components)}")
         L.append("")
+
+    if report.sympy_numeric_answers:
+        conv_lines = []
+        for target, val in report.sympy_numeric_answers.items():
+            unit = next((v.unit for v in model.variables if v.symbol == target), None)
+            alternates = sweep_conversions(val, unit)
+            if alternates:
+                alt_text = ", ".join(f"{av:.6g} {au}" for au, av in alternates)
+                conv_lines.append(f"- **{target}** = {val:.6g} {unit} = {alt_text}")
+        if conv_lines:
+            L.append("## Results in other units")
+            L.append("")
+            L.extend(conv_lines)
+            L.append("")
 
     cr = report.confidence_report()
     L.append("## Confidence report")
@@ -337,6 +352,23 @@ def build_pdf_bytes(problem_text: str, model: ProblemModel, report: Verification
                                             f"{', '.join(v.components)}"),
                                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
+
+    if report.sympy_numeric_answers:
+        conv_written = False
+        for target, val in report.sympy_numeric_answers.items():
+            unit = next((v.unit for v in model.variables if v.symbol == target), None)
+            alternates = sweep_conversions(val, unit)
+            if alternates:
+                if not conv_written:
+                    pdf.set_font("Helvetica", "B", 13)
+                    pdf.multi_cell(0, 8, "Results in other units", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                    pdf.set_font("Helvetica", "", 10)
+                    conv_written = True
+                alt_text = ", ".join(f"{av:.6g} {au}" for au, av in alternates)
+                pdf.multi_cell(0, 5, _safe(f"{target} = {val:.6g} {unit} = {alt_text}"),
+                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        if conv_written:
+            pdf.ln(2)
 
     cr = report.confidence_report()
     pdf.set_font("Helvetica", "B", 13)

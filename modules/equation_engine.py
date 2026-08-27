@@ -55,7 +55,8 @@ matching this exact schema:
     {"symbol": "v", "meaning": "velocity", "known_value": "20", "unit": "m/s", "is_function": false},
     {"symbol": "F", "meaning": "applied force", "known_value": null, "unit": "N",
      "is_vector": true, "components": ["Fx", "Fy"]},
-    {"symbol": "m", "meaning": "measured mass", "known_value": "5.0", "unit": "kg", "uncertainty": "0.1"}
+    {"symbol": "m", "meaning": "measured mass", "known_value": "5.0", "unit": "kg", "uncertainty": "0.1"},
+    {"symbol": "t", "meaning": "time since launch", "known_value": null, "unit": "s", "domain": "nonnegative"}
   ],
   "equations": [
     {
@@ -118,6 +119,16 @@ Measurement uncertainty:
   for any value the problem states as exact or doesn't mention a tolerance for -- don't invent
   a plausible-sounding uncertainty for a quantity the problem gives as a plain number.
 
+Physical-validity domains:
+- If an unknown is physically restricted by what it represents -- time since an event can't be
+  negative, a mass/length/count must be positive, a temperature drop must be non-positive -- set
+  that variable's "domain" field to "nonnegative", "positive", "nonpositive", or "negative".
+  This matters most for any unknown that could come out of an equation with multiple roots (e.g.
+  solving a quadratic for time-of-flight): it's how the system tells a physically meaningful root
+  from a mathematically-valid-but-nonsensical one (like a negative time). Leave "domain"
+  null/omitted for anything genuinely unrestricted (e.g. a temperature change that could
+  legitimately be positive or negative) -- don't add a restriction "just in case".
+
 Objective/optimization rules:
 - Only include "objective" when the problem asks to minimize, maximize, or find an optimal value.
 - "optimize_over" lists the variable(s) being solved for at the optimum -- other symbols in the
@@ -157,6 +168,7 @@ class Variable:
     is_vector: bool = False
     components: list[str] = field(default_factory=list)  # only meaningful if is_vector
     uncertainty: float | None = None  # absolute +/- tolerance on known_value, e.g. measurement error
+    domain: str | None = None  # "nonnegative" | "positive" | "nonpositive" | "negative" | None (unrestricted)
 
 
 @dataclass
@@ -335,6 +347,8 @@ def build_model(json_payload: dict) -> ProblemModel:
             is_vector=bool(v.get("is_vector", False)),
             components=list(v.get("components") or []),
             uncertainty=(float(v["uncertainty"]) if v.get("uncertainty") not in (None, "") else None),
+            domain=(v.get("domain") if v.get("domain") in
+                    ("nonnegative", "positive", "nonpositive", "negative") else None),
         )
         for v in json_payload.get("variables", [])
     ]

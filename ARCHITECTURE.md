@@ -119,6 +119,15 @@ eqsolver/
     ├── domain_utils.py              # domain-of-validity: walks an expression once, finds
     │                              #   division/even-root/log/inverse-trig restrictions, checks
     │                              #   them against the problem's specific known values
+    ├── code_export.py               # "get this as Python" -- renders algebraic/ODE/recurrence
+    │                              #   closed-form targets as standalone Python source (sp.pycode,
+    │                              #   not sp.lambdify) that can be saved/read/reused elsewhere
+    ├── physical_validity.py         # filters multi-root sp.solve() results against each
+    │                              #   variable's declared domain (nonnegative/positive/etc.) --
+    │                              #   fixes the "silently returns the negative time root" bug
+    ├── unit_conversion.py           # "also equals..." -- offers a numeric answer in common
+    │                              #   alternate units for the same dimension, built on
+    │                              #   units_checker.py's existing parse/dimension machinery
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

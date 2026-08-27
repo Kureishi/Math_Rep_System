@@ -168,3 +168,33 @@ def test_markdown_includes_domain_of_validity_section(fake_client_factory):
     md = build_markdown("t=0 problem", model, report, steps, [])
     assert "## Domain of validity" in md
     assert "undefined with the given values" in md
+
+
+def test_markdown_includes_results_in_other_units(fake_client_factory):
+    model = build_model({
+        "problem_domain": "kinematics", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "d", "meaning": "distance", "known_value": "100", "unit": "m"},
+            {"symbol": "t", "meaning": "time", "known_value": "10", "unit": "s"},
+            {"symbol": "v", "meaning": "velocity", "known_value": None, "unit": "m/s"},
+        ],
+        "equations": [
+            {"name": "speed", "kind": "equation", "expression": "Eq(v, d/t)", "derivation": ""},
+        ],
+        "solve_for": ["v"], "assumptions": [],
+    })
+    client = fake_client_factory(final_answers={"v": 10.0})
+    report = verify(model, client, "speed problem")
+    steps = compute_steps(model)
+    md = build_markdown("speed problem", model, report, steps, [])
+    assert "## Results in other units" in md
+    assert "km/hr" in md
+
+
+def test_pdf_includes_results_in_other_units(kinematics_json, fake_client_factory):
+    model = build_model(json.loads(kinematics_json))
+    client = fake_client_factory(final_answers={"a": 2.0})
+    report = verify(model, client, "x")
+    steps = compute_steps(model)
+    pdf_bytes = build_pdf_bytes("x", model, report, steps, [])
+    assert pdf_bytes[:5] == b"%PDF-"

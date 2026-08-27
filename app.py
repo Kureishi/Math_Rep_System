@@ -23,6 +23,8 @@ from modules.ode_utils import solve_ode
 from modules.recurrence_utils import solve_recurrence, _independent_variable
 from modules.optimization_utils import solve_optimization
 from modules.matrix_utils import linear_system_view
+from modules.unit_conversion import sweep_conversions
+from modules.code_export import formula_for_target, generate_python_function, generate_python_module
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
 from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot
@@ -638,6 +640,14 @@ if model:
     steps_by_target = st.session_state["steps"] or {}
     if steps_by_target:
         st.markdown("### Step-by-step solution")
+
+        module_src = generate_python_module(model)
+        if not module_src.startswith('"""No exportable'):
+            st.download_button(
+                "⬇️ Get all formulas as one Python file", data=module_src,
+                file_name="formulas.py", mime="text/x-python",
+            )
+
         for target_name, steps in steps_by_target.items():
             st.markdown(f"#### Solving for `{target_name}`")
             for i, step in enumerate(steps, start=1):
@@ -653,6 +663,18 @@ if model:
                     ws.store(target_name, sympy_val,
                              source=f"{problem_text[:60]}...", unit=unit)
                     st.rerun()
+
+                # ---- unit conversion sweep: offer the same numeric
+                # answer in a handful of common alternate units, once its
+                # declared unit is known -- purely a display convenience,
+                # doesn't touch the verified value itself
+                target_unit = next((v.unit for v in model.variables if v.symbol == target_name), None)
+                conversions = sweep_conversions(sympy_val, target_unit)
+                if conversions:
+                    with st.expander(f"Also equals... ({target_name} in other units)"):
+                        for alt_unit, alt_val in conversions:
+                            st.write(f"{alt_val:.6g} {alt_unit}")
+
             elif (target_kind(model, target_name) == "optimization" and opt_result
                     and not opt_result.error and opt_result.critical_points):
                 opt_val = opt_result.critical_points[0].get(target_name)
@@ -662,6 +684,23 @@ if model:
                         ws.store(target_name, float(opt_val),
                                  source=f"{problem_text[:60]}...", unit=unit)
                         st.rerun()
+
+            # ---- runnable code export: an actual Python function
+            # computing this target from its inputs (algebraic/ODE/
+            # recurrence closed forms only -- see code_export.py), as
+            # SOURCE TEXT someone can drop into their own project, not
+            # just a copy-pasteable formula
+            formula = formula_for_target(model, target_name)
+            if formula is not None:
+                unit_for_target = next((v.unit for v in model.variables if v.symbol == target_name), None)
+                py_src = generate_python_function(
+                    formula, {v.symbol: v.meaning for v in model.variables}, unit_for_target,
+                )
+                st.download_button(
+                    f"⬇️ Get {target_name}(...) as Python", data=py_src,
+                    file_name=f"{target_name}.py", mime="text/x-python",
+                    key=f"pyexport_{target_name}",
+                )
 
     # ---- alternative scenarios
     if st.session_state["scenarios"]:
