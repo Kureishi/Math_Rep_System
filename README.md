@@ -307,6 +307,56 @@ See `ARCHITECTURE.md` for the full design. In short:
     case -- silently applying it would produce a wrong number that
     looks plausible, so temperature-scale conversion is left out rather
     than faked.
+20. **"Grade my work"** (`modules/grading.py`) -- a student (or teacher)
+    pastes their own attempted work for an algebraic target, one step
+    per line, and gets back three separate diagnoses instead of just a
+    right/wrong verdict: a FORMULA check (is their starting equation
+    mathematically equivalent to one of the problem's own verified
+    relations -- solved both for the target symbol and compared via
+    equivalence.py's tested logic, so a correctly *rearranged* equation
+    like `a*t = v_f - v_i` instead of `a = (v_f-v_i)/t` is recognized as
+    the same formula, not flagged as different), an ARITHMETIC check per
+    line (does each side agree numerically once known values are
+    substituted), and a FINAL-ANSWER check against the system's own
+    verified value. Deliberately not a literal step-by-step diff against
+    the system's own derivation -- two valid derivations of the same
+    formula can look completely different, so diffing them directly
+    would flag correct-but-differently-ordered work as wrong. Caught two
+    real bugs during development: SymPy auto-evaluates `Eq()` of two
+    pure numbers straight to a bare `True`/`False` rather than staying
+    an `Eq` object (so `Eq(12/6, 3)` needed its own detection path, not
+    just an `isinstance(Eq)` check), and a line whose left side is just
+    the (still-unknown) target symbol itself was wrongly being marked
+    "not checkable" before that got fixed.
+21. **Reverse generation / worksheet variants** (`modules/worksheet.py`)
+    -- "Generate worksheet variants" asks the LLM to write NEW word
+    problem TEXT sharing the current problem's own verified equation
+    structure, with different numbers and a different story --
+    inverting `scenarios.py`'s "where else does this apply" into "give
+    me a fresh problem to hand a student." Deliberately does NOT ask the
+    LLM for the new problem's answer or equations too -- an LLM's own
+    stated numeric answer for a problem it just invented isn't
+    trustworthy on its own, which is this whole app's premise. Instead
+    each generated problem is meant to be pasted right back into the
+    main text input and solved through the exact same extract/verify
+    pipeline as any other problem, so a generated worksheet problem gets
+    verified by the same standard as everything else.
+22. **Multiple-method toggle** (`alternate_method_steps()` in
+    `solver.py`) -- an explicit "show me another way" per algebraic
+    target, shown only on request (never part of the default step
+    list). Always includes a back-substitution check: plug the already-
+    solved answer into the original equation(s) and confirm both sides
+    agree. When the target is part of a square coupled linear system, it
+    ALSO shows Cramer's rule (`x_i = det(A_i)/det(A)`) -- even if the
+    default view used plain substitution because that was the simplest
+    path for THAT target (see point 10's sequential-solvability note).
+    Required adding a `force=True` option to
+    `matrix_utils.build_linear_system`/`linear_system_view` so this
+    toggle can get at the coefficient matrix regardless of what the
+    default-view heuristic decided -- "show me a second way, on
+    request" is a different question from "what should the default
+    view be," so it gets its own bypass rather than fighting the
+    heuristic.
 
 ## Extending it
 

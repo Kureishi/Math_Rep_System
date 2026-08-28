@@ -344,6 +344,101 @@ def _optimization_steps_for_target(model: ProblemModel, target_name: str,
     return steps
 
 
+def alternate_method_steps(model: ProblemModel, target_name: str, subs: dict) -> list[SolutionStep] | None:
+    """A SECOND way to reach/check the same answer for target_name --
+    shown only on explicit request (a "show me another way" toggle in
+    the UI), never part of the default step list, since most problems
+    don't need two derivations but seeing an independent path can help
+    build confidence or teach a different technique.
+
+    Always includes a back-substitution check: plug the already-solved
+    numeric answer into each original equation referencing the target,
+    using the SAME known values the primary path used, and confirm both
+    sides agree. This works for any algebraic target.
+
+    Additionally includes Cramer's rule -- x_i = det(A_i)/det(A), where
+    A_i is the coefficient matrix with column i replaced by b -- when
+    the target is part of a square linear system, EVEN if the default
+    view decided plain substitution was simpler for it (build_linear_system
+    is called with force=True here specifically to get that matrix
+    regardless of the sequential-solvability heuristic that gates the
+    default view).
+
+    Returns None if target_name isn't an algebraic target, or no
+    numeric answer for it could be established at all.
+    """
+    if target_kind(model, target_name) != "equation":
+        return None
+
+    target = sp.Symbol(target_name)
+    orig_eqs = [e.sympy_eq for e in model.equations
+                if e.kind == "equation" and e.sympy_eq is not None and target in e.sympy_eq.free_symbols]
+    if not orig_eqs:
+        return None
+
+    all_eqs = [e.sympy_eq for e in model.equations if e.kind == "equation" and e.sympy_eq is not None]
+    other_targets = [sp.Symbol(t) for t in model.solve_for
+                      if t != target_name and target_kind(model, t) == "equation"]
+    substituted = [e.subs(subs) for e in all_eqs]
+    try:
+        solutions = sp.solve(substituted, [target, *other_targets], dict=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if not solutions:
+        return None
+
+    chosen = solutions[0]
+    if len(solutions) > 1:
+        filter_result = filter_physically_valid(model, solutions, [target, *other_targets])
+        if filter_result.checked_any_domain and filter_result.valid:
+            chosen = filter_result.valid[0]
+    if target not in chosen or not chosen[target].is_number:
+        return None
+    answer = sp.N(chosen[target], 6)
+
+    steps: list[SolutionStep] = [SolutionStep(
+        description="Alternate method: verify by back-substitution",
+        expression=f"Plug {target_name} = {answer} back into the original equation(s).",
+    )]
+    for eq in orig_eqs:
+        check_eq = eq.subs(subs).subs(target, answer)
+        if check_eq is sp.true or check_eq is sp.false:
+            # sp.Eq() of two pure numeric literals auto-evaluates straight
+            # to a BooleanTrue/BooleanFalse (e.g. Eq(2, 2) -> True) rather
+            # than staying an Eq object -- that IS the check result.
+            eq_with_knowns = eq.subs(subs)
+            steps.append(SolutionStep(
+                description="Check -- matches" if bool(check_eq) else "Check -- MISMATCH",
+                expression=f"{sp.latex(eq_with_knowns)} \\text{{ at }} {target_name} = {answer}",
+            ))
+            continue
+        try:
+            lhs_val, rhs_val = sp.N(check_eq.lhs, 6), sp.N(check_eq.rhs, 6)
+            matches = abs(complex(lhs_val) - complex(rhs_val)) < 1e-4 * max(
+                abs(complex(lhs_val)), abs(complex(rhs_val)), 1)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        steps.append(SolutionStep(
+            description="Check -- matches" if matches else "Check -- MISMATCH",
+            expression=f"{sp.latex(check_eq.lhs)} = {lhs_val}, \\quad {sp.latex(check_eq.rhs)} = {rhs_val}",
+        ))
+
+    matrix_result = linear_system_view(model, subs, force=True)
+    if matrix_result is not None and matrix_result.is_square and target_name in matrix_result.symbols:
+        idx = matrix_result.symbols.index(target_name)
+        A_i = matrix_result.A.copy()
+        A_i[:, idx] = matrix_result.b
+        det_A = matrix_result.determinant
+        det_Ai = A_i.det()
+        steps.append(SolutionStep(
+            description="Alternate method: Cramer's rule",
+            expression=(f"{target_name} = \\dfrac{{\\det(A_{{{target_name}}})}}{{\\det(A)}} = "
+                         f"\\dfrac{{{sp.latex(det_Ai)}}}{{{sp.latex(det_A)}}} = "
+                         f"{sp.latex(sp.simplify(det_Ai / det_A)) if det_A != 0 else 'undefined (det(A) = 0)'}"),
+        ))
+    return steps
+
+
 def compute_steps(model: ProblemModel) -> dict[str, list[SolutionStep]]:
     """Deterministic SymPy trace per target, dispatched by what kind of
     relation actually defines that target (equation / inequality / ode /

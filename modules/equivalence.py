@@ -80,19 +80,13 @@ def _sample_agreement(e1: sp.Expr, e2: sp.Expr, symbols: list[sp.Symbol]) -> tup
     return agree, tried, example_disagreement
 
 
-def check_equivalence(expr1_str: str, expr2_str: str,
-                       extra_symbols: list[str] | None = None) -> EquivalenceResult:
-    """Parses both expressions (same permissive syntax as the rest of the
-    app: implicit multiplication, ^ as power) and checks equivalence."""
-    try:
-        e1 = _parse(expr1_str, extra_symbols)
-    except Exception as e:  # noqa: BLE001
-        return EquivalenceResult(None, "undetermined", None, "", error=f"Couldn't parse the first expression: {e}")
-    try:
-        e2 = _parse(expr2_str, extra_symbols)
-    except Exception as e:  # noqa: BLE001
-        return EquivalenceResult(None, "undetermined", None, "", error=f"Couldn't parse the second expression: {e}")
-
+def check_equivalence_exprs(e1: sp.Expr, e2: sp.Expr) -> EquivalenceResult:
+    """Core equivalence check on already-parsed SymPy expressions --
+    factored out of check_equivalence() so other modules (e.g.
+    grading.py, comparing a student's algebra against the verified
+    derivation) can reuse the exact same tested logic without a
+    string-parse-reparse round trip through check_equivalence()'s
+    string-based API."""
     diff = sp.simplify(e1 - e2)
 
     try:
@@ -150,3 +144,19 @@ def check_equivalence(expr1_str: str, expr2_str: str,
         f"Agrees at {agree}/{tried} tested numeric points but disagrees at others (e.g. {where}) -- "
         "equivalent only over part of the domain, not universally.",
     )
+
+
+def check_equivalence(expr1_str: str, expr2_str: str,
+                       extra_symbols: list[str] | None = None) -> EquivalenceResult:
+    """Parses both expressions (same permissive syntax as the rest of the
+    app: implicit multiplication, ^ as power) and checks equivalence."""
+    try:
+        e1 = _parse(expr1_str, extra_symbols)
+    except Exception as e:  # noqa: BLE001
+        return EquivalenceResult(None, "undetermined", None, "", error=f"Couldn't parse the first expression: {e}")
+    try:
+        e2 = _parse(expr2_str, extra_symbols)
+    except Exception as e:  # noqa: BLE001
+        return EquivalenceResult(None, "undetermined", None, "", error=f"Couldn't parse the second expression: {e}")
+
+    return check_equivalence_exprs(e1, e2)

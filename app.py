@@ -18,13 +18,15 @@ from modules.ocr import ocr_extract
 from modules.equation_engine import extract_model, ProblemModel, target_kind, symbols_and_functions_used
 from sympy.core.function import AppliedUndef
 from modules.verifier import verify, VerificationReport, confidence_label, _known_substitutions
-from modules.solver import compute_steps, narrate_steps
+from modules.solver import compute_steps, narrate_steps, alternate_method_steps
 from modules.ode_utils import solve_ode
 from modules.recurrence_utils import solve_recurrence, _independent_variable
 from modules.optimization_utils import solve_optimization
 from modules.matrix_utils import linear_system_view
 from modules.unit_conversion import sweep_conversions
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
+from modules.grading import grade_work
+from modules.worksheet import generate_worksheet_problems
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
 from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot
@@ -42,7 +44,7 @@ client = LMStudioClient()
 ws = Workspace(st.session_state)
 for key, default in [("problem_text", ""), ("model", None), ("report", None),
                       ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
-                      ("pdf_bytes", None), ("plot_snapshots", {})]:
+                      ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", [])]:
     st.session_state.setdefault(key, default)
 
 
@@ -702,6 +704,21 @@ if model:
                     key=f"pyexport_{target_name}",
                 )
 
+            # ---- multiple-method toggle: an explicit "show me another
+            # way" for algebraic targets -- a back-substitution check
+            # always, plus Cramer's rule when the target is part of a
+            # square linear system (shown even if the default view used
+            # plain substitution because it was simpler)
+            if target_kind(model, target_name) == "equation":
+                if st.toggle(f"Show me another way to solve for {target_name}", key=f"altmethod_{target_name}"):
+                    alt_steps = alternate_method_steps(model, target_name, _known_substitutions(model))
+                    if alt_steps:
+                        for i, step in enumerate(alt_steps, start=1):
+                            st.markdown(f"**{step.description}**")
+                            st.latex(step.expression)
+                    else:
+                        st.caption("No alternate method available for this target.")
+
     # ---- alternative scenarios
     if st.session_state["scenarios"]:
         st.markdown("### Where else this applies")
@@ -712,6 +729,57 @@ if model:
                     st.code(s.get("raw", ""))
             else:
                 st.markdown(f"- **{s.get('scenario', '')}**  \n  _{s.get('mapping', '')}_")
+
+    # ---- grade my work: compare a student's own attempted steps
+    # against the verified derivation (formula check, arithmetic check,
+    # final-answer check -- see grading.py for why this is a diagnosis,
+    # not a literal line-by-line diff)
+    algebraic_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
+    if algebraic_targets:
+        with st.expander("📝 Grade my work"):
+            grade_target = st.selectbox("Which target are you solving for?", algebraic_targets,
+                                          key="grade_target")
+            student_work = st.text_area(
+                "Paste your work, one step per line",
+                placeholder="a = (v_f - v_i) / t\na = (20 - 8) / 6\na = 2.0",
+                height=120, key="grade_work_text",
+            )
+            if st.button("Grade it", key="grade_button") and student_work.strip():
+                correct_val = report.sympy_numeric_answers.get(grade_target)
+                result = grade_work(model, grade_target, student_work.splitlines(), correct_val)
+                if result.error:
+                    st.error(result.error)
+                else:
+                    (st.success if result.final_answer_ok else
+                     st.warning if result.final_answer_ok is None else st.error)(result.summary)
+                    if result.formula_ok is not None:
+                        st.caption(f"Formula check: {result.formula_detail}")
+                    for i, lr in enumerate(result.line_results, start=1):
+                        icon = "✅" if lr.arithmetic_ok else "❌" if lr.arithmetic_ok is False else "➖"
+                        st.write(f"{icon} Line {i}: `{lr.raw}` -- {lr.detail}")
+
+    # ---- worksheet generator: reverse generation -- new problem TEXT
+    # sharing this problem's own verified equation structure, fed back
+    # through the SAME extract/verify pipeline used for any problem
+    # rather than trusting the generating LLM's own numbers
+    with st.expander("📄 Generate worksheet variants"):
+        wcols = st.columns([2, 1, 1])
+        with wcols[0]:
+            w_count = st.slider("How many?", 1, 5, 3, key="worksheet_count")
+        with wcols[1]:
+            w_difficulty = st.selectbox("Difficulty", ["similar", "easier", "harder"], key="worksheet_difficulty")
+        if st.button("Generate", key="worksheet_button"):
+            with st.spinner("Generating worksheet problems..."):
+                new_problems = generate_worksheet_problems(client, model, w_count, w_difficulty)
+            if not new_problems:
+                st.warning("Couldn't generate worksheet problems -- try again.")
+            else:
+                st.session_state["worksheet_problems"] = new_problems
+        for i, p in enumerate(st.session_state.get("worksheet_problems", []), start=1):
+            st.markdown(f"**{i}.** {p}")
+        if st.session_state.get("worksheet_problems"):
+            st.caption("Copy any of these into the main text input above to solve and verify it "
+                        "through the same pipeline as any other problem.")
 
     # ---- ODE solution: plot + evaluate-at-a-point
     ode_solutions = solve_ode(model)

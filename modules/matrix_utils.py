@@ -94,16 +94,22 @@ def _is_sequentially_solvable(exprs: list[sp.Expr], symbols: list[str]) -> bool:
 
 
 def build_linear_system(equations: list[Equation], unknown_symbols: list[str],
-                         knowns: dict | None = None) -> tuple[sp.Matrix, sp.Matrix, list[str]] | None:
+                         knowns: dict | None = None, force: bool = False) -> tuple[sp.Matrix, sp.Matrix, list[str]] | None:
     """Builds A, b for A x = b from the given "equation"-kind relations,
     restricted to whichever of unknown_symbols actually appear in them.
     `knowns` (a {Symbol: value} dict, e.g. from verifier._known_substitutions)
     is substituted first so already-known variables don't show up as
     spurious matrix columns. Returns None if the result wouldn't be a
     genuine system (fewer than 2 equations, fewer than 2 shared unknowns,
-    the relations aren't linear in those unknowns, OR the system is
-    sequentially solvable by plain substitution -- see
-    _is_sequentially_solvable for why that last case doesn't count)."""
+    or the relations aren't linear in those unknowns).
+
+    By default ALSO returns None when the system is sequentially
+    solvable by plain substitution (see _is_sequentially_solvable) --
+    the matrix view doesn't earn its keep there. Pass force=True to skip
+    that check and get the matrix representation anyway, which is what
+    solver.py's "alternate method" (Cramer's rule) uses: showing a
+    second way to solve something, on request, is a different situation
+    than deciding what the DEFAULT view should be."""
     knowns = knowns or {}
     eqs = [e for e in equations if e.kind == "equation" and e.sympy_eq is not None]
     if len(eqs) < 2:
@@ -122,7 +128,7 @@ def build_linear_system(equations: list[Equation], unknown_symbols: list[str],
     if not _is_linear(exprs, sym_objs):
         return None
 
-    if _is_sequentially_solvable(exprs, syms):
+    if not force and _is_sequentially_solvable(exprs, syms):
         return None
 
     try:
@@ -187,13 +193,14 @@ def analyze_linear_system(A: sp.Matrix, b: sp.Matrix, symbols: list[str]) -> Mat
     )
 
 
-def linear_system_view(model: ProblemModel, knowns: dict | None = None) -> MatrixSystemResult | None:
+def linear_system_view(model: ProblemModel, knowns: dict | None = None, force: bool = False) -> MatrixSystemResult | None:
     """Top-level entry point: given a whole ProblemModel, find the
     equation-kind unknowns actually being solved for (or, absent an
     explicit solve_for restricted to equation-kind targets, every unknown
     equation-kind symbol) and build+analyze the matrix system. Returns
     None if the model doesn't contain a genuine (>=2 eq, >=2 unknown)
-    linear system."""
+    linear system. `force` passes through to build_linear_system -- see
+    its docstring."""
     unknown_symbols = [v.symbol for v in model.variables
                         if v.known_value is None and not v.is_function and not v.is_vector]
     # also fold in solve_for targets that are algebraic but weren't
@@ -204,7 +211,7 @@ def linear_system_view(model: ProblemModel, knowns: dict | None = None) -> Matri
     if len(unknown_symbols) < 2:
         return None
 
-    built = build_linear_system(model.equations, unknown_symbols, knowns)
+    built = build_linear_system(model.equations, unknown_symbols, knowns, force=force)
     if built is None:
         return None
     A, b, syms = built

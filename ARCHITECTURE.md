@@ -128,6 +128,12 @@ eqsolver/
     ├── unit_conversion.py           # "also equals..." -- offers a numeric answer in common
     │                              #   alternate units for the same dimension, built on
     │                              #   units_checker.py's existing parse/dimension machinery
+    ├── grading.py                    # "grade my work" -- formula/arithmetic/final-answer checks
+    │                              #   on a student's own attempted steps, reusing
+    │                              #   equivalence.py's tested logic rather than diffing steps
+    ├── worksheet.py                  # reverse generation -- new problem TEXT (not answers)
+    │                              #   sharing a solved problem's verified equation structure,
+    │                              #   meant to be re-solved through the normal pipeline
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

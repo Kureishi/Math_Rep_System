@@ -17,11 +17,12 @@ class FakeClient:
     calls without any special-casing from the caller."""
 
     def __init__(self, payload_json: str = "{}", final_answers: dict[str, float] | None = None,
-                 narration: str | None = None, scenarios: str | None = None):
+                 narration: str | None = None, scenarios: str | None = None, worksheet: str | None = None):
         self.payload_json = payload_json
         self.final_answers = final_answers or {}
         self.narration = narration or '["step explanation"]'
         self.scenarios = scenarios or '[{"scenario": "test scenario", "mapping": "x -> y"}]'
+        self.worksheet = worksheet or '["generated worksheet problem text"]'
         self.calls: list[tuple[str, str]] = []  # (system, user) log, for call-count assertions
 
     def chat(self, system: str, user: str, temperature: float = 0.0,
@@ -34,6 +35,8 @@ class FakeClient:
             return "\n".join(f"FINAL_NUMERIC_ANSWER[{k}]: {v}" for k, v in self.final_answers.items())
         if "explain math steps" in system.lower():
             return self.narration
+        if "worksheet" in system.lower():
+            return self.worksheet
         if "creative but mathematically" in system.lower():
             return self.scenarios
         return self.payload_json
