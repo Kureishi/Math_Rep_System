@@ -134,6 +134,12 @@ eqsolver/
     ├── worksheet.py                  # reverse generation -- new problem TEXT (not answers)
     │                              #   sharing a solved problem's verified equation structure,
     │                              #   meant to be re-solved through the normal pipeline
+    ├── batch_solver.py               # worksheet/batch mode -- solves a whole pasted problem
+    │                              #   set in one pass, mirroring app.py's extract/verify/retry
+    │                              #   pipeline, one failure per problem rather than all-or-nothing
+    ├── similarity.py                 # structural "find similar past problems" -- canonicalizes
+    │                              #   equations (symbol names anonymized, structure/coefficients
+    │                              #   kept) and compares by Jaccard similarity of equation shapes
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

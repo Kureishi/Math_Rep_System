@@ -455,3 +455,105 @@ def build_pdf_bytes(problem_text: str, model: ProblemModel, report: Verification
                 pdf.multi_cell(0, 5, _safe(f"  {s['mapping']}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     return bytes(pdf.output())
+
+
+def build_batch_markdown(results: list) -> str:
+    """Combines a whole batch's worth of BatchItemResult (see
+    batch_solver.py) into one Markdown document: a summary table up
+    front, then each problem's own build_markdown() output verbatim
+    under its own numbered heading. Problems that errored out entirely
+    (no model/report at all) get a short "couldn't be solved" note
+    instead of a blank section, rather than being silently omitted."""
+    from modules.batch_solver import batch_summary  # local import: avoids a module-load cycle
+                                                        # (batch_solver imports verifier/solver,
+                                                        # which this module also imports)
+
+    L = ["# Math Representation System -- Batch Report",
+         f"*Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}*", ""]
+    summary = batch_summary(results)
+    L.append(f"**{summary['solved']}/{summary['total']} solved** "
+              f"({summary['needed_retry']} needed a retry, {summary['failed']} failed)")
+    L.append("")
+    L.append("| # | Problem | Status |")
+    L.append("|---|---|---|")
+    for r in results:
+        preview = r.problem_text.strip().replace("\n", " ")[:70]
+        if r.error:
+            status = f"❌ Error: {r.error[:60]}"
+        elif r.report and r.report.passed:
+            status = "✅ Solved" + (f" ({r.retries} retr{'y' if r.retries==1 else 'ies'})" if r.retries else "")
+        else:
+            status = "⚠️ Verification failed"
+        L.append(f"| {r.index + 1} | {preview}{'...' if len(r.problem_text.strip()) > 70 else ''} | {status} |")
+    L.append("")
+
+    for r in results:
+        L.append("---")
+        L.append("")
+        L.append(f"# Problem {r.index + 1} of {len(results)}")
+        L.append("")
+        if r.error or r.model is None or r.report is None:
+            L.append(f"**Could not be solved.** {r.error or ''}")
+            L.append("")
+            L.append("Original text:")
+            L.append("")
+            L.append(r.problem_text.strip())
+            L.append("")
+            continue
+        # strip the per-problem title line (build_markdown's own "#
+        # Math Representation System" header) so each problem doesn't
+        # repeat the document title inside the batch report
+        single_md = build_markdown(r.problem_text, r.model, r.report, r.steps, [])
+        body = "\n".join(single_md.splitlines()[2:])  # drop title + timestamp lines
+        L.append(body)
+
+    return "\n".join(L)
+
+
+def build_batch_pdf_bytes(results: list) -> bytes:
+    """Merges each problem's own build_pdf_bytes() output (each already
+    a complete, valid single-problem PDF) into one combined document via
+    pypdf, with a one-page summary cover prepended. Byte-concatenating
+    separate PDFs would produce a corrupt file -- a real merge (appending
+    parsed pages) is required, hence the pypdf dependency."""
+    from pypdf import PdfWriter, PdfReader
+    from modules.batch_solver import batch_summary
+
+    summary = batch_summary(results)
+    cover = FPDF()
+    cover.set_auto_page_break(auto=True, margin=15)
+    cover.add_page()
+    cover.set_font("Helvetica", "B", 16)
+    cover.multi_cell(0, 10, "Math Representation System -- Batch Report",
+                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    cover.set_font("Helvetica", "", 10)
+    cover.multi_cell(0, 6, _safe(f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}"),
+                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    cover.ln(4)
+    cover.set_font("Helvetica", "B", 12)
+    cover.multi_cell(0, 6, _safe(f"{summary['solved']}/{summary['total']} solved "
+                                   f"({summary['needed_retry']} needed a retry, "
+                                   f"{summary['failed']} failed)"),
+                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    cover.ln(2)
+    cover.set_font("Helvetica", "", 10)
+    for r in results:
+        preview = r.problem_text.strip().replace("\n", " ")[:80]
+        status = ("Error" if r.error else "Solved" if (r.report and r.report.passed) else "Verification failed")
+        cover.multi_cell(0, 6, _safe(f"{r.index + 1}. [{status}] {preview}"),
+                           new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    writer = PdfWriter()
+    writer.append(PdfReader(io.BytesIO(bytes(cover.output()))))
+    for r in results:
+        if r.error or r.model is None or r.report is None:
+            continue
+        try:
+            single_pdf = build_pdf_bytes(r.problem_text, r.model, r.report, r.steps, [])
+            writer.append(PdfReader(io.BytesIO(single_pdf)))
+        except Exception:  # noqa: BLE001
+            continue  # one bad problem's PDF shouldn't sink the whole batch export
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()

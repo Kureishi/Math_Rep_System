@@ -27,6 +27,7 @@ from modules.unit_conversion import sweep_conversions
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
 from modules.grading import grade_work
 from modules.worksheet import generate_worksheet_problems
+from modules.batch_solver import solve_batch, batch_summary, split_batch_text
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
 from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot
@@ -35,7 +36,7 @@ from modules.curve_fitting import fit_curve, best_fit, parse_xy_csv, BUILTIN_FAM
 from modules.equivalence import check_equivalence
 from modules.workspace import Workspace
 from modules import history
-from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot
+from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot, build_batch_markdown, build_batch_pdf_bytes
 
 st.set_page_config(page_title="Math Representation System", layout="wide")
 
@@ -44,7 +45,8 @@ client = LMStudioClient()
 ws = Workspace(st.session_state)
 for key, default in [("problem_text", ""), ("model", None), ("report", None),
                       ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
-                      ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", [])]:
+                      ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
+                      ("batch_results", None), ("last_saved_history_id", None)]:
     st.session_state.setdefault(key, default)
 
 
@@ -201,6 +203,81 @@ def render_equivalence_tab():
         st.latex(r"\text{difference (simplified)} = " + sp.latex(result.difference_simplified))
 
 
+def render_batch_solver_tab():
+    """Worksheet/batch mode: solve a whole problem set in one pass --
+    the kind of thing a local tool with file access can do naturally
+    that a per-query web calculator can't. See batch_solver.py."""
+    st.subheader("📚 Batch solver")
+    st.caption("Solve a whole problem set at once and get one combined report.")
+
+    batch_text = st.text_area(
+        "Paste multiple problems -- separate with a blank line, or a line containing just ---",
+        height=200,
+        placeholder="A car accelerates from 8 m/s to 20 m/s over 6 seconds. Find acceleration.\n\n"
+                     "Two numbers x and y satisfy x + y = 12 and 3x - y = 8. Find both numbers.",
+        key="batch_text_input",
+    )
+    narrate = st.checkbox("Include step narration (slower -- one extra LLM call per problem)",
+                            key="batch_narrate")
+
+    if st.button("Solve batch", type="primary", key="batch_solve_button"):
+        problems = split_batch_text(batch_text)
+        if not problems:
+            st.warning("No problems detected -- separate them with a blank line or a '---' line.")
+            return
+        progress = st.progress(0.0, text=f"Solving 0/{len(problems)}...")
+
+        def _update(done, total):
+            progress.progress(done / total, text=f"Solving {done}/{total}...")
+
+        results = solve_batch(client, problems, narrate=narrate, progress_callback=_update)
+        st.session_state["batch_results"] = results
+        progress.empty()
+
+    results = st.session_state.get("batch_results")
+    if not results:
+        return
+
+    summary = batch_summary(results)
+    st.success(f"{summary['solved']}/{summary['total']} solved "
+                f"({summary['needed_retry']} needed a retry, {summary['failed']} failed)")
+
+    md = build_batch_markdown(results)
+    dl_cols = st.columns(2)
+    with dl_cols[0]:
+        st.download_button("⬇️ Download combined Markdown report", data=md,
+                             file_name="batch_report.md", mime="text/markdown")
+    with dl_cols[1]:
+        if st.button("Generate combined PDF report", key="batch_pdf_button"):
+            with st.spinner("Building combined PDF..."):
+                pdf_bytes = build_batch_pdf_bytes(results)
+            st.download_button("⬇️ Download combined PDF report", data=pdf_bytes,
+                                 file_name="batch_report.pdf", mime="application/pdf",
+                                 key="batch_pdf_download")
+
+    for r in results:
+        preview = r.problem_text.strip().splitlines()[0][:80]
+        if r.error:
+            icon = "❌"
+        elif r.report and r.report.passed:
+            icon = "✅"
+        else:
+            icon = "⚠️"
+        with st.expander(f"{icon} Problem {r.index + 1}: {preview}"):
+            if r.error:
+                st.error(r.error)
+                continue
+            if r.report is None:
+                st.error("Could not be solved.")
+                continue
+            cr = r.report.confidence_report()
+            st.write(f"Confidence: {cr.score:.0%} ({cr.label})")
+            if r.retries:
+                st.caption(f"Needed {r.retries} verification retr{'y' if r.retries==1 else 'ies'}.")
+            for target, val in r.report.sympy_numeric_answers.items():
+                st.write(f"**{target}** = {val:.6g}")
+
+
 with st.sidebar:
     st.header("LM Studio")
     ok, msg = client.is_available()
@@ -337,7 +414,8 @@ st.caption("Text or image → derived equations → self-verified solution → a
 # gated with an early st.stop() rather than wrapping the (large,
 # deeply-indented) word-problem pipeline below in its own tab block, so
 # adding them doesn't require touching that pipeline's indentation at all.
-mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence"],
+mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
+                          "📚 Batch solver"],
                   horizontal=True, label_visibility="collapsed")
 
 if mode == "📈 Curve fitting":
@@ -345,6 +423,9 @@ if mode == "📈 Curve fitting":
     st.stop()
 elif mode == "🔁 Check equivalence":
     render_equivalence_tab()
+    st.stop()
+elif mode == "📚 Batch solver":
+    render_batch_solver_tab()
     st.stop()
 
 # ---------------------------------------------------------------- input
@@ -414,7 +495,8 @@ if solve_clicked and problem_text.strip():
 
         st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios,
                                  pdf_bytes=None, plot_snapshots={})
-        history.save(problem_text, model, report, steps, scenarios)
+        saved_id = history.save(problem_text, model, report, steps, scenarios)
+        st.session_state["last_saved_history_id"] = saved_id
 
     except LLMOutputError as e:
         pipeline_failed = True
@@ -501,6 +583,17 @@ if model:
                     st.write(f"**{note.equation}** requires: {descs}")
 
     st.subheader(f"Domain: {model.problem_domain}")
+
+    # ---- find similar past problems: structural similarity (equation
+    # shape, not problem-text wording) against everything already saved
+    # to local history -- see similarity.py
+    similar = history.find_similar(model, exclude_id=st.session_state.get("last_saved_history_id"))
+    if similar:
+        with st.expander(f"🔎 {len(similar)} similar past problem(s) found"):
+            for s in similar:
+                st.write(f"**{s['similarity']:.0%} match** -- {s['domain'] or 'unlabeled domain'} "
+                          f"({s['timestamp'][:10]}): {s['problem_text'][:100]}"
+                          f"{'...' if len(s['problem_text']) > 100 else ''}")
 
     # ---- equations + derivations
     st.markdown("### Derived equations")

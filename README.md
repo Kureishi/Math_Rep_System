@@ -357,6 +357,44 @@ See `ARCHITECTURE.md` for the full design. In short:
     request" is a different question from "what should the default
     view be," so it gets its own bypass rather than fighting the
     heuristic.
+23. **Worksheet/batch mode** (`modules/batch_solver.py`, "📚 Batch
+    solver") -- solve a whole problem set (pasted, separated by a blank
+    line or a `---` line) in one pass instead of running each problem
+    through the app individually and reassembling the results by hand.
+    Mirrors (rather than imports) the exact extract -> verify -> retry
+    -> compute_steps pipeline the single-problem flow uses, since that
+    flow is inline Streamlit script code, not an importable function --
+    mirroring it keeps batch mode from risking any change to the
+    already-working single-problem path. Narration/scenario generation
+    are off by default (each is an extra LLM round trip per problem,
+    and neither changes whether the math is right) but toggleable. One
+    bad problem in a batch of 20 doesn't take the other 19 down with it
+    -- every failure mode is caught per-problem. Produces a combined
+    Markdown report or a combined PDF (merged via `pypdf`, a new
+    dependency -- byte-concatenating separately-generated PDFs produces
+    a corrupt file; a real page-level merge is required).
+24. **"Find similar past problems"** (`modules/similarity.py` +
+    `history.find_similar()`) -- structural similarity based on
+    equation SHAPE, not problem-text wording: `a = (v_f-v_i)/t` and
+    `r = (p-q)/s` are recognized as the same underlying formula (used
+    with different variable names/domains) via `canonicalize_equation()`
+    replacing every plain `Symbol` with an anonymous placeholder while
+    leaving numeric coefficients and operator structure untouched, then
+    comparing problems by the Jaccard similarity of their canonicalized
+    equation-shape sets. A plain text/keyword search wouldn't catch a
+    car-acceleration problem and a chemistry-rate problem sharing the
+    same math; a literal equation-string match wouldn't either
+    (different variable names -> different strings). Every solved
+    problem's shape fingerprint is stored alongside it in SQLite (a new
+    `equation_shapes` column, added via a safe `ALTER TABLE` migration
+    so an existing local `history.db` from before this feature existed
+    doesn't break), and a "similar past problems" panel surfaces matches
+    for whatever's currently being solved. Scoped to plain-Symbol
+    equation/ode/recurrence relations -- ODE/recurrence FUNCTION names
+    (the "T" in `T(t)`) aren't themselves canonicalized, only symbols
+    appearing as plain `Symbol` nodes are, so two ODEs with the same
+    structure but different function names won't match quite as
+    strongly. Documented as a scope limitation, not a silent gap.
 
 ## Extending it
 

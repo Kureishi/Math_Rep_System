@@ -198,3 +198,50 @@ def test_pdf_includes_results_in_other_units(kinematics_json, fake_client_factor
     steps = compute_steps(model)
     pdf_bytes = build_pdf_bytes("x", model, report, steps, [])
     assert pdf_bytes[:5] == b"%PDF-"
+
+
+def test_build_batch_markdown_includes_summary_and_all_problems(kinematics_json, fake_client_factory):
+    from modules.batch_solver import solve_batch
+    from modules.exporter import build_batch_markdown
+
+    client = fake_client_factory(payload_json=kinematics_json, final_answers={"a": 2.0})
+    results = solve_batch(client, ["problem one", "problem two"])
+    md = build_batch_markdown(results)
+    assert "Batch Report" in md
+    assert "2/2 solved" in md
+    assert "Problem 1 of 2" in md
+    assert "Problem 2 of 2" in md
+
+
+def test_build_batch_markdown_handles_errored_problem_gracefully():
+    from modules.batch_solver import BatchItemResult
+    from modules.exporter import build_batch_markdown
+
+    results = [BatchItemResult(index=0, problem_text="a broken problem", error="something failed")]
+    md = build_batch_markdown(results)
+    assert "Could not be solved" in md
+    assert "something failed" in md
+    assert "0/1 solved" in md
+
+
+def test_build_batch_pdf_bytes_produces_valid_multipage_pdf(kinematics_json, fake_client_factory):
+    from modules.batch_solver import solve_batch
+    from modules.exporter import build_batch_pdf_bytes
+    from pypdf import PdfReader
+    import io
+
+    client = fake_client_factory(payload_json=kinematics_json, final_answers={"a": 2.0})
+    results = solve_batch(client, ["problem one", "problem two"])
+    pdf_bytes = build_batch_pdf_bytes(results)
+    assert pdf_bytes[:5] == b"%PDF-"
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    assert len(reader.pages) >= 3  # 1 cover + at least 1 page per problem
+
+
+def test_build_batch_pdf_bytes_skips_errored_problems_without_crashing():
+    from modules.batch_solver import BatchItemResult
+    from modules.exporter import build_batch_pdf_bytes
+
+    results = [BatchItemResult(index=0, problem_text="a broken problem", error="boom")]
+    pdf_bytes = build_batch_pdf_bytes(results)
+    assert pdf_bytes[:5] == b"%PDF-"  # still a valid PDF, just cover-page-only
