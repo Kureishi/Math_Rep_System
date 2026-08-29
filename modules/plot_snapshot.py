@@ -242,3 +242,59 @@ def snapshot_fit_plot(xs: list[float], ys: list[float], fit_expr, x_label: str =
     ax.grid(alpha=0.3)
     ax.legend()
     return _finish(fig)
+
+
+def snapshot_dependency_graph(nodes, edges) -> bytes:
+    """Static counterpart to plotter.build_dependency_graph_plot()."""
+    colors = {"known": "tab:green", "unknown": "tab:red", "equation": "tab:blue"}
+    by_id = {n.id: n for n in nodes}
+    fig, ax = plt.subplots(figsize=(6, max(3, 0.8 * max((n.y for n in nodes), default=0) + 2)))
+    for edge in edges:
+        src, dst = by_id[edge.source], by_id[edge.target]
+        ax.plot([src.x, dst.x], [src.y, dst.y], color="0.7", linewidth=1.2, zorder=1)
+    for kind, color in colors.items():
+        kind_nodes = [n for n in nodes if n.kind == kind]
+        if not kind_nodes:
+            continue
+        ax.scatter([n.x for n in kind_nodes], [n.y for n in kind_nodes],
+                    s=900, color=color, zorder=2, label=kind.capitalize())
+        for n in kind_nodes:
+            ax.annotate(n.label, (n.x, n.y), ha="center", va="center", color="white",
+                         fontsize=9, zorder=3)
+    ax.invert_yaxis()
+    ax.axis("off")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=3, frameon=False)
+    return _finish(fig)
+
+
+def snapshot_tornado_chart(entries) -> bytes:
+    """Static tornado chart: horizontal bars showing the target's swing
+    across each input's swept range, largest at top. `entries` is a
+    list of sensitivity.TornadoEntry."""
+    fig, ax = plt.subplots(figsize=(7, max(2.5, 0.5 * len(entries) + 1)))
+    labels = [e.symbol for e in entries]
+    lows = [min(e.low_target, e.high_target) for e in entries]
+    highs = [max(e.low_target, e.high_target) for e in entries]
+    y_pos = list(range(len(entries)))[::-1]
+    for y, lo, hi in zip(y_pos, lows, highs):
+        ax.barh(y, hi - lo, left=lo, height=0.6, color="C0", alpha=0.85)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Target value across each input's swept range")
+    ax.grid(alpha=0.3, axis="x")
+    return _finish(fig)
+
+
+def snapshot_sweep_chart(sweep_result) -> bytes:
+    """Static counterpart of a single-input sweep line: target value vs
+    the swept input's value, with the nominal point marked."""
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    ax.plot(sweep_result.values, sweep_result.target_values, color="C0")
+    if sweep_result.nominal_target is not None:
+        ax.scatter([sweep_result.nominal_input], [sweep_result.nominal_target],
+                    color="C1", zorder=3, label="nominal", s=60)
+        ax.legend()
+    ax.set_xlabel(sweep_result.symbol)
+    ax.set_ylabel("target value")
+    ax.grid(alpha=0.3)
+    return _finish(fig)

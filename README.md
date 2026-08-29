@@ -395,6 +395,58 @@ See `ARCHITECTURE.md` for the full design. In short:
     appearing as plain `Symbol` nodes are, so two ODEs with the same
     structure but different function names won't match quite as
     strongly. Documented as a scope limitation, not a silent gap.
+25. **Sensitivity / what-if analysis** (`modules/sensitivity.py`) --
+    reuses `uncertainty.py`'s trick of re-solving the un-substituted
+    system symbolically to get the target as a formula in the knowns,
+    then sweeps ONE input across a range (default ±20%, holding every
+    other input fixed) to see how the answer moves.
+    `tornado_analysis()` ranks every input by how much it swings the
+    answer across its own range -- the classic "which input matters
+    most" tornado-chart view -- and a per-input sweep chart shows the
+    full curve, not just the two endpoints. Distinct from `uncertainty.py`'s
+    error propagation: that asks "how much does the answer move given
+    each input's STATED measurement error"; this asks "if I could
+    deliberately change this input, how much would the answer move,"
+    independent of whether any input carries a stated uncertainty at
+    all. Scoped to algebraic targets, same as `uncertainty.py`.
+26. **Algebra-rule tagging** (`modules/algebra_rules.py`) -- names which
+    algebraic TECHNIQUE was needed to isolate a target (linear,
+    quadratic, root, reciprocal, an inverse function, or "target on both
+    sides") as a "Technique" solve step. `sp.solve()` doesn't expose an
+    internal trace of the moves it makes, so rather than fabricate a
+    step sequence it never actually took, this does a structural
+    classification of the equation's shape instead -- honest about
+    being a classification, not a derivation, while still naming the
+    technique the way a textbook section heading would.
+27. **PDF/document batch import** (`extract_text_from_pdf()` +
+    numbered-list detection in `split_batch_text()`, both in
+    `batch_solver.py`) -- upload a PDF worksheet instead of retyping
+    every problem; text is pulled out via `pypdf` (already a
+    dependency -- no OCR, so a scanned/image-only PDF with no text
+    layer comes back empty rather than raising). Splitting now tries a
+    numbered-list pattern first ("1.", "2)", "Problem 3:") before
+    falling back to the `---`/blank-line delimiters, since PDF-extracted
+    text often loses blank-line spacing between problems even when the
+    original document had it, and worksheets are conventionally
+    numbered anyway. Verified the pattern doesn't false-positive on a
+    problem that happens to start with a decimal number ("3.5 kg of
+    ice...").
+28. **Dependency graph visualization** (`modules/dependency_graph.py`)
+    -- a diagram of which known/unknown variables feed into which
+    equations, useful once a problem has enough equations that it's not
+    obvious at a glance which pieces depend on which (a matrix system, a
+    coupled ODE pair, a chain of substitutions). Fixed three-column
+    layout (known inputs -> equations -> unknowns) rather than a
+    generic force-directed graph, since that's literally the
+    information flow the solving pipeline follows, and it avoids a
+    graph-layout dependency (e.g. networkx) for graphs that are always
+    small and naturally three-tiered. Uses each equation's LHS shape
+    (`Eq(single_symbol, expr)`) to distinguish a variable an equation
+    PRODUCES from one it merely DEPENDS ON -- important for a variable
+    used in more than one equation (e.g. an acceleration computed by one
+    equation and then consumed by a displacement formula), so it doesn't
+    misleadingly appear to be "produced" by every equation that
+    references it.
 
 ## Extending it
 

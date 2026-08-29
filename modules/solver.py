@@ -22,6 +22,7 @@ from modules.ode_utils import solve_ode
 from modules.matrix_utils import linear_system_view
 from modules.uncertainty import uncertainty_for_target
 from modules.physical_validity import filter_physically_valid
+from modules.algebra_rules import classify_isolation
 
 NARRATION_PROMPT = """Given this verified sequence of steps solving for {target}, \
 write a brief, clear explanation for each step in plain language (one short sentence per step). \
@@ -130,6 +131,18 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
             # discard reasoning visible than to show no answer at all
 
     if chosen is not None and target in chosen:
+        # tag the isolation step with which algebraic TECHNIQUE it
+        # required (linear/quadratic/root/inverse-function/etc.) --
+        # classified structurally from whichever substituted equation
+        # still contains the target, since sp.solve() doesn't expose an
+        # internal step-by-step trace to read the technique back out of.
+        target_eq = next((e for e in eqs if isinstance(e, sp.Eq) and target in e.free_symbols), None)
+        if target_eq is not None:
+            steps.append(SolutionStep(
+                description="Technique",
+                expression=classify_isolation(target_eq, target),
+            ))
+
         result = sp.simplify(chosen[target])
         steps.append(SolutionStep(description=f"Isolate and simplify to solve for {target_name}",
                                     expression=f"{target_name} = {sp.latex(result)}"))

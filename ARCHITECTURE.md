@@ -140,6 +140,13 @@ eqsolver/
     ├── similarity.py                 # structural "find similar past problems" -- canonicalizes
     │                              #   equations (symbol names anonymized, structure/coefficients
     │                              #   kept) and compares by Jaccard similarity of equation shapes
+    ├── sensitivity.py                # what-if / tornado analysis -- sweeps one known input at a
+    │                              #   time (others fixed) to see which one moves the answer most
+    ├── algebra_rules.py              # structurally classifies WHICH technique (linear/quadratic/
+    │                              #   root/inverse-function/etc.) isolates a target, since
+    │                              #   sp.solve() doesn't expose its own internal step trace
+    ├── dependency_graph.py           # three-column known/equation/unknown diagram of which
+    │                              #   variables feed into which equations
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

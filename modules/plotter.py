@@ -214,3 +214,70 @@ def build_vector_plot(vectors: list[tuple[str, list[float]]]) -> go.Figure:
     else:
         raise ValueError(f"build_vector_plot() only supports 2D or 3D vectors, got {dim}D")
     return fig
+
+
+_DEP_GRAPH_COLORS = {"known": "#2ca02c", "unknown": "#d62728", "equation": "#1f77b4"}
+
+
+def build_dependency_graph_plot(nodes, edges):
+    """Renders a modules.dependency_graph.(nodes, edges) pair as a
+    Plotly figure: three columns (known inputs / equations / unknowns),
+    colored by node kind, with directed edges drawn as plain lines
+    (Plotly has no built-in arrowheads on Scatter lines; the fixed
+    left-to-right column layout makes direction visually obvious
+    without needing them)."""
+    fig = go.Figure()
+    by_id = {n.id: n for n in nodes}
+    for edge in edges:
+        src, dst = by_id[edge.source], by_id[edge.target]
+        fig.add_trace(go.Scatter(x=[src.x, dst.x], y=[src.y, dst.y], mode="lines",
+                                   line=dict(color="rgba(120,120,120,0.5)", width=1.5),
+                                   showlegend=False, hoverinfo="skip"))
+
+    for kind, color in _DEP_GRAPH_COLORS.items():
+        kind_nodes = [n for n in nodes if n.kind == kind]
+        if not kind_nodes:
+            continue
+        fig.add_trace(go.Scatter(
+            x=[n.x for n in kind_nodes], y=[n.y for n in kind_nodes], mode="markers+text",
+            text=[n.label for n in kind_nodes], textposition="middle center",
+            marker=dict(size=36, color=color, line=dict(width=1, color="white")),
+            textfont=dict(color="white", size=11),
+            name={"known": "Known", "unknown": "Unknown", "equation": "Equation"}[kind],
+        ))
+    fig.update_layout(
+        xaxis=dict(visible=False, range=[-0.5, 2.5]),
+        yaxis=dict(visible=False, autorange="reversed"),
+        showlegend=True,
+    )
+    return fig
+
+
+def build_tornado_chart(entries):
+    """Interactive counterpart of plot_snapshot.snapshot_tornado_chart():
+    a horizontal bar per input, largest swing at top."""
+    fig = go.Figure()
+    labels = [e.symbol for e in entries]
+    lows = [min(e.low_target, e.high_target) for e in entries]
+    highs = [max(e.low_target, e.high_target) for e in entries]
+    widths = [h - l for l, h in zip(lows, highs)]
+    fig.add_trace(go.Bar(
+        y=labels, x=widths, base=lows, orientation="h",
+        hovertext=[f"{e.symbol}: {e.low_target:.4g} to {e.high_target:.4g}" for e in entries],
+        hoverinfo="text",
+    ))
+    fig.update_layout(xaxis_title="target value across each input's swept range",
+                        yaxis=dict(autorange="reversed"))
+    return fig
+
+
+def build_sweep_chart(sweep_result):
+    """Interactive counterpart of plot_snapshot.snapshot_sweep_chart()."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=sweep_result.values, y=sweep_result.target_values,
+                               mode="lines", name="swept"))
+    if sweep_result.nominal_target is not None:
+        fig.add_trace(go.Scatter(x=[sweep_result.nominal_input], y=[sweep_result.nominal_target],
+                                   mode="markers", marker=dict(size=10, color="red"), name="nominal"))
+    fig.update_layout(xaxis_title=sweep_result.symbol, yaxis_title="target value")
+    return fig

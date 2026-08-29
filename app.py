@@ -23,15 +23,17 @@ from modules.ode_utils import solve_ode
 from modules.recurrence_utils import solve_recurrence, _independent_variable
 from modules.optimization_utils import solve_optimization
 from modules.matrix_utils import linear_system_view
+from modules.sensitivity import sweep_input, tornado_analysis
+from modules.dependency_graph import build_dependency_graph
 from modules.unit_conversion import sweep_conversions
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
 from modules.grading import grade_work
 from modules.worksheet import generate_worksheet_problems
-from modules.batch_solver import solve_batch, batch_summary, split_batch_text
+from modules.batch_solver import solve_batch, batch_summary, split_batch_text, extract_text_from_pdf
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
-from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot
-from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot, snapshot_fit_plot
+from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot, build_tornado_chart, build_sweep_chart, build_dependency_graph_plot
+from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot, snapshot_fit_plot, snapshot_tornado_chart, snapshot_sweep_chart, snapshot_dependency_graph
 from modules.curve_fitting import fit_curve, best_fit, parse_xy_csv, BUILTIN_FAMILIES
 from modules.equivalence import check_equivalence
 from modules.workspace import Workspace
@@ -210,8 +212,18 @@ def render_batch_solver_tab():
     st.subheader("📚 Batch solver")
     st.caption("Solve a whole problem set at once and get one combined report.")
 
+    pdf_upload = st.file_uploader("...or upload a PDF worksheet (numbered problems auto-detected)",
+                                    type=["pdf"], key="batch_pdf_upload")
+    pdf_extracted_text = ""
+    if pdf_upload is not None:
+        pdf_extracted_text = extract_text_from_pdf(pdf_upload.getvalue())
+        if not pdf_extracted_text:
+            st.warning("Couldn't extract any text from that PDF -- it may be a scanned/image-only "
+                        "worksheet with no embedded text layer (OCR isn't supported here).")
+
     batch_text = st.text_area(
         "Paste multiple problems -- separate with a blank line, or a line containing just ---",
+        value=pdf_extracted_text,
         height=200,
         placeholder="A car accelerates from 8 m/s to 20 m/s over 6 seconds. Find acceleration.\n\n"
                      "Two numbers x and y satisfy x + y = 12 and 3x - y = 8. Find both numbers.",
@@ -667,6 +679,22 @@ if model:
         else:
             st.error(matrix_result.classification)
 
+    # ---- dependency graph: which known/unknown variables feed into
+    # which equations -- most useful once there's more than one equation
+    # to keep straight (see dependency_graph.py)
+    dep_nodes, dep_edges = build_dependency_graph(model)
+    equation_node_count = sum(1 for n in dep_nodes if n.kind == "equation")
+    if equation_node_count >= 2:
+        with st.expander("🕸️ Dependency graph"):
+            fig = build_dependency_graph_plot(dep_nodes, dep_edges)
+            st.plotly_chart(fig, width='stretch')
+            snapshot_button(
+                key="dependency_graph",
+                title="Dependency graph",
+                caption=f"{model.problem_domain} -- variable/equation dependencies",
+                render_fn=lambda: snapshot_dependency_graph(dep_nodes, dep_edges),
+            )
+
     if model.assumptions:
         st.markdown("**Assumptions made:**")
         for a in model.assumptions:
@@ -811,6 +839,42 @@ if model:
                             st.latex(step.expression)
                     else:
                         st.caption("No alternate method available for this target.")
+
+                # ---- sensitivity / what-if analysis: which input
+                # matters most to this target, and how does the answer
+                # move if one input changes on its own -- see sensitivity.py.
+                # Distinct from the uncertainty-propagation step above:
+                # this asks "if I deliberately changed this input" not
+                # "given its stated measurement error"
+                with st.expander(f"🎚️ Sensitivity analysis for {target_name}"):
+                    pct_range = st.slider("Sweep range (± %)", 5, 50, 20, key=f"sens_pct_{target_name}") / 100
+                    entries = tornado_analysis(model, target_name, _known_substitutions(model), pct_range)
+                    if not entries:
+                        st.caption("No swept inputs available for this target.")
+                    else:
+                        tornado_fig = build_tornado_chart(entries)
+                        st.plotly_chart(tornado_fig, width='stretch', key=f"tornado_{target_name}")
+                        snapshot_button(
+                            key=f"tornado_{target_name}",
+                            title=f"Sensitivity (tornado chart) for {target_name}",
+                            caption=f"±{pct_range:.0%} sweep of each input",
+                            render_fn=lambda e=entries: snapshot_tornado_chart(e),
+                        )
+                        sweep_symbol = st.selectbox(
+                            "Sweep a single input in detail", [e.symbol for e in entries],
+                            key=f"sweep_pick_{target_name}",
+                        )
+                        sweep_result = sweep_input(model, target_name, sweep_symbol,
+                                                     _known_substitutions(model), pct_range)
+                        if sweep_result:
+                            sweep_fig = build_sweep_chart(sweep_result)
+                            st.plotly_chart(sweep_fig, width='stretch', key=f"sweep_{target_name}")
+                            snapshot_button(
+                                key=f"sweep_{target_name}_{sweep_symbol}",
+                                title=f"{target_name} vs {sweep_symbol}",
+                                caption=f"±{pct_range:.0%} sweep of {sweep_symbol}",
+                                render_fn=lambda sr=sweep_result: snapshot_sweep_chart(sr),
+                            )
 
     # ---- alternative scenarios
     if st.session_state["scenarios"]:

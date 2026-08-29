@@ -17,12 +17,16 @@ problem's math is right), but can be turned on for a smaller batch
 where the extra polish is worth the wait.
 """
 from dataclasses import dataclass, field
+import io
+import re
 
 from config import settings
 from modules.equation_engine import extract_model, ProblemModel
 from modules.llm_client import LMStudioClient, LLMOutputError
 from modules.verifier import VerificationReport, verify
 from modules.solver import SolutionStep, compute_steps, narrate_steps
+
+_NUMBERED_ITEM = re.compile(r"^\s*(?:\d+[.)]|Problem\s+\d+[:.]?)\s+", re.IGNORECASE | re.MULTILINE)
 
 
 @dataclass
@@ -37,14 +41,26 @@ class BatchItemResult:
 
 
 def split_batch_text(raw_text: str) -> list[str]:
-    """Splits pasted batch text into individual problems. A line
-    containing only "---" (optionally with surrounding whitespace) is
-    treated as an explicit delimiter; if none is present, falls back to
-    splitting on blank lines (so problems separated by a plain empty
-    line also work without requiring the "---" convention)."""
+    """Splits pasted/extracted batch text into individual problems.
+    Tried in order (first match wins, since each is a stronger signal
+    than the next): a numbered-list pattern ("1. ...", "2) ...",
+    "Problem 3: ...") -- the most common structure for a worksheet
+    (typed OR extracted from a PDF, where blank-line spacing between
+    problems is often lost in text extraction); an explicit "---"
+    delimiter line; falling back to splitting on blank lines."""
     raw_text = raw_text.strip()
     if not raw_text:
         return []
+
+    numbered_matches = list(_NUMBERED_ITEM.finditer(raw_text))
+    if numbered_matches:
+        parts = []
+        for i, m in enumerate(numbered_matches):
+            start = m.end()
+            end = numbered_matches[i + 1].start() if i + 1 < len(numbered_matches) else len(raw_text)
+            parts.append(raw_text[start:end].strip())
+        return [p for p in parts if p]
+
     if any(line.strip() == "---" for line in raw_text.splitlines()):
         parts = []
         current: list[str] = []
@@ -58,6 +74,19 @@ def split_batch_text(raw_text: str) -> list[str]:
     else:
         parts = [p.strip() for p in raw_text.split("\n\n")]
     return [p for p in parts if p]
+
+
+def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """Pulls all text out of an uploaded PDF worksheet, one page after
+    another. Uses pypdf (already a dependency -- added earlier for
+    merging batch PDF reports), so this doesn't introduce anything new.
+    Returns whatever text pypdf can extract; a scanned/image-only PDF
+    with no embedded text layer will come back empty rather than
+    raising -- there's no OCR step here, only text extraction."""
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    pages_text = [page.extract_text() or "" for page in reader.pages]
+    return "\n".join(pages_text).strip()
 
 
 def solve_one(client: LMStudioClient, index: int, problem_text: str,
