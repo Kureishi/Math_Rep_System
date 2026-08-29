@@ -25,6 +25,9 @@ from modules.optimization_utils import solve_optimization
 from modules.matrix_utils import linear_system_view
 from modules.sensitivity import sweep_input, tornado_analysis
 from modules.dependency_graph import build_dependency_graph
+from modules.proof import build_proof
+from modules.paranoid import run_paranoid_check
+from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
 from modules.grading import grade_work
@@ -48,7 +51,8 @@ ws = Workspace(st.session_state)
 for key, default in [("problem_text", ""), ("model", None), ("report", None),
                       ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
                       ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
-                      ("batch_results", None), ("last_saved_history_id", None)]:
+                      ("batch_results", None), ("last_saved_history_id", None),
+                      ("paranoid_result", None), ("followup_history", [])]:
     st.session_state.setdefault(key, default)
 
 
@@ -203,6 +207,17 @@ def render_equivalence_tab():
     st.write(result.detail)
     if result.difference_simplified is not None:
         st.latex(r"\text{difference (simplified)} = " + sp.latex(result.difference_simplified))
+
+    # ---- symbolic proof mode: for a symbolically-confirmed equivalence,
+    # show the actual sequence of SymPy simplification passes that
+    # reduce the difference to zero, rather than just the final True --
+    # see proof.py
+    proof_steps = build_proof(result)
+    if proof_steps:
+        with st.expander("📐 Show proof"):
+            for name, expr_latex in proof_steps:
+                st.markdown(f"**{name}**")
+                st.latex(expr_latex)
 
 
 def render_batch_solver_tab():
@@ -594,6 +609,31 @@ if model:
                     descs = "; ".join(r.description for r in restrictions_ok)
                     st.write(f"**{note.equation}** requires: {descs}")
 
+    # ---- paranoid mode: re-run extraction through a SECOND,
+    # independently-configured model and compare its equations/answers
+    # against the primary derivation -- off unless a secondary model is
+    # configured in config.py, since it doubles extraction cost.
+    # See paranoid.py.
+    if settings.secondary_reasoning_model:
+        with st.expander(f"🕵️ Paranoid mode: cross-check against {settings.secondary_reasoning_model}"):
+            if st.button("Run cross-check", key="paranoid_button"):
+                with st.spinner(f"Re-solving with {settings.secondary_reasoning_model}..."):
+                    st.session_state["paranoid_result"] = run_paranoid_check(
+                        client, problem_text, model, report.sympy_numeric_answers,
+                    )
+            paranoid_result = st.session_state.get("paranoid_result")
+            if paranoid_result and paranoid_result.ran:
+                if paranoid_result.error:
+                    st.error(f"Secondary model failed: {paranoid_result.error}")
+                else:
+                    st.write(f"Equation structure match: {paranoid_result.equations_match:.0%}")
+                    if paranoid_result.disagreements:
+                        for target, (primary_val, secondary_val) in paranoid_result.disagreements.items():
+                            st.error(f"**{target}** disagreement: primary = {primary_val:.6g}, "
+                                      f"{paranoid_result.secondary_model} = {secondary_val:.6g}")
+                    elif paranoid_result.secondary_answers:
+                        st.success("Both models agree on every shared answer.")
+
     st.subheader(f"Domain: {model.problem_domain}")
 
     # ---- find similar past problems: structural similarity (equation
@@ -875,6 +915,26 @@ if model:
                                 caption=f"±{pct_range:.0%} sweep of {sweep_symbol}",
                                 render_fn=lambda sr=sweep_result: snapshot_sweep_chart(sr),
                             )
+
+    # ---- grounded follow-up Q&A: "what if t doubles?" gets a REAL
+    # recomputed answer (verified via SymPy, not LLM arithmetic); a
+    # conceptual question gets an LLM answer grounded in the problem's
+    # own equations/values -- see followup.py
+    st.markdown("### Ask a follow-up question")
+    followup_question = st.text_input(
+        "e.g. \"what if t doubles?\" or \"why this formula?\"", key="followup_input",
+    )
+    if st.button("Ask", key="followup_button") and followup_question.strip():
+        with st.spinner("Thinking..."):
+            answer = answer_followup(client, model, report, followup_question)
+        st.session_state["followup_history"].append((followup_question, answer))
+    for q, a in reversed(st.session_state["followup_history"]):
+        st.markdown(f"**Q: {q}**")
+        if a.kind == "error":
+            st.error(a.text)
+        else:
+            icon = "🧮" if a.kind == "what_if" else "💬"
+            st.write(f"{icon} {a.text}")
 
     # ---- alternative scenarios
     if st.session_state["scenarios"]:

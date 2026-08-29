@@ -20,6 +20,12 @@ class Settings:
     reasoning_model: str = os.getenv("LM_REASONING_MODEL", "qwen2.5-14b-instruct")
     vision_model: str = os.getenv("LM_VISION_MODEL", "qwen2-vl-7b-instruct")
 
+    # Optional second model for "paranoid mode" multi-model cross-verification
+    # (modules/paranoid.py) -- leave blank (the default) to leave that
+    # feature off; set to another model already loaded in LM Studio to
+    # enable it.
+    secondary_reasoning_model: str = os.getenv("LM_SECONDARY_MODEL", "")
+
     # Verification behavior
     max_verification_retries: int = 2
     numeric_tolerance: float = 1e-6

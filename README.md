@@ -447,6 +447,61 @@ See `ARCHITECTURE.md` for the full design. In short:
     equation and then consumed by a displacement formula), so it doesn't
     misleadingly appear to be "produced" by every equation that
     references it.
+29. **Grounded follow-up Q&A** (`modules/followup.py`) -- ask a question
+    about an already-solved problem via "Ask a follow-up question."
+    Splits "compute something" from "explain something," since this
+    app's whole premise is that LLM arithmetic isn't trustworthy on its
+    own: a numeric "what if" question ("what if t doubles?") is
+    classified via one small LLM call into a STRUCTURED intent (which
+    known symbol, which operation -- multiply/add/set, what operand) --
+    the LLM only extracts intent from natural language, the actual
+    arithmetic (applying that operation, then re-evaluating the
+    verified formula via `uncertainty.solve_symbolic_for_target`, the
+    same machinery `sensitivity.py` uses) is done by SymPy, so a
+    what-if answer is exactly as verified as the original solve. A
+    conceptual question ("why this formula", "what does v_i mean")
+    gets an LLM answer grounded in the problem's actual equations/known
+    values/solved answers via the system prompt, with an explicit
+    instruction to say so rather than invent a fact that isn't given --
+    though the prose explanation itself isn't independently
+    re-verified the way a numeric answer is, an honest limitation of
+    natural-language explanation this module doesn't claim to solve.
+30. **Multi-model cross-verification / "paranoid mode"**
+    (`modules/paranoid.py`) -- the existing independent cross-check in
+    `verifier.py` re-asks an LLM to solve the problem from scratch, but
+    by default with the SAME model as extraction; a model can be wrong
+    in a way that's entirely self-consistent (it misreads the problem
+    the same way whether asked to extract equations or asked to just
+    "give a number"), which single-model verification can't
+    structurally catch. Setting `config.settings.secondary_reasoning_model`
+    to a second loaded model enables a "🕵️ Paranoid mode" panel that
+    re-runs the FULL extraction pipeline through that second model and
+    compares the two derivations two ways: structural equation-shape
+    similarity (reusing `similarity.py`'s canonicalization -- the same
+    trick "find similar past problems" uses, just comparing two live
+    derivations against each other instead of one against history) and
+    numeric-answer agreement within the normal cross-check tolerance.
+    Off by default -- it doubles the extraction cost of a problem, so
+    it's opt-in, not something every solve pays for.
+31. **Symbolic proof mode** (`modules/proof.py`) -- for an equivalence
+    check that comes back symbolically confirmed True, "📐 Show proof"
+    renders the ACTUAL sequence of SymPy simplification passes (expand,
+    combine into a fraction, apply trig identities, combine powers,
+    combine logs, simplify radicals, factor, general simplification)
+    that reduce the difference of the two expressions to zero -- the
+    real transformation SymPy applies at each stage, not a fabricated
+    derivation, just reported incrementally instead of only the final
+    True the way `equivalence.py` does on its own. Required adding a
+    `raw_difference` field to `EquivalenceResult`: the existing
+    `difference_simplified` field is already FULLY reduced by
+    `equivalence.py` itself before `proof.py` ever sees it, which would
+    make every "proof" trivially one step long with nothing to show --
+    caught during development by actually running the proof builder
+    against real identities rather than assuming the design worked.
+    Scoped to symbolically-confirmed equivalences only; there's no
+    proof to walk through for something only confirmed by numeric-
+    sampling evidence (see `equivalence.py`'s own docstring on why
+    that's evidence, not proof) or that isn't equivalent at all.
 
 ## Extending it
 

@@ -147,6 +147,15 @@ eqsolver/
     │                              #   sp.solve() doesn't expose its own internal step trace
     ├── dependency_graph.py           # three-column known/equation/unknown diagram of which
     │                              #   variables feed into which equations
+    ├── followup.py                   # grounded Q&A -- numeric "what if" questions get a REAL
+    │                              #   SymPy recompute (LLM only classifies intent); conceptual
+    │                              #   questions get an LLM answer grounded in the actual equations
+    ├── paranoid.py                   # "paranoid mode" -- re-runs extraction through a SECOND,
+    │                              #   independently-configured model and compares equation
+    │                              #   shape + numeric answers against the primary derivation
+    ├── proof.py                      # symbolic proof mode -- renders the actual sequence of
+    │                              #   SymPy simplification passes that prove an equivalence,
+    │                              #   not just the final True/False
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

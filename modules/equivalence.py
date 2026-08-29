@@ -44,6 +44,10 @@ class EquivalenceResult:
     difference_simplified: sp.Expr | None
     detail: str
     error: str | None = None
+    raw_difference: sp.Expr | None = None  # e1 - e2 BEFORE simplification -- proof.py starts
+                                             # here rather than from difference_simplified, which
+                                             # by this point has already been fully reduced and so
+                                             # has nothing left to show step-by-step
 
 
 def _parse(expr_str: str, extra_symbols: list[str] | None = None) -> sp.Expr:
@@ -99,6 +103,7 @@ def check_equivalence_exprs(e1: sp.Expr, e2: sp.Expr) -> EquivalenceResult:
             True, "symbolic", diff,
             "Equivalent -- the difference simplifies to zero (or SymPy's internal check confirms "
             "equality) for every value of the free symbols.",
+            raw_difference=e1 - e2,
         )
     if verdict is False:
         return EquivalenceResult(

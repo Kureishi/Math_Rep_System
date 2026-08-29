@@ -1,7 +1,7 @@
 import json
 import sympy as sp
 
-from modules.equation_engine import build_model, symbols_and_functions_used, target_kind
+from modules.equation_engine import build_model, symbols_and_functions_used, target_kind, extract_model
 
 
 def test_algebraic_equation_parses(kinematics_json):
@@ -121,3 +121,31 @@ def test_two_target_coupled_system(kinematics_two_target_json):
     model = build_model(json.loads(kinematics_two_target_json))
     assert model.solve_for == ["a", "d"]
     assert all(e.parse_error is None for e in model.equations)
+
+
+def test_extract_model_passes_model_override_to_client():
+    """Regression test: extract_model()'s optional `model` parameter
+    (added for paranoid.py's secondary-model cross-verification) must
+    reach client.chat() as its own `model` kwarg, not get silently
+    dropped."""
+    captured = {}
+
+    class CapturingClient:
+        def chat(self, system, user, temperature=0.0, json_mode=False, model=None):
+            captured["model"] = model
+            return "{}"
+
+    extract_model(CapturingClient(), "a problem", model="secondary-model-name")
+    assert captured["model"] == "secondary-model-name"
+
+
+def test_extract_model_defaults_to_no_override():
+    captured = {}
+
+    class CapturingClient:
+        def chat(self, system, user, temperature=0.0, json_mode=False, model=None):
+            captured["model"] = model
+            return "{}"
+
+    extract_model(CapturingClient(), "a problem")
+    assert captured["model"] is None

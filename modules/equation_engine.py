@@ -396,13 +396,18 @@ def build_model(json_payload: dict) -> ProblemModel:
 
 
 def extract_model(client: LMStudioClient, problem_text: str, retry_reason: str | None = None,
-                   known_context: str | None = None) -> ProblemModel:
+                   known_context: str | None = None, model: str | None = None) -> ProblemModel:
     """One LLM round trip: problem text -> structured symbolic model.
 
     known_context: optional text listing values already available from the
     variable workspace (previously solved results), so the model can treat
     e.g. "using d from the workspace" as a known numeric input rather than
     an undefined reference it has to guess at or ask about.
+
+    model: optional override of which loaded LM Studio model handles this
+    call, instead of settings.reasoning_model -- used by paranoid.py to
+    run the same extraction through a second, independently-configured
+    model for cross-verification.
     """
     system = EXTRACTION_SYSTEM_PROMPT
     if retry_reason:
@@ -418,6 +423,6 @@ def extract_model(client: LMStudioClient, problem_text: str, retry_reason: str |
 
     from config import settings
     raw = client.chat(system=system, user=user,
-                       temperature=settings.temperature_extraction, json_mode=True)
+                       temperature=settings.temperature_extraction, json_mode=True, model=model)
     payload = extract_json(raw)
     return build_model(payload)
