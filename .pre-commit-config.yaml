@@ -1,0 +1,21 @@
+# Optional: complements the GitHub Actions workflow (.github/workflows/tests.yml)
+# with immediate LOCAL feedback before a commit even happens, rather than
+# only finding out a test broke after pushing. Since the suite runs in
+# roughly 10-15 seconds, running it on every commit isn't a meaningful
+# slowdown.
+#
+# Opt in with:
+#   pip install pre-commit
+#   pre-commit install
+#
+# After that, `git commit` runs the test suite first and blocks the
+# commit if anything fails. Skip it for one commit with `git commit --no-verify`.
+repos:
+  - repo: local
+    hooks:
+      - id: pytest
+        name: Run test suite
+        entry: pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true

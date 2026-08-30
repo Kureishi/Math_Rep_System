@@ -623,3 +623,29 @@ dimensional-unit checker (including the "unrecognized unit silently
 mis-parsed" bug caught during development); workspace rename validation;
 and the history save/load/delete round trip. `tests/conftest.py` has the
 sample payloads and fixtures if you want to add more.
+
+### Automated testing on every change
+
+- **CI** (`.github/workflows/tests.yml`): the full suite runs automatically
+  on every push and pull request, on a matrix of **ubuntu-latest AND
+  windows-latest** × Python 3.11/3.12. Windows is included deliberately,
+  not just as a formality -- this app targets Windows as a first-class
+  local-run environment, and at least one module
+  (`modules/timeout_utils.py`) exists specifically because a naive
+  implementation (`signal.alarm`) would silently do nothing there;
+  testing only on Linux would never catch that class of bug for real, it
+  would just look green. The workflow also byte-compiles the whole
+  project (including `app.py` itself, which the pytest suite never
+  imports directly since it's a Streamlit script) as a cheap first check
+  before running the actual suite. Trigger it manually from the Actions
+  tab any time via `workflow_dispatch`.
+- **Optional local pre-commit hook** (`.pre-commit-config.yaml`): runs
+  the same suite before each commit, for immediate feedback rather than
+  finding out something broke only after pushing -- the suite runs in
+  roughly 10-15 seconds, so this isn't a meaningful slowdown. Opt in
+  with:
+  ```bash
+  pip install pre-commit
+  pre-commit install
+  ```
+  Skip it for a single commit with `git commit --no-verify`.

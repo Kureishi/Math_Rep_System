@@ -83,6 +83,10 @@ eqsolver/
 ├── app.py                    # Streamlit UI, orchestrates the pipeline
 ├── config.py                 # LM Studio endpoint/model settings, tunables
 ├── requirements.txt
+├── requirements-dev.txt      # + pytest, pre-commit (dev/test only)
+├── .github/workflows/tests.yml  # CI -- runs the suite on every push/PR,
+│                              #   ubuntu-latest AND windows-latest x Python 3.11/3.12
+├── .pre-commit-config.yaml   # optional local hook: runs the suite before each commit
 ├── README.md                 # setup + run instructions
 ├── ARCHITECTURE.md           # this file
 └── modules/

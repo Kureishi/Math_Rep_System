@@ -1,0 +1,65 @@
+name: Tests
+
+# Runs on every push and pull request (any branch), plus lets you
+# trigger it manually from the Actions tab. Deliberately not restricted
+# to a specific default-branch name (main/master), since that's an easy
+# way for a solo/personal project to end up with CI that silently never
+# runs.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # fail-fast: false so a failure on one OS/version doesn't cancel
+      # the others mid-run -- seeing all the results is more useful than
+      # saving a few minutes of runner time.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+        # Windows is included deliberately, not just Ubuntu: this app
+        # targets Windows as a first-class local-run environment (conda
+        # + PowerShell, per its own setup notes), and at least one
+        # module (timeout_utils.py) exists specifically BECAUSE a
+        # naive implementation (signal.alarm) would silently do nothing
+        # on Windows. Testing only on Linux would never have caught
+        # that class of bug for real -- it would have just looked green.
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Byte-compile the whole project
+        # Cheap, fast check that catches plain syntax errors -- including
+        # in app.py itself, which the pytest suite never imports directly
+        # (it's a Streamlit script, not a module the tests exercise) and
+        # so wouldn't otherwise be covered by this workflow at all.
+        # Written as a single `python -c` invocation rather than shell
+        # globbing/command substitution ($(...)) -- that's bash syntax,
+        # and the windows-latest runner's default shell for `run:` steps
+        # is PowerShell, which doesn't understand it. A pure-Python
+        # one-liner needs no shell-specific syntax at all, so it runs
+        # identically on both.
+        run: python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in ['app.py', 'config.py'] + glob.glob('modules/*.py')]"
+
+      - name: Run the test suite
+        run: pytest -q
