@@ -30,6 +30,7 @@ from modules.equation_engine import ProblemModel, target_kind, symbols_and_funct
 from modules.units_checker import parse_unit, dimension_of, dims_equivalent, UnitParseError, make_dimension_placeholder
 from modules.matrix_utils import linear_system_view
 from modules.domain_utils import domain_restrictions_for_equation, evaluate_restriction
+from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 
 INDEPENDENT_SOLVE_PROMPT = """Solve this problem yourself, from scratch, showing minimal work. \
 The problem asks for these quantities: {targets}. \
@@ -788,17 +789,19 @@ def _solve_sympy(model: ProblemModel) -> dict[str, float]:
         return {}
     targets = [sp.Symbol(t) for t in algebraic_targets]
     try:
-        sol = sp.solve(eqs, targets, dict=True)
-        if not sol:
-            return {}
-        result = {}
-        for t, sym in zip(algebraic_targets, targets):
-            val = sol[0].get(sym)
-            if val is not None and val.is_number:
-                result[t] = float(val)
-        return result
+        sol = run_with_timeout(sp.solve, eqs, targets, dict=True, label="algebraic solve")
+    except ComputationTimeoutError:
+        raise  # let the caller report this specifically, rather than silently returning {}
     except Exception:  # noqa: BLE001
         return {}
+    if not sol:
+        return {}
+    result = {}
+    for t, sym in zip(algebraic_targets, targets):
+        val = sol[0].get(sym)
+        if val is not None and val.is_number:
+            result[t] = float(val)
+    return result
 
 
 def _extract_final_numbers(text: str) -> dict[str, float]:
@@ -826,7 +829,11 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
     _matrix_system_checks(model, report)
     _domain_checks(model, report)
 
-    sympy_answers = _solve_sympy(model)
+    try:
+        sympy_answers = _solve_sympy(model)
+    except ComputationTimeoutError as e:
+        report.add("Symbolic solve", False, str(e))
+        sympy_answers = {}
     report.sympy_numeric_answers = sympy_answers
 
     if sympy_answers:

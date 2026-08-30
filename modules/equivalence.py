@@ -32,6 +32,8 @@ from sympy.parsing.sympy_parser import (
     parse_expr, standard_transformations, implicit_multiplication_application, convert_xor,
 )
 
+from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
+
 _TRANSFORMS = standard_transformations + (implicit_multiplication_application, convert_xor)
 
 _SAMPLE_POINTS = (-3, -1.5, -0.5, 0.5, 1.5, 3, 5, 7)
@@ -91,10 +93,20 @@ def check_equivalence_exprs(e1: sp.Expr, e2: sp.Expr) -> EquivalenceResult:
     derivation) can reuse the exact same tested logic without a
     string-parse-reparse round trip through check_equivalence()'s
     string-based API."""
-    diff = sp.simplify(e1 - e2)
+    raw_diff = e1 - e2
+    try:
+        diff = run_with_timeout(sp.simplify, raw_diff, label="equivalence simplify")
+    except ComputationTimeoutError as e:
+        return EquivalenceResult(None, "undetermined", raw_diff,
+                                   f"Timed out while simplifying the difference: {e}",
+                                   raw_difference=raw_diff)
 
     try:
-        verdict = e1.equals(e2)
+        verdict = run_with_timeout(lambda: e1.equals(e2), label="equivalence .equals() check")
+    except ComputationTimeoutError as e:
+        return EquivalenceResult(None, "undetermined", diff,
+                                   f"Timed out while checking equivalence: {e}",
+                                   raw_difference=raw_diff)
     except Exception:  # noqa: BLE001
         verdict = None
 

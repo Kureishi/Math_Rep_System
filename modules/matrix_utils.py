@@ -28,6 +28,7 @@ from dataclasses import dataclass
 import sympy as sp
 
 from modules.equation_engine import ProblemModel, Equation, target_kind
+from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 
 
 @dataclass
@@ -44,6 +45,13 @@ class MatrixSystemResult:
     unique: bool
     solution: dict[str, sp.Expr] | None
     classification: str                   # human-readable summary
+    computation_notes: list[str] = None   # e.g. "Eigenvalue computation timed out..." --
+                                            # non-None fields above are trustworthy even when
+                                            # this is populated; it only flags what got skipped
+
+    def __post_init__(self):
+        if self.computation_notes is None:
+            self.computation_notes = []
 
 
 def _is_linear(exprs: list[sp.Expr], symbols: list[sp.Symbol]) -> bool:
@@ -151,14 +159,26 @@ def analyze_linear_system(A: sp.Matrix, b: sp.Matrix, symbols: list[str]) -> Mat
 
     consistent = rank_A == rank_aug
     unique = consistent and rank_A == n
+    notes: list[str] = []
 
-    determinant = A.det() if is_square else None
-    eigenvalues = A.eigenvals() if is_square else None
+    determinant = None
+    if is_square:
+        try:
+            determinant = run_with_timeout(lambda: A.det(), label="determinant")
+        except ComputationTimeoutError as e:
+            notes.append(f"Determinant computation timed out: {e}")
+
+    eigenvalues = None
+    if is_square:
+        try:
+            eigenvalues = run_with_timeout(lambda: A.eigenvals(), label="eigenvalues")
+        except ComputationTimeoutError as e:
+            notes.append(f"Eigenvalue computation timed out: {e}")
 
     solution: dict[str, sp.Expr] | None = None
     if consistent:
         try:
-            sol_set = sp.linsolve((A, b), sp.symbols(symbols))
+            sol_set = run_with_timeout(sp.linsolve, (A, b), sp.symbols(symbols), label="linsolve")
             if sol_set:
                 sol_tuple = next(iter(sol_set))
                 if unique:
@@ -170,6 +190,9 @@ def analyze_linear_system(A: sp.Matrix, b: sp.Matrix, symbols: list[str]) -> Mat
                     # single value to report
                     solution = {name: sp.simplify(val) for name, val in zip(symbols, sol_tuple)
                                 if not val.free_symbols}
+        except ComputationTimeoutError as e:
+            notes.append(f"Solving the system timed out: {e}")
+            solution = None
         except Exception:  # noqa: BLE001
             solution = None
 
@@ -190,6 +213,7 @@ def analyze_linear_system(A: sp.Matrix, b: sp.Matrix, symbols: list[str]) -> Mat
         rank_A=rank_A, rank_augmented=rank_aug,
         consistent=consistent, unique=unique,
         solution=solution, classification=classification,
+        computation_notes=notes,
     )
 
 

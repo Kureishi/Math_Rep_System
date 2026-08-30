@@ -24,6 +24,7 @@ not proof) or that isn't equivalent at all.
 import sympy as sp
 
 from modules.equivalence import EquivalenceResult
+from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 
 _STEPS: list[tuple[str, callable]] = [
     ("Expand", sp.expand),
@@ -53,7 +54,12 @@ def build_proof(equivalence_result: EquivalenceResult) -> list[tuple[str, str]] 
     current = diff
     for name, transform in _STEPS:
         try:
-            new_expr = transform(current)
+            new_expr = run_with_timeout(transform, current, label=f"proof step: {name}")
+        except ComputationTimeoutError:
+            # a single pass in the chain ran long -- skip just this
+            # technique and try the next one, rather than losing every
+            # earlier step (or hanging the whole proof) over one slow pass
+            continue
         except Exception:  # noqa: BLE001
             continue
         if new_expr == current:

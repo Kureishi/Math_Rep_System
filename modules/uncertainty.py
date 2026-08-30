@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import sympy as sp
 
 from modules.equation_engine import ProblemModel, target_kind
+from modules.timeout_utils import run_with_timeout
 
 
 @dataclass
@@ -50,9 +51,10 @@ def solve_symbolic_for_target(model: ProblemModel, target_name: str) -> sp.Expr 
     other_targets = [sp.Symbol(t) for t in model.solve_for
                       if t != target_name and target_kind(model, t) == "equation"]
     try:
-        sol = sp.solve(eqs, [target, *other_targets], dict=True)
-    except Exception:  # noqa: BLE001
-        return None
+        sol = run_with_timeout(sp.solve, eqs, [target, *other_targets], dict=True,
+                                 label="uncertainty/sensitivity solve")
+    except Exception:  # noqa: BLE001 -- includes ComputationTimeoutError; this feeds
+        return None    # secondary/bonus features that already treat None as "unavailable"
     if not sol or target not in sol[0]:
         return None
     return sol[0][target]

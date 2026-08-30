@@ -33,6 +33,16 @@ class Settings:
                                           # can differ from the derived answer before
                                           # verification flags a disagreement
 
+    # How long (seconds) a single symbolic computation (sp.solve, sp.dsolve,
+    # sp.rsolve, eigenvalue extraction, equivalence checking, the proof-mode
+    # simplification chain, etc.) is allowed to run before it's abandoned as
+    # timed out -- see modules/timeout_utils.py. Protects the app from
+    # hanging on pathological input rather than a hard resource limit;
+    # raise it for problems you know are legitimately heavy (e.g. large
+    # symbolic matrices or gnarly ODEs), lower it for a snappier UI on
+    # modest hardware.
+    computation_timeout_seconds: float = float(os.getenv("COMPUTATION_TIMEOUT_SECONDS", "10"))
+
     # Generation behavior
     temperature_extraction: float = 0.1   # low temp: we want faithful, reproducible math
     temperature_narration: float = 0.4    # slightly higher for readable explanations

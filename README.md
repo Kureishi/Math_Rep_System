@@ -502,6 +502,40 @@ See `ARCHITECTURE.md` for the full design. In short:
     proof to walk through for something only confirmed by numeric-
     sampling evidence (see `equivalence.py`'s own docstring on why
     that's evidence, not proof) or that isn't equivalent at all.
+32. **Configurable computation timeouts** (`modules/timeout_utils.py`)
+    -- every genuinely SymPy-heavy call in the app (algebraic solve,
+    matrix determinant/eigenvalues/linsolve, ODE `dsolve`, recurrence
+    `rsolve`, optimization critical points, equivalence checking, and
+    each pass of `proof.py`'s simplification chain) runs under a
+    configurable time bound (`config.settings.computation_timeout_seconds`,
+    default 10s -- adjustable live from "⚙️ Advanced settings", no
+    restart needed) instead of being able to hang the session
+    indefinitely on pathological input. Built on
+    `concurrent.futures.ThreadPoolExecutor`, deliberately NOT
+    `signal.alarm`: this app targets Windows as a first-class
+    environment, and `SIGALRM` doesn't exist there -- a signal-based
+    timeout would silently do nothing on the platform it's most meant
+    to protect. The honest tradeoff, stated rather than glossed over:
+    Python can't forcibly kill a running thread, so a genuinely hung
+    computation's worker thread keeps running in the background
+    (consuming CPU) even after the app has moved on and shown a timeout
+    message -- this protects the UI from LOOKING hung, it doesn't
+    reclaim the CPU from truly runaway work. A multiprocessing-based
+    approach could forcibly terminate it, at the cost of process-spawn
+    overhead on every single call including the overwhelming majority
+    that finish in milliseconds -- not the right tradeoff for an
+    interactive app. Degradation is calibrated per call site: the
+    primary algebraic solve and matrix analysis report a timeout as an
+    explicit, visible failure (verifier.py's "Symbolic solve" check, or
+    a "Computation timed out" solve step) rather than silently looking
+    like "no answer found"; secondary/bonus features (uncertainty
+    propagation, the "show me another way" alternate method, constraint
+    elimination in `optimization_utils.py`) degrade silently to
+    "unavailable," matching how those features already handle any other
+    failure. `matrix_utils.MatrixSystemResult` gained a
+    `computation_notes` field specifically so a timeout on, say,
+    eigenvalues alone doesn't lose the still-fast rank-based
+    classification -- genuine partial degradation, not all-or-nothing.
 
 ## Extending it
 

@@ -156,6 +156,9 @@ eqsolver/
     ├── proof.py                      # symbolic proof mode -- renders the actual sequence of
     │                              #   SymPy simplification passes that prove an equivalence,
     │                              #   not just the final True/False
+    ├── timeout_utils.py              # configurable timeout wrapper (ThreadPoolExecutor-based,
+    │                              #   Windows-safe -- no signal.alarm) around every SymPy-heavy
+    │                              #   call, so pathological input can't hang the session
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import sympy as sp
 
 from modules.equation_engine import ProblemModel
+from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 
 
 @dataclass
@@ -89,9 +90,9 @@ def _eliminate_greedy(objective_expr: sp.Expr, optimize_over: list[str],
             c_free = {s.name for s in c.free_symbols}
             for cand in _ordered_candidates(c_free):
                 try:
-                    sol = sp.solve(c, sp.Symbol(cand))
-                except Exception:  # noqa: BLE001
-                    sol = []
+                    sol = run_with_timeout(sp.solve, c, sp.Symbol(cand), label="constraint elimination")
+                except Exception:  # noqa: BLE001 -- includes ComputationTimeoutError; this is a
+                    sol = []       # best-effort elimination heuristic, skip to the next candidate
                 if sol:
                     # a constraint like r**2 = ... yields multiple branches;
                     # prefer one that isn't manifestly non-real (e.g. avoid
@@ -248,7 +249,10 @@ def solve_optimization(model: ProblemModel) -> OptimizationResult | None:
         grad_eqs = [sp.diff(L, v) for v in all_vars] + constraint_exprs
         all_unknowns = all_vars + lambdas
         try:
-            solutions = sp.solve(grad_eqs, all_unknowns, dict=True)
+            solutions = run_with_timeout(sp.solve, grad_eqs, all_unknowns, dict=True,
+                                           label="Lagrange system solve")
+        except ComputationTimeoutError as e:
+            return OptimizationResult(used_lagrange=True, error=f"Timed out solving the Lagrange system: {e}")
         except Exception as e:  # noqa: BLE001
             return OptimizationResult(used_lagrange=True, error=f"Could not solve the Lagrange system: {e}")
         solutions = [s for s in solutions if all(v.is_real is not False for v in s.values())]
@@ -263,8 +267,11 @@ def solve_optimization(model: ProblemModel) -> OptimizationResult | None:
             classifications.append("critical point (constrained -- not second-order classified)")
     else:
         try:
-            solutions = sp.solve([sp.diff(working_objective, v) for v in working_free_vars],
-                                   working_free_vars, dict=True)
+            solutions = run_with_timeout(sp.solve, [sp.diff(working_objective, v) for v in working_free_vars],
+                                           working_free_vars, dict=True, label="critical point solve")
+        except ComputationTimeoutError as e:
+            return OptimizationResult(reduced_objective=reduced_objective, eliminated_vars=eliminated_vars,
+                                        error=f"Timed out solving for critical points: {e}")
         except Exception as e:  # noqa: BLE001
             return OptimizationResult(reduced_objective=reduced_objective, eliminated_vars=eliminated_vars,
                                         error=f"Could not solve for critical points: {e}")

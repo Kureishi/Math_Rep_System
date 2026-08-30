@@ -22,6 +22,7 @@ from modules.ode_utils import solve_ode
 from modules.matrix_utils import linear_system_view
 from modules.uncertainty import uncertainty_for_target
 from modules.physical_validity import filter_physically_valid
+from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 from modules.algebra_rules import classify_isolation
 
 NARRATION_PROMPT = """Given this verified sequence of steps solving for {target}, \
@@ -92,7 +93,11 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
     other_targets = [sp.Symbol(t) for t in model.solve_for
                       if t != target_name and target_kind(model, t) == "equation"]
     try:
-        solutions = sp.solve(eqs, [target, *other_targets], dict=True)
+        solutions = run_with_timeout(sp.solve, eqs, [target, *other_targets], dict=True,
+                                       label=f"solve for {target_name}")
+    except ComputationTimeoutError as e:
+        steps.append(SolutionStep(description="Computation timed out", expression=str(e)))
+        return steps
     except Exception:  # noqa: BLE001
         solutions = []
 
@@ -394,9 +399,10 @@ def alternate_method_steps(model: ProblemModel, target_name: str, subs: dict) ->
                       if t != target_name and target_kind(model, t) == "equation"]
     substituted = [e.subs(subs) for e in all_eqs]
     try:
-        solutions = sp.solve(substituted, [target, *other_targets], dict=True)
-    except Exception:  # noqa: BLE001
-        return None
+        solutions = run_with_timeout(sp.solve, substituted, [target, *other_targets], dict=True,
+                                       label=f"alternate method for {target_name}")
+    except Exception:  # noqa: BLE001 -- includes ComputationTimeoutError; this is the
+        return None    # secondary "show me another way" feature, silent skip is fine
     if not solutions:
         return None
 

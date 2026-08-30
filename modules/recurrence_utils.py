@@ -9,6 +9,7 @@ import sympy as sp
 from sympy.core.function import AppliedUndef
 
 from modules.equation_engine import ProblemModel
+from modules.timeout_utils import run_with_timeout
 
 
 def solve_recurrence(model: ProblemModel) -> dict[str, sp.Expr]:
@@ -42,7 +43,7 @@ def solve_recurrence(model: ProblemModel) -> dict[str, sp.Expr]:
                 ics[ic.sympy_eq.lhs] = ic.sympy_eq.rhs
 
         try:
-            sol = sp.rsolve(e.sympy_eq, func_base, ics or None)
+            sol = run_with_timeout(sp.rsolve, e.sympy_eq, func_base, ics or None, label="rsolve")
             if sol is not None:
                 result[func_name] = sol
         except Exception:  # noqa: BLE001

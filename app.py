@@ -369,6 +369,15 @@ with st.sidebar:
                  "narrower catches subtler derivation errors but may false-flag on rounding.",
         )
         settings.cross_check_tolerance = cross_check_pct / 100
+        settings.computation_timeout_seconds = st.slider(
+            "Computation timeout (seconds)", 1.0, 60.0, settings.computation_timeout_seconds, 1.0,
+            help="How long a single symbolic computation (solving, eigenvalues, dsolve, equivalence "
+                 "checking, proof steps, etc.) is allowed to run before it's abandoned as timed out, "
+                 "rather than freezing the app. Raise it for problems you know are legitimately heavy "
+                 "(large matrices, gnarly ODEs); lower it for a snappier UI on modest hardware. A "
+                 "timed-out computation's background thread keeps running until it naturally finishes "
+                 "-- Python can't forcibly kill it -- but the UI itself is never blocked past this limit.",
+        )
 
         if st.button("Reset to defaults"):
             from config import Settings
@@ -378,6 +387,7 @@ with st.sidebar:
             settings.max_verification_retries = defaults.max_verification_retries
             settings.numeric_tolerance = defaults.numeric_tolerance
             settings.cross_check_tolerance = defaults.cross_check_tolerance
+            settings.computation_timeout_seconds = defaults.computation_timeout_seconds
             st.rerun()
 
     st.divider()

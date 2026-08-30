@@ -17,6 +17,7 @@ from sympy.core.function import AppliedUndef
 from sympy.solvers.ode.systems import dsolve_system
 
 from modules.equation_engine import ProblemModel, Equation
+from modules.timeout_utils import run_with_timeout
 
 
 def _funcs_used(eq: sp.Eq) -> set[str]:
@@ -91,10 +92,14 @@ def solve_ode(model: ProblemModel) -> dict[str, sp.Eq]:
         if len(group) == 1:
             func_applied = next(iter(sympy_eqs[0].atoms(AppliedUndef)))
             try:
-                sol = sp.dsolve(sympy_eqs[0], func_applied, ics=ics) if ics else sp.dsolve(sympy_eqs[0], func_applied)
+                if ics:
+                    sol = run_with_timeout(sp.dsolve, sympy_eqs[0], func_applied, ics=ics, label="dsolve")
+                else:
+                    sol = run_with_timeout(sp.dsolve, sympy_eqs[0], func_applied, label="dsolve")
                 result[str(func_applied.func)] = sol
-            except Exception:  # noqa: BLE001
-                continue
+            except Exception:  # noqa: BLE001 -- includes ComputationTimeoutError; this
+                continue        # ODE is simply skipped from the result dict, same as any
+                                 # other dsolve failure (e.g. no closed form found)
         else:
             # figure out t and the ordered list of Function applications
             # dsolve_system wants (e.g. A(t), B(t)), not just names
@@ -108,7 +113,8 @@ def solve_ode(model: ProblemModel) -> dict[str, sp.Eq]:
                         applied_funcs.append(f)
             t = next(iter(applied_funcs[0].args))  # shared independent variable
             try:
-                sol_sets = dsolve_system(sympy_eqs, funcs=applied_funcs, t=t, ics=ics or None)
+                sol_sets = run_with_timeout(dsolve_system, sympy_eqs, funcs=applied_funcs, t=t,
+                                              ics=ics or None, label="dsolve_system")
                 for sol_eq in sol_sets[0]:
                     result[str(sol_eq.lhs.func)] = sol_eq
             except Exception:  # noqa: BLE001
