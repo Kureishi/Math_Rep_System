@@ -536,6 +536,40 @@ See `ARCHITECTURE.md` for the full design. In short:
     `computation_notes` field specifically so a timeout on, say,
     eigenvalues alone doesn't lose the still-fast rank-based
     classification -- genuine partial degradation, not all-or-nothing.
+33. **Pinned dependencies** (`requirements.txt`) -- every package is
+    pinned to the exact version this project's full test suite has
+    actually been run against (`streamlit==1.62.0`, `sympy==1.14.0`,
+    etc.), not an open-ended `>=` range. An unpinned range looks
+    convenient but means a fresh install months from now could silently
+    pull in a breaking release of any dependency and fail in ways that
+    have never been seen or tested here. Upgrade deliberately: bump one
+    line, run `pytest` (or push and let CI run it across both platforms),
+    and only commit once it's green.
+34. **SQLite hardening** (`modules/history.py`) -- `_connect()` now sets
+    `PRAGMA journal_mode=WAL` (a crash or kill mid-write is far less
+    likely to leave the file in a bad state, and it tolerates a second
+    reader/writer -- e.g. two browser tabs on the same session --
+    without immediately hitting "database is locked"), paired with
+    `synchronous=NORMAL` (the standard safe pairing with WAL) and a
+    5-second `busy_timeout` (retries briefly instead of raising an error
+    the moment two connections briefly overlap). Every `save()` also
+    prunes the table down to the `MAX_HISTORY_RECORDS` most recent rows
+    (100 by default) -- keeps `history.db` from growing unbounded over
+    months of use, and keeps `list_recent()`/`find_similar()`'s
+    full-table scans bounded, without needing a separate maintenance
+    step someone has to remember to run.
+35. **Upload size limits** -- every `st.file_uploader` (CSV for curve
+    fitting, PDF for batch worksheet import, problem photos) is capped
+    at 500 MB, enforced twice: `.streamlit/config.toml` sets
+    `server.maxUploadSize = 500` so Streamlit rejects an over-limit
+    upload server-side before it's even fully received, and
+    `check_upload_size()` in `app.py` re-checks the file's own
+    `.size` as a second, defense-in-depth layer with a clearer,
+    upload-specific error message than Streamlit's generic rejection.
+    `.streamlit/` is otherwise gitignored (it can hold a local
+    `secrets.toml`); `.gitignore` carries a narrow `!.streamlit/config.toml`
+    exception so this one file -- which holds no secrets -- is still
+    tracked and ships with the project.
 
 ## Extending it
 

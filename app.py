@@ -56,6 +56,27 @@ for key, default in [("problem_text", ""), ("model", None), ("report", None),
     st.session_state.setdefault(key, default)
 
 
+MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB -- matches .streamlit/config.toml's
+                                             # server-side maxUploadSize; this is a second,
+                                             # defense-in-depth check with a clearer,
+                                             # upload-specific message rather than relying
+                                             # solely on Streamlit's own generic rejection
+
+
+def check_upload_size(uploaded_file) -> bool:
+    """Returns True if uploaded_file is within MAX_UPLOAD_SIZE_BYTES,
+    showing a clear error and returning False otherwise. Call this
+    before doing any processing on an uploaded file."""
+    if uploaded_file is None:
+        return True
+    if uploaded_file.size > MAX_UPLOAD_SIZE_BYTES:
+        size_mb = uploaded_file.size / (1024 * 1024)
+        st.error(f"'{uploaded_file.name}' is {size_mb:.0f} MB, which is over the 500 MB upload limit. "
+                  "Please upload a smaller file.")
+        return False
+    return True
+
+
 def snapshot_button(key: str, title: str, caption: str, render_fn):
     """Renders a small 'include this plot in the report' control under a
     plot. render_fn is a zero-arg callable producing PNG bytes -- kept
@@ -93,7 +114,7 @@ def render_curve_fitting_tab():
     csv_text = None
     with upload_col:
         uploaded_csv = st.file_uploader("Upload a 2-column CSV (x, y)", type=["csv"], key="fit_csv_upload")
-        if uploaded_csv is not None:
+        if uploaded_csv is not None and check_upload_size(uploaded_csv):
             csv_text = uploaded_csv.getvalue().decode("utf-8", errors="replace")
     with paste_col:
         pasted = st.text_area("...or paste CSV text", height=100,
@@ -230,7 +251,7 @@ def render_batch_solver_tab():
     pdf_upload = st.file_uploader("...or upload a PDF worksheet (numbered problems auto-detected)",
                                     type=["pdf"], key="batch_pdf_upload")
     pdf_extracted_text = ""
-    if pdf_upload is not None:
+    if pdf_upload is not None and check_upload_size(pdf_upload):
         pdf_extracted_text = extract_text_from_pdf(pdf_upload.getvalue())
         if not pdf_extracted_text:
             st.warning("Couldn't extract any text from that PDF -- it may be a scanned/image-only "
@@ -480,7 +501,7 @@ with tab_text:
 
 with tab_image:
     uploaded = st.file_uploader("Upload a photo or screenshot of the problem", type=["png", "jpg", "jpeg"])
-    if uploaded is not None:
+    if uploaded is not None and check_upload_size(uploaded):
         st.image(uploaded, caption="Uploaded image", width=400)
         use_vision = st.toggle("Use LM Studio vision model (falls back to Tesseract OCR if off/unavailable)",
                                 value=True)

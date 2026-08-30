@@ -181,3 +181,51 @@ def test_find_similar_skips_rows_with_null_equation_shapes(tmp_path, monkeypatch
     })
     # should not raise on the NULL-shape legacy row -- just finds nothing
     assert history_module.find_similar(model) == []
+
+
+def test_wal_mode_and_pragmas_active(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "pragma_test.db")
+    conn = history_module._connect()
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    conn.close()
+
+
+def test_history_pruned_to_max_records(tmp_path, monkeypatch, fake_client_factory):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "prune_test.db")
+    monkeypatch.setattr(history_module, "MAX_HISTORY_RECORDS", 5)
+    client = fake_client_factory(final_answers={"a": 2.0})
+
+    ids = []
+    for i in range(8):
+        model = build_model({
+            "problem_domain": f"domain{i}", "problem_type": "algebraic",
+            "variables": [
+                {"symbol": "a", "meaning": "a", "known_value": None, "unit": None},
+                {"symbol": "b", "meaning": "b", "known_value": str(i), "unit": None},
+            ],
+            "equations": [{"name": "eq", "kind": "equation", "expression": "Eq(a, b)", "derivation": ""}],
+            "solve_for": ["a"], "assumptions": [],
+        })
+        report = verify(model, client, f"problem {i}")
+        ids.append(history_module.save(f"problem {i}", model, report, compute_steps(model), []))
+
+    recent = history_module.list_recent(limit=100)
+    assert len(recent) == 5
+    # the 5 most recently inserted ids should be the ones kept
+    kept_ids = {r["id"] for r in recent}
+    assert kept_ids == set(ids[-5:])
+
+
+def test_history_not_pruned_when_under_the_cap(tmp_path, monkeypatch, kinematics_json, fake_client_factory):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "no_prune_test.db")
+    client = fake_client_factory(final_answers={"a": 2.0})
+    model = build_model(json.loads(kinematics_json))
+    report = verify(model, client, "x")
+
+    for _ in range(3):
+        history_module.save("x", model, report, compute_steps(model), [])
+
+    recent = history_module.list_recent(limit=100)
+    assert len(recent) == 3  # well under MAX_HISTORY_RECORDS (100) -- nothing pruned

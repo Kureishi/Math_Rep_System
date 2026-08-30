@@ -1,10 +1,20 @@
-streamlit>=1.38
-openai>=1.40
-sympy>=1.13
-plotly>=5.22
-numpy>=1.26
-Pillow>=10.4
-pytesseract>=0.3.13
-matplotlib>=3.9
-fpdf2>=2.8
-pypdf>=5.0
+# Pinned to exact versions -- this project has been developed and its
+# full test suite (see tests/, run in CI on every push) has been run
+# against exactly these versions throughout. Unpinned ">=" ranges look
+# convenient but mean a fresh install six months from now could silently
+# pull in a breaking release of any of these and fail in ways that have
+# never actually been seen or tested here.
+#
+# To upgrade deliberately: bump one line at a time, run `pytest`, and
+# only commit the change once the full suite (all platforms in CI) is
+# green against the new version.
+streamlit==1.62.0
+openai==3.3.1
+sympy==1.14.0
+plotly==6.9.0
+numpy==2.4.4
+Pillow==12.1.1
+pytesseract==0.3.13
+matplotlib==3.10.8
+fpdf2==2.8.8
+pypdf==5.9.0

@@ -87,6 +87,9 @@ eqsolver/
 ├── .github/workflows/tests.yml  # CI -- runs the suite on every push/PR,
 │                              #   ubuntu-latest AND windows-latest x Python 3.11/3.12
 ├── .pre-commit-config.yaml   # optional local hook: runs the suite before each commit
+├── .streamlit/config.toml    # server.maxUploadSize=500 (MB) -- committed despite
+│                              #   .streamlit/ being gitignored (a narrow exception
+│                              #   carves this one file out; secrets.toml etc. stay ignored)
 ├── README.md                 # setup + run instructions
 ├── ARCHITECTURE.md           # this file
 └── modules/

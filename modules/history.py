@@ -21,10 +21,29 @@ from modules.similarity import problem_shape, find_similar_shapes
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "history.db"
 
+# Keeps history.db from growing unbounded over months of use, and caps
+# how much a single query (list_recent, find_similar's full-table scan)
+# has to work through -- enforced on every save() by pruning the oldest
+# rows beyond this count, not by refusing new saves once full.
+MAX_HISTORY_RECORDS = 100
+
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
+    # WAL (write-ahead log) instead of the default rollback-journal mode:
+    # a crash or kill mid-write is much less likely to leave the file in
+    # a bad state, and it tolerates a second reader/writer (e.g. two
+    # browser tabs open on the same session) without immediately hitting
+    # "database is locked". synchronous=NORMAL is the safe pairing with
+    # WAL (still durable against an OS crash, just not against a full
+    # power loss mid-write, an acceptable tradeoff for a local personal
+    # tool). busy_timeout makes SQLite retry for a few seconds instead of
+    # raising "database is locked" immediately if a brief write overlaps
+    # from another connection, rather than surfacing a raw error to the UI.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS problems (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +64,18 @@ def _connect() -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass
     return conn
+
+
+def _prune_old_records(conn: sqlite3.Connection):
+    """Keeps only the MAX_HISTORY_RECORDS most recent rows (by id, which
+    is monotonically increasing) -- called after every save() so the
+    table never grows past the cap, rather than needing a separate
+    maintenance step someone has to remember to run."""
+    conn.execute(
+        "DELETE FROM problems WHERE id NOT IN "
+        "(SELECT id FROM problems ORDER BY id DESC LIMIT ?)",
+        (MAX_HISTORY_RECORDS,),
+    )
 
 
 def save(problem_text: str, model: ProblemModel, report: VerificationReport,
@@ -70,7 +101,9 @@ def save(problem_text: str, model: ProblemModel, report: VerificationReport,
             (datetime.now().isoformat(timespec="seconds"), problem_text, model.problem_domain,
              int(report.passed), json.dumps(payload), shapes_json),
         )
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        _prune_old_records(conn)
+        return new_id
 
 
 def list_recent(limit: int = 25) -> list[dict]:
