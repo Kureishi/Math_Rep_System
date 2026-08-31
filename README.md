@@ -570,6 +570,42 @@ See `ARCHITECTURE.md` for the full design. In short:
     `secrets.toml`); `.gitignore` carries a narrow `!.streamlit/config.toml`
     exception so this one file -- which holds no secrets -- is still
     tracked and ships with the project.
+36. **Basic logging** (`modules/app_logging.py`) -- a small rotating log
+    file (`data/app.log`, 5 MB × 3 backups, WARNING level and above
+    only -- not a full request/access log, which would be noisy and
+    mostly pointless overhead for a personal local tool) so a recurring
+    failure is visible after the fact instead of only ever showing up
+    as a message in the UI that's gone the moment the page reruns.
+    Directly motivated by an earlier incident in this project where
+    telling "a rare one-off" apart from "this keeps happening" for an
+    LM Studio engine error required manually digging back through the
+    conversation rather than checking a log. Wired in at just three
+    gateway points essentially every failure of its class already
+    funnels through, rather than touching every individual try/except
+    scattered across the app: `LMStudioClient.chat()` (every LLM call,
+    whichever module made it), `extract_json()` (every JSON-parsing
+    failure), and `timeout_utils.run_with_timeout()` (every symbolic
+    computation timeout, across matrix analysis, ODEs, recurrences,
+    optimization, equivalence checking, and proof mode alike). Three
+    edits, near-complete coverage. `logging.getLogger()`'s process-wide
+    singleton-by-name behavior is what keeps Streamlit's constant script
+    reruns from re-adding a handler (and duplicating every log line) on
+    every interaction -- guarded explicitly rather than assumed.
+37. **Config/connection validation** (`LMStudioClient.validate_model()`
+    in `modules/llm_client.py`) -- distinguishes two genuinely different
+    failure modes that would otherwise both just look like a similar
+    raw API error the moment a call is attempted: LM Studio isn't
+    reachable at all, versus it IS reachable but the specific model
+    requested isn't one it currently has loaded (a typo, or a model
+    unloaded since it was configured). The primary/vision models are
+    already implicitly validated by construction -- their selectors in
+    the sidebar are populated FROM `list_models()`, so nothing outside
+    that list can be chosen -- but "paranoid mode"'s secondary model
+    (set via `config.py`/an env var, no dropdown) had no such guarantee.
+    The "🕵️ Paranoid mode" panel now validates it up front and shows a
+    specific, actionable message before attempting the (more expensive)
+    cross-check, rather than launching into an extraction call destined
+    to fail confusingly.
 
 ## Extending it
 

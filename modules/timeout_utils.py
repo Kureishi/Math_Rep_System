@@ -32,6 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeou
 from typing import Callable, TypeVar
 
 from config import settings
+from modules.app_logging import logger
 
 T = TypeVar("T")
 
@@ -72,4 +73,12 @@ def run_with_timeout(func: Callable[..., T], *args, timeout: float | None = None
     try:
         return future.result(timeout=timeout)
     except _FutureTimeoutError:
+        # Logged here -- the one gateway every timeout-protected symbolic
+        # computation across the app (matrix_utils, ode_utils,
+        # recurrence_utils, optimization_utils, equivalence.py, proof.py,
+        # solver.py, uncertainty.py, verifier.py) already goes through --
+        # so a pattern of "this keeps timing out" is visible in the log
+        # regardless of which specific call site it came from, without
+        # needing every one of those call sites to log it separately.
+        logger.warning("Computation timed out after %gs%s", timeout, f" ({label})" if label else "")
         raise ComputationTimeoutError(timeout, label) from None

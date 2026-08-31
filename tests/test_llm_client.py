@@ -48,3 +48,59 @@ def test_raises_llm_output_error_on_invalid_json_syntax():
     raw = '{"a": 1, "b": }'  # syntactically broken
     with pytest.raises(LLMOutputError):
         extract_json(raw)
+
+
+# ---------------------------------------------------------------- validate_model
+
+
+def _client_with(is_available_result, models):
+    from modules.llm_client import LMStudioClient
+    client = LMStudioClient()
+    client.is_available = lambda: is_available_result
+    client.list_models = lambda: models
+    return client
+
+
+def test_validate_model_success_when_loaded():
+    client = _client_with((True, "Connected."), ["model-a", "model-b"])
+    ok, msg = client.validate_model("model-a")
+    assert ok is True
+    assert "model-a" in msg
+    assert "loaded and ready" in msg
+
+
+def test_validate_model_fails_when_server_unreachable():
+    client = _client_with((False, "Could not reach LM Studio."), [])
+    ok, msg = client.validate_model("model-a")
+    assert ok is False
+    assert msg == "Could not reach LM Studio."
+
+
+def test_validate_model_fails_when_no_models_loaded():
+    client = _client_with((True, "Connected."), [])
+    ok, msg = client.validate_model("model-a")
+    assert ok is False
+    assert "no models are loaded" in msg.lower()
+
+
+def test_validate_model_fails_when_model_not_in_loaded_list():
+    client = _client_with((True, "Connected."), ["model-a", "model-b"])
+    ok, msg = client.validate_model("model-typo")
+    assert ok is False
+    assert "model-typo" in msg
+    assert "model-a" in msg and "model-b" in msg  # lists what IS loaded
+
+
+def test_validate_model_distinguishes_unreachable_from_not_loaded():
+    """The two failure modes must produce genuinely different messages --
+    that's the whole point of this check, rather than both looking like
+    a generic 'something went wrong'."""
+    unreachable_client = _client_with((False, "Could not reach LM Studio."), [])
+    _, unreachable_msg = unreachable_client.validate_model("model-a")
+
+    not_loaded_client = _client_with((True, "Connected."), ["model-b"])
+    _, not_loaded_msg = not_loaded_client.validate_model("model-a")
+
+    assert unreachable_msg != not_loaded_msg
+    assert "reach" in unreachable_msg.lower()
+    assert "model-a" in not_loaded_msg

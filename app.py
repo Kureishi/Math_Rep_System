@@ -647,7 +647,10 @@ if model:
     # See paranoid.py.
     if settings.secondary_reasoning_model:
         with st.expander(f"🕵️ Paranoid mode: cross-check against {settings.secondary_reasoning_model}"):
-            if st.button("Run cross-check", key="paranoid_button"):
+            valid, valid_msg = client.validate_model(settings.secondary_reasoning_model)
+            if not valid:
+                st.warning(f"Can't run the cross-check: {valid_msg}")
+            elif st.button("Run cross-check", key="paranoid_button"):
                 with st.spinner(f"Re-solving with {settings.secondary_reasoning_model}..."):
                     st.session_state["paranoid_result"] = run_paranoid_check(
                         client, problem_text, model, report.sympy_numeric_answers,

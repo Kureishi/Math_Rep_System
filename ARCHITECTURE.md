@@ -166,6 +166,10 @@ eqsolver/
     ├── timeout_utils.py              # configurable timeout wrapper (ThreadPoolExecutor-based,
     │                              #   Windows-safe -- no signal.alarm) around every SymPy-heavy
     │                              #   call, so pathological input can't hang the session
+    ├── app_logging.py                # rotating WARNING+ log file (data/app.log) -- wired in at
+    │                              #   3 gateway points (chat(), extract_json(), run_with_timeout())
+    │                              #   for near-complete failure coverage without touching every
+    │                              #   individual try/except across the app
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

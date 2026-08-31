@@ -11,6 +11,7 @@ import json
 from openai import OpenAI, APIConnectionError
 
 from config import settings
+from modules.app_logging import logger
 
 
 class LMStudioClient:
@@ -42,6 +43,29 @@ class LMStudioClient:
         except Exception:  # noqa: BLE001
             return []
 
+    def validate_model(self, model_name: str) -> tuple[bool, str]:
+        """Checks model_name against what's actually loaded, distinguishing
+        the two genuinely different failure modes that would otherwise both
+        just surface as a similar-looking raw API error the moment a chat()
+        call is attempted: the server isn't reachable at all, versus the
+        server IS reachable but this particular model isn't one of the ones
+        it has loaded (e.g. a typo, or a model that was unloaded since
+        config.py/an env var was set). Used by paranoid.py's secondary-model
+        check before attempting a real (more expensive, more confusing to
+        fail) extraction call against it."""
+        ok, msg = self.is_available()
+        if not ok:
+            return False, msg
+        loaded = self.list_models()
+        if not loaded:
+            return False, "Connected to LM Studio, but no models are loaded at all."
+        if model_name not in loaded:
+            return False, (
+                f"'{model_name}' isn't currently loaded in LM Studio. "
+                f"Loaded models: {', '.join(loaded)}."
+            )
+        return True, f"'{model_name}' is loaded and ready."
+
     def chat(self, system: str, user: str, temperature: float,
               json_mode: bool = False, model: str | None = None) -> str:
         # NOTE: LM Studio's OpenAI-compat server is stricter than OpenAI's
@@ -52,16 +76,29 @@ class LMStudioClient:
         # prompt and rely on extract_json()'s forgiving parser below, which
         # already strips code fences/prose. json_mode is kept as a parameter
         # so call sites can still signal intent even though it's a no-op here.
-        resp = self._client.chat.completions.create(
-            model=model or settings.reasoning_model,
-            temperature=temperature,
-            max_tokens=settings.max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
-        return resp.choices[0].message.content
+        try:
+            resp = self._client.chat.completions.create(
+                model=model or settings.reasoning_model,
+                temperature=temperature,
+                max_tokens=settings.max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            )
+            return resp.choices[0].message.content
+        except Exception as e:  # noqa: BLE001
+            # Logged HERE, at the one gateway every LLM call in the app
+            # goes through, rather than in each of the many try/except
+            # blocks scattered across scenarios.py/solver.py/worksheet.py/
+            # paranoid.py/followup.py/batch_solver.py that already catch
+            # and gracefully recover from this -- recovering gracefully in
+            # the UI is good, but it also means a recurring failure would
+            # otherwise leave no trace once the page reruns. Re-raised
+            # unchanged; this only adds a log line, not new behavior.
+            logger.warning("LM Studio chat() call failed (model=%s): %s",
+                             model or settings.reasoning_model, e)
+            raise
 
     def vision_extract(self, image_bytes: bytes, mime_type: str = "image/png",
                          model: str | None = None) -> str:
@@ -122,6 +159,7 @@ def extract_json(raw: str) -> dict | list:
     first_square = text.find("[")
     candidates = [i for i in (first_curly, first_square) if i != -1]
     if not candidates:
+        logger.warning("extract_json(): model returned no JSON at all (%d chars of raw output)", len(raw))
         raise LLMOutputError(
             "The model didn't return any JSON -- it may have replied with a "
             "clarifying question or plain prose instead of the structured "
@@ -132,9 +170,11 @@ def extract_json(raw: str) -> dict | list:
     closing = "}" if text[start] == "{" else "]"
     end = text.rfind(closing)
     if end == -1 or end < start:
+        logger.warning("extract_json(): model's JSON output looks truncated (%d chars of raw output)", len(raw))
         raise LLMOutputError("The model's JSON output looks truncated (no closing bracket found).",
                               raw_output=raw)
     try:
         return json.loads(text[start : end + 1])
     except json.JSONDecodeError as e:
+        logger.warning("extract_json(): JSON decode failed: %s", e)
         raise LLMOutputError(f"The model's JSON didn't parse ({e}).", raw_output=raw) from e
