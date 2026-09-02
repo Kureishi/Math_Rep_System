@@ -170,6 +170,16 @@ eqsolver/
     │                              #   3 gateway points (chat(), extract_json(), run_with_timeout())
     │                              #   for near-complete failure coverage without touching every
     │                              #   individual try/except across the app
+    ├── numerical_fallback.py         # mpmath.findroot fallback for single-equation/single-unknown
+    │                              #   cases sp.solve() can't handle symbolically (e.g. x+sin(x)=5)
+    │                              #   -- explicitly labeled as an approximation, never blended
+    │                              #   in with exact symbolic answers
+    ├── self_consistency.py           # re-runs extraction on the SAME model 2-5 times and compares
+    │                              #   via similarity.py -- catches an ambiguous PROBLEM STATEMENT,
+    │                              #   distinct from paranoid.py's cross-model disagreement check
+    ├── notebook_export.py            # hand-built nbformat v4 JSON -- narrative as markdown cells +
+    │                              #   code_export.py's runnable functions as code cells, no new
+    │                              #   dependency on the nbformat package
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
     │                              #   with a fresh-placeholder-safe fallback to Lagrange
     │                              #   multipliers; imports verifier._known_substitutions

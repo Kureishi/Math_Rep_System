@@ -27,6 +27,8 @@ from modules.sensitivity import sweep_input, tornado_analysis
 from modules.dependency_graph import build_dependency_graph
 from modules.proof import build_proof
 from modules.paranoid import run_paranoid_check
+from modules.self_consistency import run_self_consistency_check
+from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
@@ -52,7 +54,8 @@ for key, default in [("problem_text", ""), ("model", None), ("report", None),
                       ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
                       ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
                       ("batch_results", None), ("last_saved_history_id", None),
-                      ("paranoid_result", None), ("followup_history", [])]:
+                      ("paranoid_result", None), ("followup_history", []),
+                      ("self_consistency_result", None)]:
     st.session_state.setdefault(key, default)
 
 
@@ -668,6 +671,35 @@ if model:
                     elif paranoid_result.secondary_answers:
                         st.success("Both models agree on every shared answer.")
 
+    # ---- self-consistency check: re-run extraction on the SAME model
+    # 2-5 times and compare the derivations to each other -- a
+    # different signal than paranoid mode: disagreement here usually
+    # means the PROBLEM STATEMENT is ambiguous, not that a model is
+    # specifically wrong. See self_consistency.py.
+    with st.expander("🔁 Self-consistency check"):
+        st.caption("Re-runs extraction on this same model several times and checks whether it "
+                    "derives the same equations each time -- catches an ambiguous problem "
+                    "statement, not a wrong model.")
+        sc_runs = st.slider("Number of runs", 2, 5, 3, key="self_consistency_runs")
+        if st.button("Run self-consistency check", key="self_consistency_button"):
+            with st.spinner(f"Re-extracting {sc_runs} times..."):
+                st.session_state["self_consistency_result"] = run_self_consistency_check(
+                    client, problem_text, runs=sc_runs,
+                )
+        sc_result = st.session_state.get("self_consistency_result")
+        if sc_result is not None:
+            if sc_result.consistent is None:
+                st.warning("Couldn't get enough successful runs to compare "
+                            f"({len(sc_result.errors)} failed).")
+            elif sc_result.consistent:
+                st.success(f"Consistent across {sc_result.runs} runs -- "
+                            f"similarity scores: {', '.join(f'{s:.0%}' for s in sc_result.shapes_match)}")
+            else:
+                st.warning(f"Inconsistent across {sc_result.runs} runs -- similarity scores: "
+                            f"{', '.join(f'{s:.0%}' for s in sc_result.shapes_match)}. This may mean "
+                            "the problem statement is ambiguous enough that even this model can't "
+                            "parse it the same way twice.")
+
     st.subheader(f"Domain: {model.problem_domain}")
 
     # ---- find similar past problems: structural similarity (equation
@@ -839,10 +871,18 @@ if model:
         st.markdown("### Step-by-step solution")
 
         module_src = generate_python_module(model)
-        if not module_src.startswith('"""No exportable'):
+        dl_cols = st.columns(2)
+        with dl_cols[0]:
+            if not module_src.startswith('"""No exportable'):
+                st.download_button(
+                    "⬇️ Get all formulas as one Python file", data=module_src,
+                    file_name="formulas.py", mime="text/x-python",
+                )
+        with dl_cols[1]:
+            notebook_json = build_notebook(problem_text, model, steps_by_target)
             st.download_button(
-                "⬇️ Get all formulas as one Python file", data=module_src,
-                file_name="formulas.py", mime="text/x-python",
+                "⬇️ Get as Jupyter notebook", data=notebook_json,
+                file_name="solution.ipynb", mime="application/x-ipynb+json",
             )
 
         for target_name, steps in steps_by_target.items():

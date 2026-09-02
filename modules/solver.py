@@ -23,6 +23,7 @@ from modules.matrix_utils import linear_system_view
 from modules.uncertainty import uncertainty_for_target
 from modules.physical_validity import filter_physically_valid
 from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
+from modules.numerical_fallback import numerical_fallback_for_equation
 from modules.algebra_rules import classify_isolation
 
 NARRATION_PROMPT = """Given this verified sequence of steps solving for {target}, \
@@ -168,6 +169,29 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
                     description="Propagate measurement uncertainty",
                     expression=f"{target_name} = {unc.nominal:.6g} \\pm {unc.uncertainty:.4g}{rel_text}",
                 ))
+    elif not other_targets:
+        # sp.solve() found no closed form at all (common for equations
+        # mixing polynomial and transcendental terms, e.g. x + sin(x) = 5
+        # -- these are perfectly ordinary word problems with no symbolic
+        # solution, not a sign of anything wrong). Only attempted for a
+        # single-target equation, not a coupled system, since numerical
+        # solving several unknowns simultaneously is a much less
+        # reliable problem -- see numerical_fallback.py.
+        target_eq = next((e for e in eqs if isinstance(e, sp.Eq) and target in e.free_symbols), None)
+        if target_eq is not None:
+            roots = numerical_fallback_for_equation(target_eq, target)
+            if roots:
+                steps.append(SolutionStep(
+                    description="No exact symbolic solution -- numerical approximation",
+                    expression=(f"{target_name} \\approx {roots[0].value:.6g} \\quad "
+                                 f"\\text{{(residual }} {roots[0].residual:.2e}\\text{{)}}"),
+                ))
+                if len(roots) > 1:
+                    others = ", ".join(f"{r.value:.6g}" for r in roots[1:])
+                    steps.append(SolutionStep(
+                        description="Other numerical roots found",
+                        expression=f"{target_name} \\approx {others} \\text{{ (also satisfy the equation)}}",
+                    ))
     return steps
 
 

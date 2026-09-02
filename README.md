@@ -606,6 +606,54 @@ See `ARCHITECTURE.md` for the full design. In short:
     specific, actionable message before attempting the (more expensive)
     cross-check, rather than launching into an extraction call destined
     to fail confusingly.
+38. **Numerical fallback** (`modules/numerical_fallback.py`) -- when
+    `sp.solve()` can't find a closed form (common for equations mixing
+    polynomial and transcendental terms, e.g. `x + sin(x) = 5` or
+    `x*exp(x) = 10` -- both ordinary physics/engineering "solve for x"
+    problems that SymPy's symbolic solver genuinely can't handle, not
+    edge cases), falls back to numerical root-finding via
+    `mpmath.findroot` -- already a SymPy dependency, so no new one
+    added -- tried from several starting points to catch multiple
+    distinct roots. Unmistakably labeled as an approximation the whole
+    way through (`is_numerical=True` on every result, a distinct
+    "No exact symbolic solution -- numerical approximation" step rather
+    than blending in with exact answers): this app's whole premise is
+    verification-first, so a numerical fallback that looked identical to
+    a verified symbolic answer would undermine that. Deliberately scoped
+    to a single equation in a single remaining unknown -- coupled
+    numerical solving across several unknowns simultaneously is a much
+    less reliable problem and isn't attempted. Currently surfaced in the
+    step-by-step solve trace only; it isn't yet threaded back into
+    `verifier.py`'s independent-cross-check/confidence-report pipeline,
+    which stays scoped to exact symbolic answers for now -- a known,
+    stated limitation rather than a silent gap.
+39. **Self-consistency check** (`modules/self_consistency.py`, "🔁
+    Self-consistency check") -- re-runs extraction on the SAME model
+    2-5 times and compares the derivations via `similarity.py`'s
+    equation-shape canonicalization, the same trick "find similar past
+    problems" and "paranoid mode" both use. A genuinely different
+    signal from paranoid mode's cross-MODEL check: two different models
+    disagreeing suggests one of them is specifically wrong, but the SAME
+    model disagreeing with ITSELF across repeated runs of the identical
+    prompt usually means the PROBLEM STATEMENT is ambiguous or
+    underspecified enough that even one model can't parse it the same
+    way twice -- a property of the input, not of any one model's
+    competence, worth surfacing regardless of which derivation ends up
+    being used.
+40. **Jupyter notebook export** (`modules/notebook_export.py`, "⬇️ Get
+    as Jupyter notebook") -- bundles the step-by-step narrative (as
+    markdown cells) with the runnable Python formula(s) (as executable
+    code cells, reusing `code_export.py`'s exact same `sp.pycode`-
+    rendered functions) into a single `.ipynb` -- a more natural
+    deliverable than a bare `.py` script for further work in a notebook
+    environment. Built by hand-constructing the nbformat v4 JSON
+    structure directly rather than adding a dependency on the
+    `nbformat` package: the schema needed here (a flat list of
+    markdown/code cells, no stored outputs) is small and stable enough
+    that a new dependency for it isn't worth it. Verified the exported
+    notebook is genuinely runnable, not just well-formed JSON -- its
+    code cells were executed in sequence exactly as Jupyter would, and
+    produce the correct numeric answer.
 
 ## Extending it
 
