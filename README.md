@@ -654,6 +654,56 @@ See `ARCHITECTURE.md` for the full design. In short:
     notebook is genuinely runnable, not just well-formed JSON -- its
     code cells were executed in sequence exactly as Jupyter would, and
     produce the correct numeric answer.
+41. **Physical plausibility check** (`modules/plausibility.py`,
+    "⚠️ Physical plausibility check") -- a softer, advisory-only cousin
+    of Domain of validity above. `domain_utils.py` catches values that
+    are mathematically *undefined* (a division by zero, a negative
+    even-root argument); this catches values that are mathematically
+    fine but land far outside what's normal for the kind of quantity
+    involved -- a car's acceleration coming out to 500 m/s², a computed
+    mass that's negative even though nothing declared a domain
+    restriction on it. A small curated table of typical magnitude
+    ranges per domain category (kinematics, mechanics, finance,
+    thermodynamics, electricity), inferred from the problem's own
+    `problem_domain` label, plus an independent meaning-based
+    heuristic ("mass", "distance", "age", ... shouldn't be negative)
+    for variables with no declared domain at all. Deliberately never
+    affects `report.passed` -- an out-of-range magnitude isn't proof
+    the math is wrong (a problem CAN legitimately be about a rocket
+    sled), only worth a second look.
+42. **Personalized error-pattern tracking** (`modules/grading.py`'s
+    `classify_mistake`, `history.py`'s `grading_records` table +
+    `summarize_error_patterns`, wired into "📝 Grade my work" and "📄
+    Generate worksheet variants") -- connects three already-built
+    pieces into an actual learning loop. Every "Grade my work"
+    submission gets classified (correct / wrong formula / arithmetic
+    slip, with a best-effort subtype like sign error, subtraction,
+    division) and persisted alongside history.py's existing records.
+    When a (category, subtype) pair recurs 3+ times within the last
+    week, it surfaces as a plain-English pattern ("You've made a sign
+    error 3 times this week") right in the grading panel, and the
+    worksheet generator gets a "🎯 Target my recent mistake pattern(s)"
+    option that biases new practice problems toward exercising exactly
+    that step -- turning generic worksheet variants into targeted
+    practice.
+43. **Multi-problem dependency chains** (`modules/chains.py`, "🔗
+    Problem chains" mode) -- formalizes the ad-hoc "extract to
+    workspace" flow into a NAMED, PERSISTENT sequence of problems where
+    a downstream step's input is wired directly to an upstream step's
+    solved output: change an upstream value (or edit a fixed input on
+    an early step) and everything downstream automatically re-solves,
+    the way a spreadsheet cell ripples through formulas that reference
+    it. Distinct from `dependency_graph.py`, which only diagrams
+    structure WITHIN a single already-extracted problem -- this spans
+    MULTIPLE separately-extracted problems and actually performs the
+    re-solve, not just visualizes it. Deliberately re-solves with plain
+    SymPy only (`verifier._solve_sympy`), skipping the LLM independent
+    cross-check that the normal `verify()` pipeline does -- a chain step
+    can be re-solved many times as inputs change, and an LLM round trip
+    on every edit isn't something this should require. A step is only
+    ever added to a chain from an already-extracted-and-verified
+    `ProblemModel` in the first place, so full verification still
+    happens once, upstream of this feature.
 
 ## Extending it
 

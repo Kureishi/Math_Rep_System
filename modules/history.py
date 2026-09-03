@@ -11,7 +11,7 @@ dicts so reloading a past problem never needs another LLM call.
 import json
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from modules.equation_engine import ProblemModel, build_model
@@ -63,6 +63,25 @@ def _connect() -> sqlite3.Connection:
         conn.execute("ALTER TABLE problems ADD COLUMN equation_shapes TEXT")
     except sqlite3.OperationalError:
         pass
+
+    # personalized error-pattern tracking: persists grading.py's own
+    # formula/arithmetic classification per "grade my work" submission,
+    # separate from the `problems` table above (a submission may or may
+    # not correspond to a problem that's itself been saved to history).
+    # See classify_mistake() in grading.py and summarize_error_patterns()
+    # below.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS grading_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            target TEXT NOT NULL,
+            domain TEXT,
+            category TEXT NOT NULL,
+            subtype TEXT,
+            detail TEXT,
+            equation_shapes TEXT
+        )
+    """)
     return conn
 
 
@@ -191,3 +210,96 @@ def find_similar(model: ProblemModel, exclude_id: int | None = None,
 
     ranked = find_similar_shapes(target_shape, candidates, limit=limit, min_similarity=min_similarity)
     return [{**row_by_id[rid], "similarity": score} for rid, score in ranked]
+
+
+# ---------------------------------------------------------------- grading / error-pattern tracking
+
+def _prune_old_grading_records(conn: sqlite3.Connection):
+    """Same cap-and-prune approach as _prune_old_records, applied to
+    grading_records so it doesn't grow unbounded either."""
+    conn.execute(
+        "DELETE FROM grading_records WHERE id NOT IN "
+        "(SELECT id FROM grading_records ORDER BY id DESC LIMIT ?)",
+        (MAX_HISTORY_RECORDS,),
+    )
+
+
+def record_grading(target: str, domain: str | None, category: str, subtype: str | None,
+                    detail: str, equation_shapes: frozenset[str] | None = None) -> int:
+    """Persists one grading.classify_mistake() result. `equation_shapes`
+    (see similarity.py) is stored so a future feature could match
+    patterns to structurally-similar problems, not just to a domain
+    label -- optional since not every caller has a built ProblemModel
+    handy."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO grading_records (timestamp, target, domain, category, subtype, detail, "
+            "equation_shapes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), target, domain, category, subtype, detail,
+             json.dumps(sorted(equation_shapes)) if equation_shapes else None),
+        )
+        new_id = cur.lastrowid
+        _prune_old_grading_records(conn)
+        return new_id
+
+
+def list_recent_grading(limit: int = 50) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, timestamp, target, domain, category, subtype, detail FROM grading_records "
+            "ORDER BY id DESC LIMIT ?", (limit,),
+        ).fetchall()
+    return [
+        {"id": r[0], "timestamp": r[1], "target": r[2], "domain": r[3],
+         "category": r[4], "subtype": r[5], "detail": r[6]}
+        for r in rows
+    ]
+
+
+_PATTERN_THRESHOLD = 3  # how many times a (category, subtype) pair has to recur within the
+                          # lookback window before it's called an actual "pattern" worth acting
+                          # on, rather than one-off noise
+
+
+def _pattern_message(category: str, subtype: str | None, count: int, days: int) -> str:
+    window = "this week" if days <= 7 else f"in the last {days} days"
+    if category == "formula":
+        return f"You've picked the wrong starting formula {count} times {window}."
+    subtype_phrase = {
+        "sign_error": "a sign error",
+        "subtraction": "a subtraction-step error",
+        "multiplication": "a multiplication-step error",
+        "division": "a division-step error",
+        "addition": "an addition-step error",
+    }.get(subtype, "an arithmetic error")
+    return f"You've made {subtype_phrase} {count} times {window}."
+
+
+def summarize_error_patterns(days: int = 7, min_count: int = _PATTERN_THRESHOLD) -> list[dict]:
+    """Groups recent grading_records by (category, subtype) within the
+    last `days` days and returns those that recurred at least
+    `min_count` times, most-frequent first -- each as {"category",
+    "subtype", "count", "message"}. Only "formula"/"arithmetic"
+    (i.e. actual mistakes) are ever counted -- a "pattern" is about
+    what keeps going wrong, so "correct"/"unverified" submissions never
+    contribute to one."""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT category, subtype FROM grading_records "
+            "WHERE timestamp >= ? AND category IN ('formula', 'arithmetic')",
+            (cutoff,),
+        ).fetchall()
+
+    counts: dict[tuple[str, str | None], int] = {}
+    for category, subtype in rows:
+        key = (category, subtype)
+        counts[key] = counts.get(key, 0) + 1
+
+    patterns = [
+        {"category": category, "subtype": subtype, "count": count,
+         "message": _pattern_message(category, subtype, count, days)}
+        for (category, subtype), count in counts.items() if count >= min_count
+    ]
+    patterns.sort(key=lambda p: p["count"], reverse=True)
+    return patterns

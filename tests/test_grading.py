@@ -2,7 +2,7 @@ import pytest
 import sympy as sp
 
 from modules.equation_engine import build_model
-from modules.grading import grade_work
+from modules.grading import grade_work, classify_mistake
 
 
 def _kinematics_model():
@@ -77,6 +77,51 @@ def test_unparseable_line_marked_unparsed_not_crash():
     result = grade_work(model, "a", ["a = (v_f - v_i) / t", "this is not math @#$", "a = 2.0"], 2.0)
     kinds = [lr.kind for lr in result.line_results]
     assert "unparsed" in kinds
+
+
+# ---------------------------------------------------------------- classify_mistake
+
+def test_classify_correct_submission():
+    model = _kinematics_model()
+    result = grade_work(model, "a", ["a = (v_f - v_i) / t", "a = (20 - 8) / 6", "a = 2.0"], 2.0)
+    c = classify_mistake(result)
+    assert c.category == "correct"
+    assert c.subtype is None
+
+
+def test_classify_wrong_formula():
+    model = _kinematics_model()
+    result = grade_work(model, "a", ["a = v_f / t", "a = 20/6", "a = 3.33"], 2.0)
+    c = classify_mistake(result)
+    assert c.category == "formula"
+    assert c.subtype is None
+
+
+def test_classify_arithmetic_error_with_sign_subtype():
+    model = _kinematics_model()
+    # a stray line re-asserting v_i with the wrong sign -- same
+    # magnitude (8) but opposite sign -- should be recognized as a sign
+    # error specifically, distinct from a generic arithmetic slip
+    result = grade_work(
+        model, "a", ["a = (v_f - v_i) / t", "v_i = -8", "a = -2.0"], 2.0)
+    c = classify_mistake(result)
+    assert c.category == "arithmetic"
+    assert c.subtype == "sign_error"
+
+
+def test_classify_arithmetic_error_falls_back_to_operator_guess():
+    model = _kinematics_model()
+    result = grade_work(model, "a", ["a = (v_f - v_i) / t", "12/6 = 5", "a = 5"], 2.0)
+    c = classify_mistake(result)
+    assert c.category == "arithmetic"
+    assert c.subtype == "division"
+
+
+def test_classify_empty_work_error_is_unverified():
+    model = _kinematics_model()
+    result = grade_work(model, "a", ["", "   "], 2.0)
+    c = classify_mistake(result)
+    assert c.category == "unverified"
 
 
 def test_line_with_undeclared_symbol_marked_not_checkable():

@@ -31,6 +31,7 @@ from modules.units_checker import parse_unit, dimension_of, dims_equivalent, Uni
 from modules.matrix_utils import linear_system_view
 from modules.domain_utils import domain_restrictions_for_equation, evaluate_restriction
 from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
+from modules.plausibility import check_plausibility, PlausibilityNote
 
 INDEPENDENT_SOLVE_PROMPT = """Solve this problem yourself, from scratch, showing minimal work. \
 The problem asks for these quantities: {targets}. \
@@ -141,6 +142,10 @@ class VerificationReport:
     sympy_numeric_answers: dict[str, float] = field(default_factory=dict)
     llm_independent_answers: dict[str, float] = field(default_factory=dict)
     domain_notes: list[DomainNote] = field(default_factory=list)
+    # advisory only -- see plausibility.py. Never affects `passed`, since
+    # an out-of-range magnitude isn't proof the math is wrong the way a
+    # domain-validity violation is.
+    plausibility_notes: list[PlausibilityNote] = field(default_factory=list)
     passed: bool = True
     failure_reason: str | None = None
 
@@ -835,6 +840,11 @@ def verify(model: ProblemModel, client: LMStudioClient, problem_text: str) -> Ve
         report.add("Symbolic solve", False, str(e))
         sympy_answers = {}
     report.sympy_numeric_answers = sympy_answers
+
+    # advisory physical-plausibility pass -- checks both the problem's
+    # own known inputs and whatever got solved above, never gates `passed`
+    known_values = {v.symbol: v.known_value for v in model.variables if v.known_value is not None}
+    report.plausibility_notes = check_plausibility(model, {**known_values, **sympy_answers})
 
     if sympy_answers:
         # only ask about targets we actually have an algebraic answer for --

@@ -229,3 +229,85 @@ def test_history_not_pruned_when_under_the_cap(tmp_path, monkeypatch, kinematics
 
     recent = history_module.list_recent(limit=100)
     assert len(recent) == 3  # well under MAX_HISTORY_RECORDS (100) -- nothing pruned
+
+
+# ---------------------------------------------------------------- grading records / error patterns
+
+def test_record_and_list_recent_grading(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "grading_test.db")
+    rid = history_module.record_grading(
+        target="a", domain="kinematics", category="arithmetic", subtype="sign_error",
+        detail="Both sides do NOT agree: 8 vs -8.", equation_shapes=frozenset({"equation:foo"}),
+    )
+    assert rid is not None
+
+    recent = history_module.list_recent_grading()
+    assert len(recent) == 1
+    assert recent[0]["category"] == "arithmetic"
+    assert recent[0]["subtype"] == "sign_error"
+    assert recent[0]["target"] == "a"
+
+
+def test_summarize_error_patterns_below_threshold_not_reported(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "pattern_below_test.db")
+    for _ in range(2):  # below the default min_count of 3
+        history_module.record_grading("a", "kinematics", "arithmetic", "sign_error", "detail")
+    assert history_module.summarize_error_patterns() == []
+
+
+def test_summarize_error_patterns_at_threshold_reported(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "pattern_at_test.db")
+    for _ in range(3):
+        history_module.record_grading("a", "kinematics", "arithmetic", "sign_error", "detail")
+    patterns = history_module.summarize_error_patterns()
+    assert len(patterns) == 1
+    assert patterns[0]["category"] == "arithmetic"
+    assert patterns[0]["subtype"] == "sign_error"
+    assert patterns[0]["count"] == 3
+    assert "sign error" in patterns[0]["message"].lower()
+    assert "3 times" in patterns[0]["message"]
+
+
+def test_summarize_error_patterns_ignores_correct_submissions(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "pattern_correct_test.db")
+    for _ in range(5):
+        history_module.record_grading("a", "kinematics", "correct", None, "Correct final answer.")
+    assert history_module.summarize_error_patterns() == []
+
+
+def test_summarize_error_patterns_formula_message_distinct_from_arithmetic(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "pattern_formula_test.db")
+    for _ in range(3):
+        history_module.record_grading("a", "kinematics", "formula", None, "wrong formula")
+    patterns = history_module.summarize_error_patterns()
+    assert len(patterns) == 1
+    assert "formula" in patterns[0]["message"].lower()
+
+
+def test_summarize_error_patterns_respects_lookback_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "pattern_window_test.db")
+    import sqlite3
+    from datetime import datetime, timedelta
+    db_path = tmp_path / "pattern_window_test.db"
+    history_module._connect().close()  # ensure table exists
+    old_ts = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
+    with sqlite3.connect(db_path) as conn:
+        for _ in range(5):
+            conn.execute(
+                "INSERT INTO grading_records (timestamp, target, domain, category, subtype, detail) "
+                "VALUES (?, 'a', 'kinematics', 'arithmetic', 'sign_error', 'old mistake')",
+                (old_ts,),
+            )
+    # all 5 records are outside the default 7-day window
+    assert history_module.summarize_error_patterns(days=7) == []
+    # but do show up with a wider window
+    assert len(history_module.summarize_error_patterns(days=60)) == 1
+
+
+def test_grading_records_pruned_to_max(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "grading_prune_test.db")
+    monkeypatch.setattr(history_module, "MAX_HISTORY_RECORDS", 5)
+    for i in range(8):
+        history_module.record_grading("a", "kinematics", "arithmetic", "sign_error", f"detail {i}")
+    recent = history_module.list_recent_grading(limit=100)
+    assert len(recent) == 5

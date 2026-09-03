@@ -1,5 +1,5 @@
 from modules.equation_engine import build_model
-from modules.worksheet import generate_worksheet_problems
+from modules.worksheet import generate_worksheet_problems, generate_targeted_worksheet_problems
 
 
 def _kinematics_model():
@@ -82,3 +82,37 @@ def test_blank_and_whitespace_entries_filtered_out(fake_client_factory):
     client = fake_client_factory(worksheet='["real problem", "", "   ", "another real one"]')
     problems = generate_worksheet_problems(client, model, count=5)
     assert problems == ["real problem", "another real one"]
+
+
+# ---------------------------------------------------------------- targeted generation
+
+def test_targeted_without_patterns_falls_back_to_plain_generation(fake_client_factory):
+    model = _kinematics_model()
+    client = fake_client_factory(worksheet='["p1"]')
+    problems = generate_targeted_worksheet_problems(client, model, patterns=[], count=1)
+    assert problems == ["p1"]
+    _, user_prompt = client.calls[-1]
+    assert "struggled with" not in user_prompt
+
+
+def test_targeted_with_patterns_includes_focus_note_in_prompt(fake_client_factory):
+    model = _kinematics_model()
+    client = fake_client_factory(worksheet='["p1"]')
+    patterns = ["You've made a sign-error 3 times this week."]
+    problems = generate_targeted_worksheet_problems(client, model, patterns=patterns, count=1)
+    assert problems == ["p1"]
+    _, user_prompt = client.calls[-1]
+    assert "struggled with" in user_prompt
+    assert "sign-error" in user_prompt
+
+
+def test_targeted_generation_still_returns_empty_list_on_api_error():
+    model = _kinematics_model()
+
+    class RaisingClient:
+        def chat(self, **kwargs):
+            raise RuntimeError("boom")
+
+    result = generate_targeted_worksheet_problems(
+        RaisingClient(), model, patterns=["some pattern"], count=1)
+    assert result == []

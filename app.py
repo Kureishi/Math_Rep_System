@@ -32,8 +32,8 @@ from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
-from modules.grading import grade_work
-from modules.worksheet import generate_worksheet_problems
+from modules.grading import grade_work, classify_mistake
+from modules.worksheet import generate_worksheet_problems, generate_targeted_worksheet_problems
 from modules.batch_solver import solve_batch, batch_summary, split_batch_text, extract_text_from_pdf
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
@@ -43,6 +43,9 @@ from modules.curve_fitting import fit_curve, best_fit, parse_xy_csv, BUILTIN_FAM
 from modules.equivalence import check_equivalence
 from modules.workspace import Workspace
 from modules import history
+from modules import chains
+from modules.chains import InputBinding
+from modules.similarity import problem_shape
 from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot, build_batch_markdown, build_batch_pdf_bytes
 
 st.set_page_config(page_title="Math Representation System", layout="wide")
@@ -55,7 +58,7 @@ for key, default in [("problem_text", ""), ("model", None), ("report", None),
                       ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
                       ("batch_results", None), ("last_saved_history_id", None),
                       ("paranoid_result", None), ("followup_history", []),
-                      ("self_consistency_result", None)]:
+                      ("self_consistency_result", None), ("error_pattern_messages", [])]:
     st.session_state.setdefault(key, default)
 
 
@@ -467,6 +470,165 @@ with st.sidebar:
     else:
         st.caption("No solved problems yet -- they'll be saved here automatically.")
 
+
+def render_chains_tab():
+    """Multi-problem dependency chains -- a named, persistent sequence
+    of separately-extracted problems where a downstream step's input
+    can be wired directly to an upstream step's solved output. Distinct
+    from the single-problem "extract to workspace" flow (workspace.py,
+    one-shot copy) and from dependency_graph.py (visualizes structure
+    WITHIN one already-extracted problem): this module spans MULTIPLE
+    problems and actually re-solves on an edit, cascading downstream
+    the way a spreadsheet cell ripples through formulas that reference
+    it. See modules/chains.py for the underlying persistence/resolve
+    logic."""
+    st.subheader("🔗 Problem chains")
+    st.caption("A named, persistent sequence of solved problems where one step's output can feed "
+                "the next step's input -- change an upstream input and everything downstream "
+                "re-solves automatically, like a lightweight spreadsheet.")
+
+    chain_list = chains.list_chains()
+    chain_names = {c["id"]: c["name"] for c in chain_list}
+
+    with st.expander("➕ New chain", expanded=not chain_list):
+        new_name = st.text_input("Chain name", key="new_chain_name",
+                                   placeholder="e.g. Projectile motion homework")
+        if st.button("Create chain", key="create_chain_button") and new_name.strip():
+            new_id = chains.create_chain(new_name.strip())
+            st.session_state["active_chain_id"] = new_id
+            st.rerun()
+
+    if not chain_list:
+        st.info("No chains yet -- create one above to get started.")
+        return
+
+    ids = [c["id"] for c in chain_list]
+    default_index = ids.index(st.session_state["active_chain_id"]) \
+        if st.session_state.get("active_chain_id") in ids else 0
+    chosen_id = st.selectbox("Chain", ids, index=default_index,
+                               format_func=lambda i: chain_names[i], key="active_chain_selector")
+    st.session_state["active_chain_id"] = chosen_id
+    chain = chains.load_chain(chosen_id)
+
+    if st.button("🗑️ Delete this chain", key="delete_chain_button"):
+        chains.delete_chain(chosen_id)
+        st.session_state["active_chain_id"] = None
+        for k in ["chain_pending_model", "chain_pending_text"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    if chain.steps:
+        st.write("### Steps")
+        for step in chain.steps:
+            icon = {"ok": "✅", "error": "❌", "stale": "➖"}.get(step.status, "➖")
+            with st.expander(f"{icon} Step {step.position + 1}: {step.problem_text[:60]}"):
+                st.caption(step.problem_text)
+                st.write(f"Solves for **{step.output_symbol}**")
+                if step.status == "ok":
+                    st.success(f"{step.output_symbol} = {step.output_value:.6g}")
+                elif step.status == "error":
+                    st.error(step.error_detail)
+
+                if step.bindings:
+                    st.write("Inputs:")
+                    for b in step.bindings:
+                        if b.source == "literal":
+                            st.write(f"- `{b.symbol}` = {b.literal_value} (fixed value)")
+                        else:
+                            st.write(f"- `{b.symbol}` ← step {b.upstream_position + 1}'s "
+                                      f"`{b.upstream_symbol}`")
+
+                    literal_bindings = [b for b in step.bindings if b.source == "literal"]
+                    if literal_bindings:
+                        edit_symbol = st.selectbox(
+                            "Try a different value for...", [b.symbol for b in literal_bindings],
+                            key=f"edit_binding_symbol_{step.position}")
+                        current = next(b.literal_value for b in literal_bindings
+                                        if b.symbol == edit_symbol)
+                        new_val = st.number_input("New value", value=float(current),
+                                                    key=f"edit_binding_value_{step.position}")
+                        if st.button("Apply & re-solve chain", key=f"apply_binding_{step.position}"):
+                            updated = [
+                                InputBinding(symbol=b.symbol, source=b.source, literal_value=new_val,
+                                              upstream_position=b.upstream_position,
+                                              upstream_symbol=b.upstream_symbol)
+                                if b.symbol == edit_symbol else b
+                                for b in step.bindings
+                            ]
+                            chains.set_step_bindings(chosen_id, step.position, updated)
+                            st.rerun()
+
+                if st.button("Remove this step", key=f"remove_step_{step.position}"):
+                    chains.remove_step(chosen_id, step.position)
+                    st.rerun()
+
+    st.write("### Add a step")
+    step_text = st.text_area("New problem text", key="chain_new_step_text", height=100,
+                               placeholder="e.g. If the car keeps that same acceleration for another "
+                                           "10 seconds, how much extra distance does it cover?")
+    if st.button("Extract & verify", key="chain_extract_button") and step_text.strip():
+        with st.spinner("Deriving and verifying..."):
+            try:
+                new_model = extract_model(client, step_text)
+                new_report = verify(new_model, client, step_text)
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Extraction failed: {e}")
+                new_model, new_report = None, None
+        if new_model is not None:
+            st.session_state["chain_pending_model"] = new_model
+            st.session_state["chain_pending_text"] = step_text
+            if new_report is not None and not new_report.passed:
+                st.warning(f"Verification didn't fully pass: {new_report.failure_reason}. "
+                            "You can still add it, but double-check the derivation.")
+
+    pending_model = st.session_state.get("chain_pending_model")
+    if pending_model is not None:
+        algebraic_targets = [t for t in pending_model.solve_for
+                               if target_kind(pending_model, t) == "equation"]
+        if not algebraic_targets:
+            st.warning("This problem has no algebraic solve_for target -- it can't be added to a chain.")
+        else:
+            output_symbol = st.selectbox("Which target should this step expose downstream?",
+                                           algebraic_targets, key="chain_output_symbol")
+            unknown_vars = [v for v in pending_model.variables
+                              if v.known_value is None and v.symbol != output_symbol]
+            bindings: list[InputBinding] = []
+            if unknown_vars:
+                st.caption("This problem has unknown inputs -- give each one a value before adding it:")
+                suggested = {b.symbol: b for b in chains.suggest_bindings(chain, pending_model)}
+                for var in unknown_vars:
+                    step_options = [f"step {s.position + 1}: {s.output_symbol}" for s in chain.steps]
+                    options = ["(leave unbound)"] + step_options + ["fixed value"]
+                    default_idx = 0
+                    match = suggested.get(var.symbol)
+                    if match is not None:
+                        default_idx = options.index(
+                            f"step {match.upstream_position + 1}: {match.upstream_symbol}")
+                    choice = st.selectbox(f"Input for `{var.symbol}` ({var.meaning})", options,
+                                            index=default_idx, key=f"chain_bind_choice_{var.symbol}")
+                    if choice == "fixed value":
+                        lit = st.number_input(f"Value for `{var.symbol}`",
+                                                key=f"chain_bind_literal_{var.symbol}")
+                        bindings.append(InputBinding(symbol=var.symbol, source="literal",
+                                                       literal_value=lit))
+                    elif choice != "(leave unbound)":
+                        pos = int(choice.split(":")[0].replace("step ", "")) - 1
+                        upstream_step = next(s for s in chain.steps if s.position == pos)
+                        bindings.append(InputBinding(symbol=var.symbol, source="upstream",
+                                                       upstream_position=pos,
+                                                       upstream_symbol=upstream_step.output_symbol))
+            if st.button("➕ Add to chain", key="chain_add_step_button"):
+                try:
+                    chains.add_step(chosen_id, st.session_state["chain_pending_text"], pending_model,
+                                      output_symbol, bindings)
+                except ValueError as e:
+                    st.error(str(e))
+                else:
+                    for k in ["chain_pending_model", "chain_pending_text"]:
+                        st.session_state.pop(k, None)
+                    st.rerun()
+
+
 st.title("🧮 Math Representation System")
 st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
 
@@ -476,7 +638,7 @@ st.caption("Text or image → derived equations → self-verified solution → a
 # deeply-indented) word-problem pipeline below in its own tab block, so
 # adding them doesn't require touching that pipeline's indentation at all.
 mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
-                          "📚 Batch solver"],
+                          "📚 Batch solver", "🔗 Problem chains"],
                   horizontal=True, label_visibility="collapsed")
 
 if mode == "📈 Curve fitting":
@@ -487,6 +649,9 @@ elif mode == "🔁 Check equivalence":
     st.stop()
 elif mode == "📚 Batch solver":
     render_batch_solver_tab()
+    st.stop()
+elif mode == "🔗 Problem chains":
+    render_chains_tab()
     st.stop()
 
 # ---------------------------------------------------------------- input
@@ -642,6 +807,18 @@ if model:
                 if restrictions_ok:
                     descs = "; ".join(r.description for r in restrictions_ok)
                     st.write(f"**{note.equation}** requires: {descs}")
+
+    # ---- physical plausibility: a softer, advisory-only cousin of
+    # domain of validity above -- flags values that are mathematically
+    # fine but land far outside what's normal for the kind of quantity
+    # involved (a 500 m/s^2 acceleration, a negative mass). Never
+    # affects report.passed; see plausibility.py.
+    if report.plausibility_notes:
+        with st.expander("⚠️ Physical plausibility check", expanded=True):
+            st.caption("Advisory only -- these values are mathematically valid, just unusual for this "
+                        "kind of quantity. Worth a second look, not necessarily wrong.")
+            for note in report.plausibility_notes:
+                st.warning(note.message)
 
     # ---- paranoid mode: re-run extraction through a SECOND,
     # independently-configured model and compare its equations/answers
@@ -1049,6 +1226,27 @@ if model:
                         icon = "✅" if lr.arithmetic_ok else "❌" if lr.arithmetic_ok is False else "➖"
                         st.write(f"{icon} Line {i}: `{lr.raw}` -- {lr.detail}")
 
+                    # personalized error-pattern tracking: persist this
+                    # submission's classification alongside history.py's
+                    # existing records, so a recurring mistake (a sign
+                    # error, a wrong-formula habit, ...) can surface as
+                    # an actual pattern over time rather than vanishing
+                    # once this expander closes
+                    classification = classify_mistake(result)
+                    history.record_grading(
+                        target=grade_target, domain=model.problem_domain,
+                        category=classification.category, subtype=classification.subtype,
+                        detail=classification.detail, equation_shapes=problem_shape(model),
+                    )
+
+            error_patterns = history.summarize_error_patterns()
+            if error_patterns:
+                st.divider()
+                st.caption("📊 Patterns from your recent graded work:")
+                for p in error_patterns:
+                    st.warning(p["message"])
+                st.session_state["error_pattern_messages"] = [p["message"] for p in error_patterns]
+
     # ---- worksheet generator: reverse generation -- new problem TEXT
     # sharing this problem's own verified equation structure, fed back
     # through the SAME extract/verify pipeline used for any problem
@@ -1059,9 +1257,20 @@ if model:
             w_count = st.slider("How many?", 1, 5, 3, key="worksheet_count")
         with wcols[1]:
             w_difficulty = st.selectbox("Difficulty", ["similar", "easier", "harder"], key="worksheet_difficulty")
+        recent_patterns = st.session_state.get("error_pattern_messages", [])
+        w_targeted = False
+        if recent_patterns:
+            w_targeted = st.checkbox(
+                "🎯 Target my recent mistake pattern(s)", value=True, key="worksheet_targeted",
+                help="Biases the generated problems toward extra practice on: " + "; ".join(recent_patterns),
+            )
         if st.button("Generate", key="worksheet_button"):
             with st.spinner("Generating worksheet problems..."):
-                new_problems = generate_worksheet_problems(client, model, w_count, w_difficulty)
+                if w_targeted and recent_patterns:
+                    new_problems = generate_targeted_worksheet_problems(
+                        client, model, recent_patterns, w_count, w_difficulty)
+                else:
+                    new_problems = generate_worksheet_problems(client, model, w_count, w_difficulty)
             if not new_problems:
                 st.warning("Couldn't generate worksheet problems -- try again.")
             else:

@@ -33,6 +33,7 @@ wrong -- there's nothing to fault a step for if there's no way to
 evaluate it.
 """
 from dataclasses import dataclass, field
+import re
 import sympy as sp
 
 from modules.equation_engine import ProblemModel, TRANSFORMS, _local_dict, target_kind
@@ -249,3 +250,70 @@ def grade_work(model: ProblemModel, target_name: str, student_lines: list[str],
         line_results=line_results, student_final_value=student_final,
         correct_value=correct_value, final_answer_ok=final_answer_ok, summary=summary,
     )
+
+
+# ---------------------------------------------------------------- error classification
+#
+# Feeds a learning loop: history.py persists this classification per
+# submission, history.summarize_error_patterns() looks for a category/
+# subtype that keeps recurring, and worksheet.py can bias new practice
+# problems toward whatever's actually going wrong -- rather than every
+# graded submission being a one-off with no memory of past mistakes.
+
+_ARITHMETIC_LINE_RE = re.compile(r"(-?[\d.]+)\s+vs\s+(-?[\d.]+)")
+
+
+@dataclass
+class ErrorClassification:
+    category: str          # "correct" | "formula" | "arithmetic" | "unverified"
+    subtype: str | None    # only set for category=="arithmetic": "sign_error" |
+                            # "addition" | "subtraction" | "multiplication" | "division" | None
+    detail: str
+
+
+def _arithmetic_subtype(line_result: LineResult) -> str | None:
+    """Best-effort guess at WHAT KIND of arithmetic slip a failing line
+    represents. LineResult only carries the raw text and a rendered
+    detail string by this point (not the parsed expression), so this is
+    a light heuristic, not a proof: if the two sides its own detail
+    reports are equal in magnitude but opposite in sign, that's very
+    likely a sign error; otherwise falls back to whichever operator
+    appears in the raw line, checked in an order that favors the
+    operator most likely to be the actual point of failure (a line with
+    both + and - is far more often a subtraction slip than an addition
+    one, since "+" is usually just holding two already-correct terms
+    together)."""
+    m = _ARITHMETIC_LINE_RE.search(line_result.detail)
+    if m:
+        a, b = float(m.group(1)), float(m.group(2))
+        if abs(a + b) < max(abs(a), abs(b), 1e-9) * 0.01:
+            return "sign_error"
+    raw = line_result.raw
+    if "-" in raw:
+        return "subtraction"
+    if "/" in raw:
+        return "division"
+    if "*" in raw:
+        return "multiplication"
+    if "+" in raw:
+        return "addition"
+    return None
+
+
+def classify_mistake(result: GradingResult) -> ErrorClassification:
+    """Turns a GradingResult's three-part diagnosis into a single,
+    compact classification suitable for persisting and counting over
+    time -- see history.record_grading / summarize_error_patterns."""
+    if result.error:
+        return ErrorClassification("unverified", None, result.error)
+    if result.final_answer_ok is True:
+        return ErrorClassification("correct", None, "Correct final answer.")
+    if result.formula_ok is False:
+        return ErrorClassification("formula", None, result.formula_detail)
+    bad_line = next((lr for lr in result.line_results if lr.arithmetic_ok is False), None)
+    if bad_line is not None:
+        return ErrorClassification("arithmetic", _arithmetic_subtype(bad_line), bad_line.detail)
+    # formula checked out, no line was flagged wrong, but the final
+    # answer still didn't match (or couldn't be compared) -- not
+    # confidently attributable to either category
+    return ErrorClassification("unverified", None, result.summary)
