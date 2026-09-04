@@ -1,6 +1,8 @@
 import json
 
-from modules.self_consistency import run_self_consistency_check
+import pytest
+
+from modules.self_consistency import run_self_consistency_check, numeric_answer_spread
 
 
 def _kinematics_payload():
@@ -106,3 +108,52 @@ def test_min_similarity_threshold_respected():
     client = _AlternatingClient(payload_a, payload_b)
     result = run_self_consistency_check(client, "a problem", runs=2, min_similarity=0.0)
     assert result.consistent is True
+
+
+# ---------------------------------------------------------------- numeric_answer_spread
+
+def test_numeric_answer_spread_identical_across_consistent_runs():
+    client = _FixedClient(_kinematics_payload())
+    result = run_self_consistency_check(client, "a car problem", runs=3)
+    values = numeric_answer_spread(result, "a")
+    assert len(values) == 3
+    for v in values:
+        assert v == pytest.approx((20 - 8) / 6)
+
+
+def test_numeric_answer_spread_reflects_genuinely_different_known_values():
+    payload_a = _kinematics_payload()
+    payload_b = dict(payload_a)
+    # same equation SHAPE, but a different known value for v_i -- shapes_match
+    # would score this highly (identical structure), while the numeric
+    # spread correctly shows the runs actually landed on different numbers
+    payload_b["variables"] = [
+        dict(v, known_value="2") if v["symbol"] == "v_i" else dict(v)
+        for v in payload_a["variables"]
+    ]
+    client = _AlternatingClient(payload_a, payload_b)
+    result = run_self_consistency_check(client, "a problem", runs=2)
+    values = numeric_answer_spread(result, "a")
+    assert len(values) == 2
+    assert values[0] != pytest.approx(values[1])
+
+
+def test_numeric_answer_spread_skips_runs_missing_the_target():
+    payload_a = _kinematics_payload()
+    payload_b = dict(payload_a)
+    payload_b["solve_for"] = []  # this run's re-extraction didn't ask to solve for 'a' at all
+    client = _AlternatingClient(payload_a, payload_b)
+    result = run_self_consistency_check(client, "a problem", runs=2)
+    values = numeric_answer_spread(result, "a")
+    assert len(values) == 1
+
+
+def test_numeric_answer_spread_empty_for_all_failed_runs():
+    result = run_self_consistency_check(_RaisingClient(), "a problem", runs=3)
+    assert numeric_answer_spread(result, "a") == []
+
+
+def test_numeric_answer_spread_target_never_present_returns_empty():
+    client = _FixedClient(_kinematics_payload())
+    result = run_self_consistency_check(client, "a problem", runs=2)
+    assert numeric_answer_spread(result, "not_a_real_target") == []

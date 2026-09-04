@@ -219,3 +219,85 @@ def test_suggest_bindings_skips_already_known_variables():
         "solve_for": ["t2"], "assumptions": [],
     })
     assert chains_module.suggest_bindings(chain, model) == []
+
+
+# ---------------------------------------------------------------- sweep_step_binding
+
+def test_sweep_step_binding_returns_one_row_per_value():
+    cid = chains_module.create_chain("chain")
+    chains_module.add_step(
+        cid, "upstream", _kinematics_model(),
+        "a", bindings=[InputBinding(symbol="v_i", source="literal", literal_value=8.0)],
+    )
+    rows = chains_module.sweep_step_binding(cid, 0, "v_i", [0.0, 5.0, 10.0])
+    assert len(rows) == 3
+    assert [r["value"] for r in rows] == [0.0, 5.0, 10.0]
+    # a = (20 - v_i) / 6
+    assert rows[0]["outputs"][0] == pytest.approx((20 - 0.0) / 6)
+    assert rows[1]["outputs"][0] == pytest.approx((20 - 5.0) / 6)
+    assert rows[2]["outputs"][0] == pytest.approx((20 - 10.0) / 6)
+
+
+def test_sweep_step_binding_cascades_to_downstream_steps():
+    cid = chains_module.create_chain("chain")
+    chains_module.add_step(
+        cid, "upstream", _kinematics_model(),
+        "a", bindings=[InputBinding(symbol="v_i", source="literal", literal_value=8.0)],
+    )
+    chains_module.add_step(
+        cid, "downstream", _downstream_model(), "d",
+        bindings=[InputBinding(symbol="a", source="upstream", upstream_position=0, upstream_symbol="a")],
+    )
+    rows = chains_module.sweep_step_binding(cid, 0, "v_i", [0.0, 6.0])
+    a0 = (20 - 0.0) / 6
+    a1 = (20 - 6.0) / 6
+    assert rows[0]["outputs"][1] == pytest.approx(a0 * 10)
+    assert rows[1]["outputs"][1] == pytest.approx(a1 * 10)
+
+
+def test_sweep_step_binding_restores_original_bindings_after_sweep():
+    cid = chains_module.create_chain("chain")
+    chains_module.add_step(
+        cid, "upstream", _kinematics_model(),
+        "a", bindings=[InputBinding(symbol="v_i", source="literal", literal_value=8.0)],
+    )
+    chains_module.sweep_step_binding(cid, 0, "v_i", [0.0, 100.0])
+    chain = chains_module.load_chain(cid)
+    literal = next(b for b in chain.steps[0].bindings if b.symbol == "v_i")
+    assert literal.literal_value == 8.0
+    # and the chain's actual stored/resolved state reflects the ORIGINAL
+    # binding, not the last swept value
+    assert chain.steps[0].output_value == pytest.approx((20 - 8.0) / 6)
+
+
+def test_sweep_step_binding_rejects_missing_literal_binding():
+    cid = chains_module.create_chain("chain")
+    chains_module.add_step(cid, "upstream", _kinematics_model(), "a")  # no bindings at all
+    with pytest.raises(ValueError):
+        chains_module.sweep_step_binding(cid, 0, "v_i", [0.0, 5.0])
+
+
+def test_sweep_step_binding_rejects_empty_values():
+    cid = chains_module.create_chain("chain")
+    chains_module.add_step(
+        cid, "upstream", _kinematics_model(),
+        "a", bindings=[InputBinding(symbol="v_i", source="literal", literal_value=8.0)],
+    )
+    with pytest.raises(ValueError):
+        chains_module.sweep_step_binding(cid, 0, "v_i", [])
+
+
+def test_sweep_step_binding_enforces_max_points(monkeypatch):
+    monkeypatch.setattr(chains_module, "MAX_SWEEP_POINTS", 3)
+    cid = chains_module.create_chain("chain")
+    chains_module.add_step(
+        cid, "upstream", _kinematics_model(),
+        "a", bindings=[InputBinding(symbol="v_i", source="literal", literal_value=8.0)],
+    )
+    with pytest.raises(ValueError):
+        chains_module.sweep_step_binding(cid, 0, "v_i", [0.0, 1.0, 2.0, 3.0, 4.0])
+
+
+def test_sweep_step_binding_unknown_chain_raises():
+    with pytest.raises(ValueError):
+        chains_module.sweep_step_binding(99999, 0, "v_i", [0.0, 1.0])

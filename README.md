@@ -704,6 +704,77 @@ See `ARCHITECTURE.md` for the full design. In short:
     ever added to a chain from an already-extracted-and-verified
     `ProblemModel` in the first place, so full verification still
     happens once, upstream of this feature.
+44. **Log/log-log axis toggle** (`plotter.build_plot`/`build_fit_plot`,
+    "Log X-axis"/"Log Y-axis" checkboxes on the main interactive plot
+    and the curve-fitting tab) -- a power-law relationship renders as a
+    straight line on log-log axes, an exponential one as a straight
+    line with only the Y-axis logged, which is usually a clearer visual
+    sanity check of a fit or trend than the default linear view. A log
+    axis uses a geometric (not linear) sweep grid, floored just above
+    zero.
+45. **Contour plots** (`plotter.build_contour_plot`, "Contour" plot type
+    alongside "2D line"/"3D surface" whenever a plottable equation has 2+
+    free symbols) -- the flat, labeled-level-lines counterpart of the
+    existing 3D surface plot: the same (x, y) → z evaluation, but
+    without a viewing angle to fight with, and usually easier to read
+    exact values off of.
+46. **Overlay/comparison plots** (`plotter.build_overlay_plot`, used in
+    the curve-fitting tab's "📊 Compare every candidate fit on one plot")
+    -- a generic multi-series plot for putting several curves on the
+    same axes at once, rather than only ever seeing one result at a
+    time. `best_fit()` already tries every built-in family; this makes
+    it possible to actually SEE why one family won, not just read its
+    higher R² in a list.
+47. **Vector plot export** (`plot_snapshot.py`'s `fmt` parameter --
+    `"png"`/`"svg"`/`"pdf"` -- threaded through every snapshot function,
+    surfaced as a Format dropdown + download button next to the main
+    interactive plots and the curve-fit plot) -- PNG is fine for the
+    exported Markdown/PDF report, but a figure headed into a paper or
+    slide deck usually wants a vector format that doesn't pixelate when
+    scaled up. Comes for free from matplotlib's own `savefig()` -- no
+    new dependency.
+48. **Chain-driven parameter sweeps** (`chains.sweep_step_binding`,
+    `plotter.build_chain_sweep_plot`, "📊 Sweep `<symbol>` across a
+    range" inside a chain step's fixed-input editor) -- sweeps ONE fixed
+    input on one chain step across a range, cascading the WHOLE chain at
+    every swept value, and plots every downstream step's output as its
+    own line against the swept value. The natural next step once
+    `chains.py` existed: rather than testing "what if this input were
+    different" one value at a time by hand, sweep it and see the whole
+    curve. Restores the step's original binding when the sweep finishes
+    -- a sweep is exploratory, not a change to the chain's real state.
+49. **Monte Carlo uncertainty propagation** (`modules/monte_carlo.py`,
+    "🎲 Uncertainty propagation for `<target>`") -- give one or more known
+    inputs a measurement uncertainty (mean ± std) and see the resulting
+    SPREAD in the target, sampled JOINTLY across every uncertain input
+    at once. Distinct from the existing sensitivity/tornado analysis,
+    which varies ONE input at a time deterministically (a
+    partial-derivative-flavored "which input matters most" view) rather
+    than propagating a joint distribution (a "given these measurement
+    uncertainties, how uncertain is my final answer" view) -- the two
+    are complementary. Solves the system SYMBOLICALLY ONLY ONCE
+    (substituting every fixed known value, leaving the uncertain
+    variables as free symbols) and evaluates that one closed-form
+    expression vectorized across every sample via NumPy, rather than
+    calling `verifier._solve_sympy()` per sample -- an earlier version
+    did the latter and, because `_known_substitutions()` runs every
+    known value through `sp.nsimplify()` looking for an exact form, hit
+    sympy's occasionally very slow algebraic-number-reconstruction path
+    on arbitrary sampled floats (100 samples took 14+ seconds). The
+    symbolic-once/numeric-after rewrite runs 5,000 samples in well
+    under a second.
+50. **Self-consistency numeric spread** (`self_consistency.numeric_answer_spread`,
+    `plotter.build_spread_plot`, shown inside the existing "🔁
+    Self-consistency check" expander) -- self-consistency's own
+    `shapes_match` score is a STRUCTURAL similarity between repeated
+    re-extractions; it says nothing about whether they land on the same
+    NUMBER. Two runs can score a near-perfect shapes_match and still
+    disagree numerically if, say, one run's extraction assigned a
+    different known value to some variable. This solves each usable
+    run's own re-derived model for a chosen target and plots the actual
+    numeric answers as a box-and-strip spread, making that kind of
+    disagreement directly visible rather than only inferable from a
+    similarity percentage.
 
 ## Extending it
 

@@ -27,7 +27,8 @@ from modules.sensitivity import sweep_input, tornado_analysis
 from modules.dependency_graph import build_dependency_graph
 from modules.proof import build_proof
 from modules.paranoid import run_paranoid_check
-from modules.self_consistency import run_self_consistency_check
+from modules.self_consistency import run_self_consistency_check, numeric_answer_spread
+from modules.monte_carlo import run_monte_carlo, UncertainVariable, MAX_SAMPLES as MC_MAX_SAMPLES
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
@@ -37,8 +38,8 @@ from modules.worksheet import generate_worksheet_problems, generate_targeted_wor
 from modules.batch_solver import solve_batch, batch_summary, split_batch_text, extract_text_from_pdf
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
-from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot, build_tornado_chart, build_sweep_chart, build_dependency_graph_plot
-from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot, snapshot_fit_plot, snapshot_tornado_chart, snapshot_sweep_chart, snapshot_dependency_graph
+from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot, build_tornado_chart, build_sweep_chart, build_dependency_graph_plot, build_contour_plot, build_overlay_plot, build_chain_sweep_plot, build_spread_plot, build_histogram_plot
+from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot, snapshot_fit_plot, snapshot_tornado_chart, snapshot_sweep_chart, snapshot_dependency_graph, snapshot_contour_plot, snapshot_overlay_plot, snapshot_chain_sweep_plot, snapshot_spread_plot, snapshot_histogram_plot
 from modules.curve_fitting import fit_curve, best_fit, parse_xy_csv, BUILTIN_FAMILIES
 from modules.equivalence import check_equivalence
 from modules.workspace import Workspace
@@ -108,6 +109,27 @@ def snapshot_button(key: str, title: str, caption: str, render_fn):
             except Exception as e:  # noqa: BLE001
                 st.error(f"Couldn't capture a snapshot of this plot: {e}")
 
+
+def format_download_button(key: str, file_stem: str, render_fn):
+    """A 'download this plot' control offering PNG (raster) or SVG/PDF
+    (vector) -- vector formats scale to any size without pixelating,
+    which matters for dropping a figure straight into a paper or slide
+    deck. Distinct from snapshot_button() above, which always captures
+    PNG specifically for embedding in this app's own Markdown/PDF report
+    -- this is a direct, ad-hoc download of just this one plot, in
+    whichever format the person actually wants it in. render_fn is a
+    one-arg callable: fmt -> bytes."""
+    fmt = st.selectbox("Format", ["png", "svg", "pdf"], key=f"fmt_{key}", label_visibility="collapsed")
+    mime = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf"}[fmt]
+    if st.button(f"⬇️ Download plot ({fmt.upper()})", key=f"download_{key}"):
+        try:
+            data = render_fn(fmt)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Couldn't render this plot as {fmt}: {e}")
+        else:
+            st.download_button(f"Save {file_stem}.{fmt}", data=data, file_name=f"{file_stem}.{fmt}",
+                                 mime=mime, key=f"save_{key}")
+
 def render_curve_fitting_tab():
     """Sibling pipeline to the word-problem solver: input is a table of
     numbers (typed in or uploaded as CSV), not LLM-extracted text, and
@@ -174,6 +196,31 @@ def render_curve_fitting_tab():
             st.write(f"- **{fam}**: R² = {res.r_squared:.5f}, RMSE = {res.rmse:.5g}")
         best_family, result = ranked[0]
         st.success(f"Best fit: **{best_family}**")
+
+        if len(ranked) >= 2:
+            with st.expander("📊 Compare every candidate fit on one plot"):
+                st.caption("Every family that successfully fit the data, overlaid on the same "
+                            "axes -- often makes it visually obvious why one family won, not just "
+                            "which one had the higher R².")
+                grid_lo, grid_hi = min(xs), max(xs)
+                pad = (grid_hi - grid_lo) * 0.05 if grid_hi > grid_lo else 1.0
+                x_grid = np.linspace(grid_lo - pad, grid_hi + pad, 300).tolist()
+                series = [{"x": xs, "y": ys, "name": "data", "mode": "markers"}]
+                for fam, res in ranked:
+                    f = sp.lambdify(sp.Symbol("x"), res.expr, "numpy")
+                    try:
+                        y_fit = np.broadcast_to(np.asarray(f(x_grid), dtype=float), (len(x_grid),)).tolist()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    series.append({"x": x_grid, "y": y_fit, "name": f"{fam} (R²={res.r_squared:.3f})"})
+                overlay_fig = build_overlay_plot(series, x_label=x_label, y_label=y_label,
+                                                   title="All candidate fits vs. data")
+                st.plotly_chart(overlay_fig, width='stretch')
+                format_download_button(
+                    key="fit_overlay", file_stem="curve_fit_comparison",
+                    render_fn=lambda fmt, s=series: snapshot_overlay_plot(
+                        s, x_label=x_label, y_label=y_label, title="All candidate fits vs. data", fmt=fmt),
+                )
     else:
         result = fit_curve(xs, ys, family, degree=degree, expr_str=expr_str, param_names=param_names)
 
@@ -186,15 +233,28 @@ def render_curve_fitting_tab():
     m1.metric("R²", f"{result.r_squared:.5f}")
     m2.metric("RMSE", f"{result.rmse:.5g}")
 
-    fig = build_fit_plot(xs, ys, result.expr, x_label, y_label)
+    log_cols = st.columns(2)
+    with log_cols[0]:
+        fit_x_log = st.checkbox("Log X-axis", key="fit_x_log")
+    with log_cols[1]:
+        fit_y_log = st.checkbox("Log Y-axis", key="fit_y_log")
+    if fit_x_log or fit_y_log:
+        st.caption("A power-law fit is a straight line on log-log axes; an exponential fit is a "
+                    "straight line with only the Y-axis logged -- a quick visual sanity check that "
+                    "the chosen family actually matches the data's shape.")
+
+    fig = build_fit_plot(xs, ys, result.expr, x_label, y_label, x_log=fit_x_log, y_log=fit_y_log)
     st.plotly_chart(fig, width='stretch')
 
     with st.expander("Residuals"):
         for x, y, r in zip(xs, ys, result.residuals):
             st.write(f"x={x:g}, y={y:g}, residual={r:.4g}")
 
-    png = snapshot_fit_plot(xs, ys, result.expr, x_label, y_label)
-    st.download_button("Download plot as PNG", data=png, file_name="curve_fit.png", mime="image/png")
+    format_download_button(
+        key="curve_fit", file_stem="curve_fit",
+        render_fn=lambda fmt: snapshot_fit_plot(xs, ys, result.expr, x_label, y_label,
+                                                   x_log=fit_x_log, y_log=fit_y_log, fmt=fmt),
+    )
 
 
 def render_equivalence_tab():
@@ -558,6 +618,40 @@ def render_chains_tab():
                             chains.set_step_bindings(chosen_id, step.position, updated)
                             st.rerun()
 
+                        # ---- research: sweep this input across a range and see
+                        # every downstream step's output ripple in response, all
+                        # at once -- the "what if I varied this input" view,
+                        # rather than testing one value at a time by hand
+                        with st.expander(f"📊 Sweep `{edit_symbol}` across a range"):
+                            sweep_lo, sweep_hi = st.slider(
+                                "Range", float(current) - 20, float(current) + 20,
+                                (float(current) - 5, float(current) + 5),
+                                key=f"sweep_range_{step.position}_{edit_symbol}",
+                            )
+                            sweep_points = st.slider("Number of points", 5, 50, 15,
+                                                       key=f"sweep_points_{step.position}_{edit_symbol}")
+                            if st.button("Run sweep", key=f"run_sweep_{step.position}_{edit_symbol}"):
+                                sweep_values = np.linspace(sweep_lo, sweep_hi, sweep_points).tolist()
+                                try:
+                                    rows = chains.sweep_step_binding(
+                                        chosen_id, step.position, edit_symbol, sweep_values)
+                                except ValueError as e:
+                                    st.error(str(e))
+                                else:
+                                    st.session_state[f"sweep_result_{step.position}_{edit_symbol}"] = rows
+                            sweep_rows = st.session_state.get(f"sweep_result_{step.position}_{edit_symbol}")
+                            if sweep_rows:
+                                step_labels = {s.position: f"step {s.position + 1}: {s.output_symbol}"
+                                                for s in chain.steps}
+                                sweep_fig = build_chain_sweep_plot(sweep_rows, edit_symbol, step_labels)
+                                st.plotly_chart(sweep_fig, width='stretch')
+                                format_download_button(
+                                    key=f"chain_sweep_{step.position}_{edit_symbol}",
+                                    file_stem=f"chain_sweep_{edit_symbol}",
+                                    render_fn=lambda fmt, r=sweep_rows, sl=step_labels, sym=edit_symbol:
+                                        snapshot_chain_sweep_plot(r, sym, sl, fmt=fmt),
+                                )
+
                 if st.button("Remove this step", key=f"remove_step_{step.position}"):
                     chains.remove_step(chosen_id, step.position)
                     st.rerun()
@@ -877,6 +971,33 @@ if model:
                             "the problem statement is ambiguous enough that even this model can't "
                             "parse it the same way twice.")
 
+            # numeric spread: complementary to the structural similarity
+            # score above -- two runs can score a near-perfect shapes_match
+            # (identical equation structure) and STILL disagree on the
+            # actual number if, say, one run extracted a slightly
+            # different known value. Only offered for a target every
+            # usable run actually shares.
+            sc_targets = sorted(set().union(*(
+                {t for t in m.solve_for if target_kind(m, t) == "equation"}
+                for m in sc_result.models if m is not None
+            ))) if any(m is not None for m in sc_result.models) else []
+            if sc_targets:
+                sc_target = st.selectbox("See the numeric spread for...", sc_targets,
+                                           key="self_consistency_spread_target")
+                spread_values = numeric_answer_spread(sc_result, sc_target)
+                if len(spread_values) >= 2:
+                    fig = build_spread_plot(spread_values, sc_target)
+                    st.plotly_chart(fig, width='stretch')
+                    st.caption(f"{sc_target}: mean {sum(spread_values) / len(spread_values):.4g}, "
+                                f"min {min(spread_values):.4g}, max {max(spread_values):.4g} "
+                                f"across {len(spread_values)} runs.")
+                    png = snapshot_spread_plot(spread_values, sc_target)
+                    st.download_button("Download plot as PNG", data=png,
+                                         file_name=f"self_consistency_{sc_target}.png", mime="image/png",
+                                         key="download_spread_png")
+                elif len(spread_values) == 1:
+                    st.caption(f"Only one run solved for {sc_target} -- need at least 2 to show a spread.")
+
     st.subheader(f"Domain: {model.problem_domain}")
 
     # ---- find similar past problems: structural similarity (equation
@@ -1130,6 +1251,68 @@ if model:
                             st.latex(step.expression)
                     else:
                         st.caption("No alternate method available for this target.")
+
+                # ---- Monte Carlo uncertainty propagation: give one or
+                # more KNOWN inputs a measurement uncertainty (mean ±
+                # std) and see the resulting SPREAD in this target,
+                # sampled jointly across all of them at once -- see
+                # monte_carlo.py. Complementary to (not a replacement
+                # for) the sensitivity analysis below, which varies one
+                # input at a time deterministically rather than
+                # propagating a joint distribution.
+                known_vars_here = [v for v in model.variables if v.known_value is not None]
+                if known_vars_here:
+                    with st.expander(f"🎲 Uncertainty propagation for {target_name}"):
+                        st.caption("Give one or more known inputs a measurement uncertainty and see "
+                                    "how that uncertainty propagates through to this target -- the "
+                                    "whole spread of plausible answers, not just a single point estimate.")
+                        mc_symbols = st.multiselect(
+                            "Which inputs have uncertainty?", [v.symbol for v in known_vars_here],
+                            key=f"mc_vars_{target_name}",
+                        )
+                        uncertain_vars = []
+                        if mc_symbols:
+                            mc_cols = st.columns(len(mc_symbols))
+                            for i, sym in enumerate(mc_symbols):
+                                var = next(v for v in known_vars_here if v.symbol == sym)
+                                with mc_cols[i]:
+                                    std_val = st.number_input(
+                                        f"± std for {sym}", min_value=0.0,
+                                        value=abs(var.known_value) * 0.05 or 0.1,
+                                        key=f"mc_std_{target_name}_{sym}",
+                                    )
+                                    if std_val > 0:
+                                        uncertain_vars.append(
+                                            UncertainVariable(symbol=sym, mean=var.known_value, std=std_val))
+                        mc_n = st.slider("Number of samples", 100, min(MC_MAX_SAMPLES, 10000), 1000,
+                                           key=f"mc_n_{target_name}")
+                        if st.button("Run Monte Carlo", key=f"mc_run_{target_name}") and uncertain_vars:
+                            with st.spinner(f"Sampling {mc_n} times..."):
+                                try:
+                                    mc_result = run_monte_carlo(model, target_name, uncertain_vars,
+                                                                  n_samples=mc_n)
+                                except ValueError as e:
+                                    st.error(str(e))
+                                    mc_result = None
+                            st.session_state[f"mc_result_{target_name}"] = mc_result
+                        mc_result = st.session_state.get(f"mc_result_{target_name}")
+                        if mc_result is not None and mc_result.samples:
+                            st.write(f"**{target_name} = {mc_result.mean:.6g} ± {mc_result.std:.4g}** "
+                                      f"(5th–95th percentile: {mc_result.p5:.6g} to {mc_result.p95:.6g})")
+                            if mc_result.n_failed:
+                                st.caption(f"{mc_result.n_failed} of {mc_result.n_requested} samples "
+                                            "didn't produce a real result and were excluded.")
+                            hist_fig = build_histogram_plot(mc_result.samples, target_name,
+                                                               mean=mc_result.mean, p5=mc_result.p5,
+                                                               p95=mc_result.p95)
+                            st.plotly_chart(hist_fig, width='stretch', key=f"mc_hist_{target_name}")
+                            format_download_button(
+                                key=f"mc_hist_{target_name}", file_stem=f"monte_carlo_{target_name}",
+                                render_fn=lambda fmt, r=mc_result: snapshot_histogram_plot(
+                                    r.samples, target_name, mean=r.mean, p5=r.p5, p95=r.p95, fmt=fmt),
+                            )
+                        elif mc_result is not None:
+                            st.warning("No samples produced a real result -- try smaller std values.")
 
                 # ---- sensitivity / what-if analysis: which input
                 # matters most to this target, and how does the answer
@@ -1415,7 +1598,7 @@ if model:
 
         plot_mode = "2D line"
         if len(free_syms) >= 2:
-            plot_mode = st.radio("Plot type", ["2D line", "3D surface"], horizontal=True)
+            plot_mode = st.radio("Plot type", ["2D line", "3D surface", "Contour"], horizontal=True)
 
         if plot_mode == "3D surface" and len(free_syms) >= 2:
             x_symbol = st.selectbox("X-axis variable", free_syms, key="surf_x")
@@ -1468,6 +1651,75 @@ if model:
                                  xr=x_range, yr=y_range, zt=z_target:
                     snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt),
             )
+            format_download_button(
+                key=f"surface_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                file_stem=f"{eq_choice.name}_surface",
+                render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                    xr=x_range, yr=y_range, zt=z_target:
+                    snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt, fmt=fmt),
+            )
+
+        elif plot_mode == "Contour" and len(free_syms) >= 2:
+            x_symbol = st.selectbox("X-axis variable", free_syms, key="contour_x")
+            y_candidates = [s for s in free_syms if s != x_symbol]
+            y_symbol = st.selectbox("Y-axis variable", y_candidates, key="contour_y")
+            other_syms = [s for s in free_syms if s not in (x_symbol, y_symbol)]
+
+            param_values = {}
+            if other_syms:
+                st.caption("Adjust the remaining parameters:")
+                pcols = st.columns(min(4, len(other_syms)))
+                for i, s in enumerate(other_syms):
+                    default = edited_values.get(s, 1.0) or 1.0
+                    with pcols[i % len(pcols)]:
+                        param_values[s] = st.slider(
+                            s, min_value=float(default) - 10, max_value=float(default) + 10,
+                            value=float(default), key=f"contour_slider_{s}",
+                        )
+
+            x_default = edited_values.get(x_symbol, 10.0) or 10.0
+            y_default = edited_values.get(y_symbol, 10.0) or 10.0
+            x_range = st.slider("X-axis range", -50.0, 50.0,
+                                 (min(0.0, x_default - 10), x_default + 10), key="contour_xr")
+            y_range = st.slider("Y-axis range", -50.0, 50.0,
+                                 (min(0.0, y_default - 10), y_default + 10), key="contour_yr")
+
+            z_target = None
+            if model.solve_for:
+                z_candidates = [t for t in model.solve_for
+                                 if t not in (x_symbol, y_symbol) and target_kind(model, t) == "equation"]
+                if z_candidates:
+                    z_target = st.selectbox("Contour value (solve equation for)", z_candidates,
+                                              key="contour_z_target")
+
+            fig = build_contour_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
+                                       z_target=z_target)
+            st.plotly_chart(fig, width='stretch')
+            st.caption("Same relationship as the 3D surface, viewed from directly above as level "
+                        "lines -- often easier to read exact values off of, with no rotation needed.")
+
+            contour_caption = (
+                f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}] | "
+                f"y={y_symbol} [{y_range[0]:g}, {y_range[1]:g}]"
+                + (f" | contours of: {z_target}" if z_target else "")
+                + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
+                   if param_values else "")
+            )
+            snapshot_button(
+                key=f"contour_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                title=f"{eq_choice.name}: contours of {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
+                caption=contour_caption,
+                render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                 xr=x_range, yr=y_range, zt=z_target:
+                    snapshot_contour_plot(ec, xs, ys, pv, xr, yr, z_target=zt),
+            )
+            format_download_button(
+                key=f"contour_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                file_stem=f"{eq_choice.name}_contour",
+                render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                    xr=x_range, yr=y_range, zt=z_target:
+                    snapshot_contour_plot(ec, xs, ys, pv, xr, yr, z_target=zt, fmt=fmt),
+            )
 
         else:
             x_symbol = st.selectbox("X-axis variable", free_syms, key="line_x")
@@ -1496,7 +1748,17 @@ if model:
                 if candidates:
                     y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
 
-            fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target)
+            log_cols = st.columns(2)
+            with log_cols[0]:
+                x_log = st.checkbox("Log X-axis", key="line_x_log")
+            with log_cols[1]:
+                y_log = st.checkbox("Log Y-axis", key="line_y_log")
+            if x_log or y_log:
+                st.caption("A power-law relationship is a straight line on log-log axes; an "
+                            "exponential one is a straight line with only the Y-axis logged.")
+
+            fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target,
+                               x_log=x_log, y_log=y_log)
             st.plotly_chart(fig, width='stretch')
 
             line_caption = (
@@ -1509,8 +1771,16 @@ if model:
                 key=f"line_{eq_choice.name}_{x_symbol}",
                 title=f"{eq_choice.name}: {y_target or 'residual'} vs {x_symbol}",
                 caption=line_caption,
-                render_fn=lambda ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target:
-                    snapshot_line_plot(ec, xs, pv, xr, y_target=yt),
+                render_fn=lambda ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target,
+                                 xl=x_log, yl=y_log:
+                    snapshot_line_plot(ec, xs, pv, xr, y_target=yt, x_log=xl, y_log=yl),
+            )
+            format_download_button(
+                key=f"line_{eq_choice.name}_{x_symbol}",
+                file_stem=f"{eq_choice.name}_line",
+                render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target,
+                                    xl=x_log, yl=y_log:
+                    snapshot_line_plot(ec, xs, pv, xr, y_target=yt, x_log=xl, y_log=yl, fmt=fmt),
             )
 
     # ---- feasible region (multiple inequality constraints, 2 free variables)

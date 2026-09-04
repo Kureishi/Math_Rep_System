@@ -16,9 +16,10 @@ since it's a property of the input, not of any one model's competence.
 """
 from dataclasses import dataclass, field
 
-from modules.equation_engine import extract_model, ProblemModel
+from modules.equation_engine import extract_model, ProblemModel, target_kind
 from modules.llm_client import LMStudioClient
 from modules.similarity import problem_shape, jaccard_similarity
+from modules.verifier import _solve_sympy
 
 
 @dataclass
@@ -61,3 +62,36 @@ def run_self_consistency_check(client: LMStudioClient, problem_text: str,
 
     return SelfConsistencyResult(runs=runs, shapes_match=shapes_match, consistent=consistent,
                                    models=models, errors=errors)
+
+
+def numeric_answer_spread(results: SelfConsistencyResult, target: str) -> list[float]:
+    """Solves `target` numerically (plain SymPy, no LLM) in every usable
+    run's own re-derived ProblemModel and returns the resulting list of
+    numeric answers -- the "does the SAME model actually land on the
+    SAME NUMBER across repeated derivations" view, complementary to
+    `shapes_match`'s structural-similarity score. Two runs can have
+    near-identical equation shapes (a high shapes_match score) and still
+    disagree numerically if, say, one run's extraction assigned a
+    different known value to some variable -- this surfaces that
+    directly as a visualizable spread (see
+    plotter.build_spread_plot / plot_snapshot.snapshot_spread_plot)
+    rather than only a single similarity number.
+
+    A run whose model doesn't have `target` as an algebraic solve_for
+    target, or that fails to solve at all, is silently skipped -- this
+    can legitimately happen since re-extraction runs aren't guaranteed
+    to produce the exact same target set every time (see this module's
+    own docstring on why that's meaningful, not a bug to hide)."""
+    values: list[float] = []
+    for model in results.models:
+        if model is None:
+            continue
+        if target not in model.solve_for or target_kind(model, target) != "equation":
+            continue
+        try:
+            answers = _solve_sympy(model)
+        except Exception:  # noqa: BLE001
+            continue
+        if target in answers:
+            values.append(answers[target])
+    return values

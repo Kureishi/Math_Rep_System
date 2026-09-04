@@ -333,3 +333,64 @@ def suggest_bindings(chain: Chain, model: ProblemModel) -> list[InputBinding]:
                 ))
                 break
     return suggestions
+
+
+# ---------------------------------------------------------------- research: parameter sweep
+
+MAX_SWEEP_POINTS = 200  # each sweep point re-resolves the ENTIRE chain (a real sp.solve() per
+                          # downstream step), so this is a much tighter cap than monte_carlo.py's,
+                          # which solves symbolically only once regardless of sample count
+
+
+def sweep_step_binding(chain_id: int, position: int, symbol: str,
+                         values: list[float]) -> list[dict]:
+    """Sweeps ONE literal input binding on step `position` across
+    `values`, re-resolving the WHOLE chain at each swept value (via
+    resolve_chain()'s ordinary top-to-bottom cascade), and returns the
+    resulting output value of every step at every swept point --
+    the "how does everything downstream change as I vary this one
+    upstream input" research view. Restores the chain's stored bindings
+    to their original values before returning (a sweep is exploratory,
+    not a step's real state -- it shouldn't leave the persisted chain
+    sitting on the last swept value).
+
+    Returns a list of {"value": <swept value>, "outputs": {position:
+    output_value_or_None}} rows, one per entry in `values`, suitable for
+    plotter.build_chain_sweep_plot() / plot_snapshot.snapshot_chain_sweep_plot().
+    """
+    if len(values) > MAX_SWEEP_POINTS:
+        raise ValueError(f"Sweep has {len(values)} points; the cap is {MAX_SWEEP_POINTS}.")
+    if not values:
+        raise ValueError("Need at least one value to sweep over.")
+
+    chain = load_chain(chain_id)
+    if chain is None:
+        raise ValueError(f"No chain with id {chain_id}.")
+    step = next((s for s in chain.steps if s.position == position), None)
+    if step is None:
+        raise ValueError(f"Chain {chain_id} has no step at position {position}.")
+
+    original_bindings = step.bindings
+    matching = [b for b in original_bindings if b.symbol == symbol and b.source == "literal"]
+    if not matching:
+        raise ValueError(f"Step {position + 1} has no literal binding for '{symbol}' to sweep.")
+
+    rows: list[dict] = []
+    try:
+        for value in values:
+            swept_bindings = [
+                InputBinding(symbol=b.symbol, source=b.source, literal_value=value,
+                              upstream_position=b.upstream_position, upstream_symbol=b.upstream_symbol)
+                if b.symbol == symbol and b.source == "literal" else b
+                for b in original_bindings
+            ]
+            set_step_bindings(chain_id, position, swept_bindings)
+            resolved = load_chain(chain_id)
+            outputs = {s.position: s.output_value for s in resolved.steps}
+            rows.append({"value": value, "outputs": outputs})
+    finally:
+        # always restore the chain to its pre-sweep state, even if a
+        # swept value raised partway through
+        set_step_bindings(chain_id, position, original_bindings)
+
+    return rows
