@@ -393,6 +393,15 @@ def render_batch_solver_tab():
 
 
 with st.sidebar:
+    # ---- navigation: which tool is active. Kept at the very top of the
+    # sidebar (rather than a horizontal radio competing with the main
+    # input box, as it used to be) so switching tools doesn't require
+    # scrolling past whatever's currently in the main content area.
+    mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
+                              "📚 Batch solver", "🔗 Problem chains"],
+                      key="app_mode")
+    st.divider()
+
     st.header("LM Studio")
     ok, msg = client.is_available()
     (st.success if ok else st.error)(msg)
@@ -476,6 +485,34 @@ with st.sidebar:
             settings.cross_check_tolerance = defaults.cross_check_tolerance
             settings.computation_timeout_seconds = defaults.computation_timeout_seconds
             st.rerun()
+
+    # ---- persistent status panels: these matter across MULTIPLE
+    # problems in a session (a recurring mistake, a chain in progress),
+    # not just the one currently on screen, so they live in the sidebar
+    # rather than inside a single problem's own tabs/expanders where
+    # they'd only be visible while that specific problem is showing.
+    error_patterns = history.summarize_error_patterns()
+    if error_patterns:
+        st.divider()
+        st.header("📊 Recent patterns")
+        for p in error_patterns[:3]:
+            st.warning(p["message"])
+        st.caption("See the Practice tab on a solved problem to target these with a worksheet.")
+
+    active_chain_id = st.session_state.get("active_chain_id")
+    if active_chain_id is not None:
+        active_chain = chains.load_chain(active_chain_id)
+        if active_chain is not None:
+            st.divider()
+            st.header("🔗 Active chain")
+            st.caption(f"**{active_chain.name}** -- {len(active_chain.steps)} step(s)")
+            for step in active_chain.steps:
+                icon = {"ok": "✅", "error": "❌", "stale": "➖"}.get(step.status, "➖")
+                value = f"{step.output_value:.6g}" if step.output_value is not None else "--"
+                st.caption(f"{icon} step {step.position + 1}: {step.output_symbol} = {value}")
+            if st.button("Open in Problem chains", key="sidebar_open_chain",
+                          on_click=lambda: st.session_state.update(app_mode="🔗 Problem chains")):
+                st.rerun()
 
     st.divider()
     st.header("Variable Workspace")
@@ -726,15 +763,13 @@ def render_chains_tab():
 st.title("🧮 Math Representation System")
 st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
 
-# ---------------------------------------------------------------- mode selector
-# Curve fitting and equivalence checking are sibling/standalone tools --
-# gated with an early st.stop() rather than wrapping the (large,
-# deeply-indented) word-problem pipeline below in its own tab block, so
-# adding them doesn't require touching that pipeline's indentation at all.
-mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
-                          "📚 Batch solver", "🔗 Problem chains"],
-                  horizontal=True, label_visibility="collapsed")
-
+# ---------------------------------------------------------------- mode dispatch
+# `mode` itself is set by the sidebar navigation radio (see the top of the
+# `with st.sidebar:` block above) so it's visible without scrolling past the
+# main input box. Curve fitting and equivalence checking are sibling/
+# standalone tools -- gated with an early st.stop() rather than wrapping the
+# (large, deeply-indented) word-problem pipeline below in its own tab block,
+# so adding them doesn't require touching that pipeline's indentation at all.
 if mode == "📈 Curve fitting":
     render_curve_fitting_tab()
     st.stop()
@@ -874,129 +909,175 @@ if model:
         st.error("**Critical checks that failed:** " +
                   "; ".join(f"{c.label} -- {c.detail}" for c in cr.critical_failures))
 
-    with st.expander("Verification detail (raw check list)"):
-        for c in report.checks:
-            icon = "✅" if c.passed else "❌"
-            margin_tag = ""
-            if c.passed and c.margin_ratio is not None:
-                margin_tag = f"  `confidence: {confidence_label(c.margin_ratio)}`"
-            (st.write if c.passed else st.error)(f"{icon} **{c.label}**: {c.detail}{margin_tag}")
-        for target, val in report.sympy_numeric_answers.items():
-            st.write(f"Derived-equation answer for `{target}`: `{val:.6g}`")
-        for target, val in report.llm_independent_answers.items():
-            st.write(f"Independent cross-check for `{target}`: `{val:.6g}`")
-
-    # ---- domain of validity: when does each formula's derived relation
-    # actually make sense (never divide by zero, sqrt of a negative, log
-    # of a non-positive value, etc.) -- shown as its own panel even for
-    # restrictions that AREN'T currently violated, since knowing the
-    # boundary of a formula's validity is useful on its own
-    if report.domain_notes:
-        with st.expander("Domain of validity", expanded=any(n.violated for n in report.domain_notes)):
-            for note in report.domain_notes:
-                if note.violated:
-                    st.error(f"**{note.equation}** -- undefined with the given values: " +
-                              "; ".join(r.description for r in note.violated))
-                restrictions_ok = note.satisfied + note.pending
-                if restrictions_ok:
-                    descs = "; ".join(r.description for r in restrictions_ok)
-                    st.write(f"**{note.equation}** requires: {descs}")
-
-    # ---- physical plausibility: a softer, advisory-only cousin of
-    # domain of validity above -- flags values that are mathematically
-    # fine but land far outside what's normal for the kind of quantity
-    # involved (a 500 m/s^2 acceleration, a negative mass). Never
-    # affects report.passed; see plausibility.py.
-    if report.plausibility_notes:
-        with st.expander("⚠️ Physical plausibility check", expanded=True):
-            st.caption("Advisory only -- these values are mathematically valid, just unusual for this "
-                        "kind of quantity. Worth a second look, not necessarily wrong.")
-            for note in report.plausibility_notes:
-                st.warning(note.message)
-
-    # ---- paranoid mode: re-run extraction through a SECOND,
-    # independently-configured model and compare its equations/answers
-    # against the primary derivation -- off unless a secondary model is
-    # configured in config.py, since it doubles extraction cost.
-    # See paranoid.py.
-    if settings.secondary_reasoning_model:
-        with st.expander(f"🕵️ Paranoid mode: cross-check against {settings.secondary_reasoning_model}"):
-            valid, valid_msg = client.validate_model(settings.secondary_reasoning_model)
-            if not valid:
-                st.warning(f"Can't run the cross-check: {valid_msg}")
-            elif st.button("Run cross-check", key="paranoid_button"):
-                with st.spinner(f"Re-solving with {settings.secondary_reasoning_model}..."):
-                    st.session_state["paranoid_result"] = run_paranoid_check(
-                        client, problem_text, model, report.sympy_numeric_answers,
-                    )
-            paranoid_result = st.session_state.get("paranoid_result")
-            if paranoid_result and paranoid_result.ran:
-                if paranoid_result.error:
-                    st.error(f"Secondary model failed: {paranoid_result.error}")
-                else:
-                    st.write(f"Equation structure match: {paranoid_result.equations_match:.0%}")
-                    if paranoid_result.disagreements:
-                        for target, (primary_val, secondary_val) in paranoid_result.disagreements.items():
-                            st.error(f"**{target}** disagreement: primary = {primary_val:.6g}, "
-                                      f"{paranoid_result.secondary_model} = {secondary_val:.6g}")
-                    elif paranoid_result.secondary_answers:
-                        st.success("Both models agree on every shared answer.")
-
-    # ---- self-consistency check: re-run extraction on the SAME model
-    # 2-5 times and compare the derivations to each other -- a
-    # different signal than paranoid mode: disagreement here usually
-    # means the PROBLEM STATEMENT is ambiguous, not that a model is
-    # specifically wrong. See self_consistency.py.
-    with st.expander("🔁 Self-consistency check"):
-        st.caption("Re-runs extraction on this same model several times and checks whether it "
-                    "derives the same equations each time -- catches an ambiguous problem "
-                    "statement, not a wrong model.")
-        sc_runs = st.slider("Number of runs", 2, 5, 3, key="self_consistency_runs")
-        if st.button("Run self-consistency check", key="self_consistency_button"):
-            with st.spinner(f"Re-extracting {sc_runs} times..."):
-                st.session_state["self_consistency_result"] = run_self_consistency_check(
-                    client, problem_text, runs=sc_runs,
+    # ---- send to chain: a one-click shortcut so getting a just-solved
+    # problem into a chain doesn't mean re-pasting its text into the
+    # separate Problem chains mode. Only offered when there's an
+    # algebraic result to actually expose downstream.
+    send_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
+    if send_targets:
+        with st.expander("🔗 Send this result to a chain"):
+            existing_chains = chains.list_chains()
+            chain_choice = st.selectbox(
+                "Chain", ["+ New chain"] + [c["name"] for c in existing_chains],
+                key="send_to_chain_choice",
+            )
+            send_target = st.selectbox("Expose which result downstream?", send_targets,
+                                         key="send_to_chain_target")
+            new_chain_name = ""
+            if chain_choice == "+ New chain":
+                new_chain_name = st.text_input(
+                    "New chain name", key="send_to_chain_new_name",
+                    placeholder=f"{model.problem_domain} chain",
                 )
-        sc_result = st.session_state.get("self_consistency_result")
-        if sc_result is not None:
-            if sc_result.consistent is None:
-                st.warning("Couldn't get enough successful runs to compare "
-                            f"({len(sc_result.errors)} failed).")
-            elif sc_result.consistent:
-                st.success(f"Consistent across {sc_result.runs} runs -- "
-                            f"similarity scores: {', '.join(f'{s:.0%}' for s in sc_result.shapes_match)}")
-            else:
-                st.warning(f"Inconsistent across {sc_result.runs} runs -- similarity scores: "
-                            f"{', '.join(f'{s:.0%}' for s in sc_result.shapes_match)}. This may mean "
-                            "the problem statement is ambiguous enough that even this model can't "
-                            "parse it the same way twice.")
+            if st.button("Send to chain", key="send_to_chain_button"):
+                if chain_choice == "+ New chain":
+                    if not new_chain_name.strip():
+                        st.error("Give the new chain a name first.")
+                        target_chain_id = None
+                    else:
+                        target_chain_id = chains.create_chain(new_chain_name.strip())
+                else:
+                    target_chain_id = next(c["id"] for c in existing_chains if c["name"] == chain_choice)
+                if target_chain_id is not None:
+                    try:
+                        chains.add_step(target_chain_id, st.session_state.get("problem_text", ""),
+                                          model, send_target)
+                    except ValueError as e:
+                        st.error(str(e))
+                    else:
+                        st.session_state["active_chain_id"] = target_chain_id
+                        st.success(f"Added as a step exposing `{send_target}` -- see the sidebar, "
+                                    "or switch to Problem chains to wire it up further.")
 
-            # numeric spread: complementary to the structural similarity
-            # score above -- two runs can score a near-perfect shapes_match
-            # (identical equation structure) and STILL disagree on the
-            # actual number if, say, one run extracted a slightly
-            # different known value. Only offered for a target every
-            # usable run actually shares.
-            sc_targets = sorted(set().union(*(
-                {t for t in m.solve_for if target_kind(m, t) == "equation"}
-                for m in sc_result.models if m is not None
-            ))) if any(m is not None for m in sc_result.models) else []
-            if sc_targets:
-                sc_target = st.selectbox("See the numeric spread for...", sc_targets,
-                                           key="self_consistency_spread_target")
-                spread_values = numeric_answer_spread(sc_result, sc_target)
-                if len(spread_values) >= 2:
-                    fig = build_spread_plot(spread_values, sc_target)
-                    st.plotly_chart(fig, width='stretch')
-                    st.caption(f"{sc_target}: mean {sum(spread_values) / len(spread_values):.4g}, "
-                                f"min {min(spread_values):.4g}, max {max(spread_values):.4g} "
-                                f"across {len(spread_values)} runs.")
-                    png = snapshot_spread_plot(spread_values, sc_target)
-                    st.download_button("Download plot as PNG", data=png,
-                                         file_name=f"self_consistency_{sc_target}.png", mime="image/png",
-                                         key="download_spread_png")
-                elif len(spread_values) == 1:
-                    st.caption(f"Only one run solved for {sc_target} -- need at least 2 to show a spread.")
+    st.caption("Secondary panels are grouped into tabs below -- verification checks, "
+                "exploratory plots, and practice tools -- so the main solution flow "
+                "below isn't buried under them.")
+    tab_verify, tab_explore, tab_practice = st.tabs(["🔎 Verify", "📊 Explore", "🎯 Practice"])
+
+    with tab_verify:
+        with st.expander("Verification detail (raw check list)"):
+            for c in report.checks:
+                icon = "✅" if c.passed else "❌"
+                margin_tag = ""
+                if c.passed and c.margin_ratio is not None:
+                    margin_tag = f"  `confidence: {confidence_label(c.margin_ratio)}`"
+                (st.write if c.passed else st.error)(f"{icon} **{c.label}**: {c.detail}{margin_tag}")
+            for target, val in report.sympy_numeric_answers.items():
+                st.write(f"Derived-equation answer for `{target}`: `{val:.6g}`")
+            for target, val in report.llm_independent_answers.items():
+                st.write(f"Independent cross-check for `{target}`: `{val:.6g}`")
+
+        # ---- domain of validity: when does each formula's derived relation
+        # actually make sense (never divide by zero, sqrt of a negative, log
+        # of a non-positive value, etc.) -- shown as its own panel even for
+        # restrictions that AREN'T currently violated, since knowing the
+        # boundary of a formula's validity is useful on its own
+        if report.domain_notes:
+            with st.expander("Domain of validity", expanded=any(n.violated for n in report.domain_notes)):
+                for note in report.domain_notes:
+                    if note.violated:
+                        st.error(f"**{note.equation}** -- undefined with the given values: " +
+                                  "; ".join(r.description for r in note.violated))
+                    restrictions_ok = note.satisfied + note.pending
+                    if restrictions_ok:
+                        descs = "; ".join(r.description for r in restrictions_ok)
+                        st.write(f"**{note.equation}** requires: {descs}")
+
+        # ---- physical plausibility: a softer, advisory-only cousin of
+        # domain of validity above -- flags values that are mathematically
+        # fine but land far outside what's normal for the kind of quantity
+        # involved (a 500 m/s^2 acceleration, a negative mass). Never
+        # affects report.passed; see plausibility.py.
+        if report.plausibility_notes:
+            with st.expander("⚠️ Physical plausibility check", expanded=True):
+                st.caption("Advisory only -- these values are mathematically valid, just unusual for this "
+                            "kind of quantity. Worth a second look, not necessarily wrong.")
+                for note in report.plausibility_notes:
+                    st.warning(note.message)
+
+        # ---- paranoid mode: re-run extraction through a SECOND,
+        # independently-configured model and compare its equations/answers
+        # against the primary derivation -- off unless a secondary model is
+        # configured in config.py, since it doubles extraction cost.
+        # See paranoid.py.
+        if settings.secondary_reasoning_model:
+            with st.expander(f"🕵️ Paranoid mode: cross-check against {settings.secondary_reasoning_model}"):
+                valid, valid_msg = client.validate_model(settings.secondary_reasoning_model)
+                if not valid:
+                    st.warning(f"Can't run the cross-check: {valid_msg}")
+                elif st.button("Run cross-check", key="paranoid_button"):
+                    with st.spinner(f"Re-solving with {settings.secondary_reasoning_model}..."):
+                        st.session_state["paranoid_result"] = run_paranoid_check(
+                            client, problem_text, model, report.sympy_numeric_answers,
+                        )
+                paranoid_result = st.session_state.get("paranoid_result")
+                if paranoid_result and paranoid_result.ran:
+                    if paranoid_result.error:
+                        st.error(f"Secondary model failed: {paranoid_result.error}")
+                    else:
+                        st.write(f"Equation structure match: {paranoid_result.equations_match:.0%}")
+                        if paranoid_result.disagreements:
+                            for target, (primary_val, secondary_val) in paranoid_result.disagreements.items():
+                                st.error(f"**{target}** disagreement: primary = {primary_val:.6g}, "
+                                          f"{paranoid_result.secondary_model} = {secondary_val:.6g}")
+                        elif paranoid_result.secondary_answers:
+                            st.success("Both models agree on every shared answer.")
+
+        # ---- self-consistency check: re-run extraction on the SAME model
+        # 2-5 times and compare the derivations to each other -- a
+        # different signal than paranoid mode: disagreement here usually
+        # means the PROBLEM STATEMENT is ambiguous, not that a model is
+        # specifically wrong. See self_consistency.py.
+        with st.expander("🔁 Self-consistency check"):
+            st.caption("Re-runs extraction on this same model several times and checks whether it "
+                        "derives the same equations each time -- catches an ambiguous problem "
+                        "statement, not a wrong model.")
+            sc_runs = st.slider("Number of runs", 2, 5, 3, key="self_consistency_runs")
+            if st.button("Run self-consistency check", key="self_consistency_button"):
+                with st.spinner(f"Re-extracting {sc_runs} times..."):
+                    st.session_state["self_consistency_result"] = run_self_consistency_check(
+                        client, problem_text, runs=sc_runs,
+                    )
+            sc_result = st.session_state.get("self_consistency_result")
+            if sc_result is not None:
+                if sc_result.consistent is None:
+                    st.warning("Couldn't get enough successful runs to compare "
+                                f"({len(sc_result.errors)} failed).")
+                elif sc_result.consistent:
+                    st.success(f"Consistent across {sc_result.runs} runs -- "
+                                f"similarity scores: {', '.join(f'{s:.0%}' for s in sc_result.shapes_match)}")
+                else:
+                    st.warning(f"Inconsistent across {sc_result.runs} runs -- similarity scores: "
+                                f"{', '.join(f'{s:.0%}' for s in sc_result.shapes_match)}. This may mean "
+                                "the problem statement is ambiguous enough that even this model can't "
+                                "parse it the same way twice.")
+
+                # numeric spread: complementary to the structural similarity
+                # score above -- two runs can score a near-perfect shapes_match
+                # (identical equation structure) and STILL disagree on the
+                # actual number if, say, one run extracted a slightly
+                # different known value. Only offered for a target every
+                # usable run actually shares.
+                sc_targets = sorted(set().union(*(
+                    {t for t in m.solve_for if target_kind(m, t) == "equation"}
+                    for m in sc_result.models if m is not None
+                ))) if any(m is not None for m in sc_result.models) else []
+                if sc_targets:
+                    sc_target = st.selectbox("See the numeric spread for...", sc_targets,
+                                               key="self_consistency_spread_target")
+                    spread_values = numeric_answer_spread(sc_result, sc_target)
+                    if len(spread_values) >= 2:
+                        fig = build_spread_plot(spread_values, sc_target)
+                        st.plotly_chart(fig, width='stretch')
+                        st.caption(f"{sc_target}: mean {sum(spread_values) / len(spread_values):.4g}, "
+                                    f"min {min(spread_values):.4g}, max {max(spread_values):.4g} "
+                                    f"across {len(spread_values)} runs.")
+                        png = snapshot_spread_plot(spread_values, sc_target)
+                        st.download_button("Download plot as PNG", data=png,
+                                             file_name=f"self_consistency_{sc_target}.png", mime="image/png",
+                                             key="download_spread_png")
+                    elif len(spread_values) == 1:
+                        st.caption(f"Only one run solved for {sc_target} -- need at least 2 to show a spread.")
 
     st.subheader(f"Domain: {model.problem_domain}")
 
@@ -1088,16 +1169,17 @@ if model:
     # to keep straight (see dependency_graph.py)
     dep_nodes, dep_edges = build_dependency_graph(model)
     equation_node_count = sum(1 for n in dep_nodes if n.kind == "equation")
-    if equation_node_count >= 2:
-        with st.expander("🕸️ Dependency graph"):
-            fig = build_dependency_graph_plot(dep_nodes, dep_edges)
-            st.plotly_chart(fig, width='stretch')
-            snapshot_button(
-                key="dependency_graph",
-                title="Dependency graph",
-                caption=f"{model.problem_domain} -- variable/equation dependencies",
-                render_fn=lambda: snapshot_dependency_graph(dep_nodes, dep_edges),
-            )
+    with tab_explore:
+        if equation_node_count >= 2:
+            with st.expander("🕸️ Dependency graph"):
+                fig = build_dependency_graph_plot(dep_nodes, dep_edges)
+                st.plotly_chart(fig, width='stretch')
+                snapshot_button(
+                    key="dependency_graph",
+                    title="Dependency graph",
+                    caption=f"{model.problem_domain} -- variable/equation dependencies",
+                    render_fn=lambda: snapshot_dependency_graph(dep_nodes, dep_edges),
+                )
 
     if model.assumptions:
         st.markdown("**Assumptions made:**")
@@ -1385,84 +1467,85 @@ if model:
     # against the verified derivation (formula check, arithmetic check,
     # final-answer check -- see grading.py for why this is a diagnosis,
     # not a literal line-by-line diff)
-    algebraic_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
-    if algebraic_targets:
-        with st.expander("📝 Grade my work"):
-            grade_target = st.selectbox("Which target are you solving for?", algebraic_targets,
-                                          key="grade_target")
-            student_work = st.text_area(
-                "Paste your work, one step per line",
-                placeholder="a = (v_f - v_i) / t\na = (20 - 8) / 6\na = 2.0",
-                height=120, key="grade_work_text",
-            )
-            if st.button("Grade it", key="grade_button") and student_work.strip():
-                correct_val = report.sympy_numeric_answers.get(grade_target)
-                result = grade_work(model, grade_target, student_work.splitlines(), correct_val)
-                if result.error:
-                    st.error(result.error)
+    with tab_practice:
+        algebraic_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
+        if algebraic_targets:
+            with st.expander("📝 Grade my work"):
+                grade_target = st.selectbox("Which target are you solving for?", algebraic_targets,
+                                              key="grade_target")
+                student_work = st.text_area(
+                    "Paste your work, one step per line",
+                    placeholder="a = (v_f - v_i) / t\na = (20 - 8) / 6\na = 2.0",
+                    height=120, key="grade_work_text",
+                )
+                if st.button("Grade it", key="grade_button") and student_work.strip():
+                    correct_val = report.sympy_numeric_answers.get(grade_target)
+                    result = grade_work(model, grade_target, student_work.splitlines(), correct_val)
+                    if result.error:
+                        st.error(result.error)
+                    else:
+                        (st.success if result.final_answer_ok else
+                         st.warning if result.final_answer_ok is None else st.error)(result.summary)
+                        if result.formula_ok is not None:
+                            st.caption(f"Formula check: {result.formula_detail}")
+                        for i, lr in enumerate(result.line_results, start=1):
+                            icon = "✅" if lr.arithmetic_ok else "❌" if lr.arithmetic_ok is False else "➖"
+                            st.write(f"{icon} Line {i}: `{lr.raw}` -- {lr.detail}")
+
+                        # personalized error-pattern tracking: persist this
+                        # submission's classification alongside history.py's
+                        # existing records, so a recurring mistake (a sign
+                        # error, a wrong-formula habit, ...) can surface as
+                        # an actual pattern over time rather than vanishing
+                        # once this expander closes
+                        classification = classify_mistake(result)
+                        history.record_grading(
+                            target=grade_target, domain=model.problem_domain,
+                            category=classification.category, subtype=classification.subtype,
+                            detail=classification.detail, equation_shapes=problem_shape(model),
+                        )
+
+                error_patterns = history.summarize_error_patterns()
+                if error_patterns:
+                    st.divider()
+                    st.caption("📊 Patterns from your recent graded work:")
+                    for p in error_patterns:
+                        st.warning(p["message"])
+                    st.session_state["error_pattern_messages"] = [p["message"] for p in error_patterns]
+
+        # ---- worksheet generator: reverse generation -- new problem TEXT
+        # sharing this problem's own verified equation structure, fed back
+        # through the SAME extract/verify pipeline used for any problem
+        # rather than trusting the generating LLM's own numbers
+        with st.expander("📄 Generate worksheet variants"):
+            wcols = st.columns([2, 1, 1])
+            with wcols[0]:
+                w_count = st.slider("How many?", 1, 5, 3, key="worksheet_count")
+            with wcols[1]:
+                w_difficulty = st.selectbox("Difficulty", ["similar", "easier", "harder"], key="worksheet_difficulty")
+            recent_patterns = st.session_state.get("error_pattern_messages", [])
+            w_targeted = False
+            if recent_patterns:
+                w_targeted = st.checkbox(
+                    "🎯 Target my recent mistake pattern(s)", value=True, key="worksheet_targeted",
+                    help="Biases the generated problems toward extra practice on: " + "; ".join(recent_patterns),
+                )
+            if st.button("Generate", key="worksheet_button"):
+                with st.spinner("Generating worksheet problems..."):
+                    if w_targeted and recent_patterns:
+                        new_problems = generate_targeted_worksheet_problems(
+                            client, model, recent_patterns, w_count, w_difficulty)
+                    else:
+                        new_problems = generate_worksheet_problems(client, model, w_count, w_difficulty)
+                if not new_problems:
+                    st.warning("Couldn't generate worksheet problems -- try again.")
                 else:
-                    (st.success if result.final_answer_ok else
-                     st.warning if result.final_answer_ok is None else st.error)(result.summary)
-                    if result.formula_ok is not None:
-                        st.caption(f"Formula check: {result.formula_detail}")
-                    for i, lr in enumerate(result.line_results, start=1):
-                        icon = "✅" if lr.arithmetic_ok else "❌" if lr.arithmetic_ok is False else "➖"
-                        st.write(f"{icon} Line {i}: `{lr.raw}` -- {lr.detail}")
-
-                    # personalized error-pattern tracking: persist this
-                    # submission's classification alongside history.py's
-                    # existing records, so a recurring mistake (a sign
-                    # error, a wrong-formula habit, ...) can surface as
-                    # an actual pattern over time rather than vanishing
-                    # once this expander closes
-                    classification = classify_mistake(result)
-                    history.record_grading(
-                        target=grade_target, domain=model.problem_domain,
-                        category=classification.category, subtype=classification.subtype,
-                        detail=classification.detail, equation_shapes=problem_shape(model),
-                    )
-
-            error_patterns = history.summarize_error_patterns()
-            if error_patterns:
-                st.divider()
-                st.caption("📊 Patterns from your recent graded work:")
-                for p in error_patterns:
-                    st.warning(p["message"])
-                st.session_state["error_pattern_messages"] = [p["message"] for p in error_patterns]
-
-    # ---- worksheet generator: reverse generation -- new problem TEXT
-    # sharing this problem's own verified equation structure, fed back
-    # through the SAME extract/verify pipeline used for any problem
-    # rather than trusting the generating LLM's own numbers
-    with st.expander("📄 Generate worksheet variants"):
-        wcols = st.columns([2, 1, 1])
-        with wcols[0]:
-            w_count = st.slider("How many?", 1, 5, 3, key="worksheet_count")
-        with wcols[1]:
-            w_difficulty = st.selectbox("Difficulty", ["similar", "easier", "harder"], key="worksheet_difficulty")
-        recent_patterns = st.session_state.get("error_pattern_messages", [])
-        w_targeted = False
-        if recent_patterns:
-            w_targeted = st.checkbox(
-                "🎯 Target my recent mistake pattern(s)", value=True, key="worksheet_targeted",
-                help="Biases the generated problems toward extra practice on: " + "; ".join(recent_patterns),
-            )
-        if st.button("Generate", key="worksheet_button"):
-            with st.spinner("Generating worksheet problems..."):
-                if w_targeted and recent_patterns:
-                    new_problems = generate_targeted_worksheet_problems(
-                        client, model, recent_patterns, w_count, w_difficulty)
-                else:
-                    new_problems = generate_worksheet_problems(client, model, w_count, w_difficulty)
-            if not new_problems:
-                st.warning("Couldn't generate worksheet problems -- try again.")
-            else:
-                st.session_state["worksheet_problems"] = new_problems
-        for i, p in enumerate(st.session_state.get("worksheet_problems", []), start=1):
-            st.markdown(f"**{i}.** {p}")
-        if st.session_state.get("worksheet_problems"):
-            st.caption("Copy any of these into the main text input above to solve and verify it "
-                        "through the same pipeline as any other problem.")
+                    st.session_state["worksheet_problems"] = new_problems
+            for i, p in enumerate(st.session_state.get("worksheet_problems", []), start=1):
+                st.markdown(f"**{i}.** {p}")
+            if st.session_state.get("worksheet_problems"):
+                st.caption("Copy any of these into the main text input above to solve and verify it "
+                            "through the same pipeline as any other problem.")
 
     # ---- ODE solution: plot + evaluate-at-a-point
     ode_solutions = solve_ode(model)
@@ -1588,259 +1671,260 @@ if model:
 
     # ---- interactive plot (algebraic equations only -- inequalities and
     # ODEs are visualized in their own dedicated sections above)
-    plottable = [e for e in model.equations if e.kind == "equation" and e.sympy_eq is not None
-                 and len(plottable_free_symbols(e, set())) >= 1]
-    if plottable:
-        st.markdown("### Interactive plot")
-        eq_choice_name = st.selectbox("Equation to plot", [e.name for e in plottable])
-        eq_choice = next(e for e in plottable if e.name == eq_choice_name)
-        free_syms = plottable_free_symbols(eq_choice, set())
+    with tab_explore:
+        plottable = [e for e in model.equations if e.kind == "equation" and e.sympy_eq is not None
+                     and len(plottable_free_symbols(e, set())) >= 1]
+        if plottable:
+            st.markdown("### Interactive plot")
+            eq_choice_name = st.selectbox("Equation to plot", [e.name for e in plottable])
+            eq_choice = next(e for e in plottable if e.name == eq_choice_name)
+            free_syms = plottable_free_symbols(eq_choice, set())
 
-        plot_mode = "2D line"
-        if len(free_syms) >= 2:
-            plot_mode = st.radio("Plot type", ["2D line", "3D surface", "Contour"], horizontal=True)
+            plot_mode = "2D line"
+            if len(free_syms) >= 2:
+                plot_mode = st.radio("Plot type", ["2D line", "3D surface", "Contour"], horizontal=True)
 
-        if plot_mode == "3D surface" and len(free_syms) >= 2:
-            x_symbol = st.selectbox("X-axis variable", free_syms, key="surf_x")
-            y_candidates = [s for s in free_syms if s != x_symbol]
-            y_symbol = st.selectbox("Y-axis variable", y_candidates, key="surf_y")
-            other_syms = [s for s in free_syms if s not in (x_symbol, y_symbol)]
+            if plot_mode == "3D surface" and len(free_syms) >= 2:
+                x_symbol = st.selectbox("X-axis variable", free_syms, key="surf_x")
+                y_candidates = [s for s in free_syms if s != x_symbol]
+                y_symbol = st.selectbox("Y-axis variable", y_candidates, key="surf_y")
+                other_syms = [s for s in free_syms if s not in (x_symbol, y_symbol)]
 
-            param_values = {}
-            if other_syms:
-                st.caption("Adjust the remaining parameters:")
-                pcols = st.columns(min(4, len(other_syms)))
-                for i, s in enumerate(other_syms):
-                    default = edited_values.get(s, 1.0) or 1.0
-                    with pcols[i % len(pcols)]:
-                        param_values[s] = st.slider(
-                            s, min_value=float(default) - 10, max_value=float(default) + 10,
-                            value=float(default), key=f"surf_slider_{s}",
-                        )
+                param_values = {}
+                if other_syms:
+                    st.caption("Adjust the remaining parameters:")
+                    pcols = st.columns(min(4, len(other_syms)))
+                    for i, s in enumerate(other_syms):
+                        default = edited_values.get(s, 1.0) or 1.0
+                        with pcols[i % len(pcols)]:
+                            param_values[s] = st.slider(
+                                s, min_value=float(default) - 10, max_value=float(default) + 10,
+                                value=float(default), key=f"surf_slider_{s}",
+                            )
 
-            x_default = edited_values.get(x_symbol, 10.0) or 10.0
-            y_default = edited_values.get(y_symbol, 10.0) or 10.0
-            x_range = st.slider("X-axis range", -50.0, 50.0,
-                                 (min(0.0, x_default - 10), x_default + 10), key="surf_xr")
-            y_range = st.slider("Y-axis range", -50.0, 50.0,
-                                 (min(0.0, y_default - 10), y_default + 10), key="surf_yr")
+                x_default = edited_values.get(x_symbol, 10.0) or 10.0
+                y_default = edited_values.get(y_symbol, 10.0) or 10.0
+                x_range = st.slider("X-axis range", -50.0, 50.0,
+                                     (min(0.0, x_default - 10), x_default + 10), key="surf_xr")
+                y_range = st.slider("Y-axis range", -50.0, 50.0,
+                                     (min(0.0, y_default - 10), y_default + 10), key="surf_yr")
 
-            z_target = None
-            if model.solve_for:
-                z_candidates = [t for t in model.solve_for
-                                 if t not in (x_symbol, y_symbol) and target_kind(model, t) == "equation"]
-                if z_candidates:
-                    z_target = st.selectbox("Z-axis target (solve equation for)", z_candidates)
+                z_target = None
+                if model.solve_for:
+                    z_candidates = [t for t in model.solve_for
+                                     if t not in (x_symbol, y_symbol) and target_kind(model, t) == "equation"]
+                    if z_candidates:
+                        z_target = st.selectbox("Z-axis target (solve equation for)", z_candidates)
 
-            fig = build_surface_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
-                                       z_target=z_target)
-            st.plotly_chart(fig, width='stretch')
-
-            surf_caption = (
-                f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}] | "
-                f"y={y_symbol} [{y_range[0]:g}, {y_range[1]:g}]"
-                + (f" | z solved for: {z_target}" if z_target else "")
-                + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
-                   if param_values else "")
-            )
-            snapshot_button(
-                key=f"surface_{eq_choice.name}_{x_symbol}_{y_symbol}",
-                title=f"{eq_choice.name}: {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
-                caption=surf_caption,
-                render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
-                                 xr=x_range, yr=y_range, zt=z_target:
-                    snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt),
-            )
-            format_download_button(
-                key=f"surface_{eq_choice.name}_{x_symbol}_{y_symbol}",
-                file_stem=f"{eq_choice.name}_surface",
-                render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
-                                    xr=x_range, yr=y_range, zt=z_target:
-                    snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt, fmt=fmt),
-            )
-
-        elif plot_mode == "Contour" and len(free_syms) >= 2:
-            x_symbol = st.selectbox("X-axis variable", free_syms, key="contour_x")
-            y_candidates = [s for s in free_syms if s != x_symbol]
-            y_symbol = st.selectbox("Y-axis variable", y_candidates, key="contour_y")
-            other_syms = [s for s in free_syms if s not in (x_symbol, y_symbol)]
-
-            param_values = {}
-            if other_syms:
-                st.caption("Adjust the remaining parameters:")
-                pcols = st.columns(min(4, len(other_syms)))
-                for i, s in enumerate(other_syms):
-                    default = edited_values.get(s, 1.0) or 1.0
-                    with pcols[i % len(pcols)]:
-                        param_values[s] = st.slider(
-                            s, min_value=float(default) - 10, max_value=float(default) + 10,
-                            value=float(default), key=f"contour_slider_{s}",
-                        )
-
-            x_default = edited_values.get(x_symbol, 10.0) or 10.0
-            y_default = edited_values.get(y_symbol, 10.0) or 10.0
-            x_range = st.slider("X-axis range", -50.0, 50.0,
-                                 (min(0.0, x_default - 10), x_default + 10), key="contour_xr")
-            y_range = st.slider("Y-axis range", -50.0, 50.0,
-                                 (min(0.0, y_default - 10), y_default + 10), key="contour_yr")
-
-            z_target = None
-            if model.solve_for:
-                z_candidates = [t for t in model.solve_for
-                                 if t not in (x_symbol, y_symbol) and target_kind(model, t) == "equation"]
-                if z_candidates:
-                    z_target = st.selectbox("Contour value (solve equation for)", z_candidates,
-                                              key="contour_z_target")
-
-            fig = build_contour_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
-                                       z_target=z_target)
-            st.plotly_chart(fig, width='stretch')
-            st.caption("Same relationship as the 3D surface, viewed from directly above as level "
-                        "lines -- often easier to read exact values off of, with no rotation needed.")
-
-            contour_caption = (
-                f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}] | "
-                f"y={y_symbol} [{y_range[0]:g}, {y_range[1]:g}]"
-                + (f" | contours of: {z_target}" if z_target else "")
-                + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
-                   if param_values else "")
-            )
-            snapshot_button(
-                key=f"contour_{eq_choice.name}_{x_symbol}_{y_symbol}",
-                title=f"{eq_choice.name}: contours of {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
-                caption=contour_caption,
-                render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
-                                 xr=x_range, yr=y_range, zt=z_target:
-                    snapshot_contour_plot(ec, xs, ys, pv, xr, yr, z_target=zt),
-            )
-            format_download_button(
-                key=f"contour_{eq_choice.name}_{x_symbol}_{y_symbol}",
-                file_stem=f"{eq_choice.name}_contour",
-                render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
-                                    xr=x_range, yr=y_range, zt=z_target:
-                    snapshot_contour_plot(ec, xs, ys, pv, xr, yr, z_target=zt, fmt=fmt),
-            )
-
-        else:
-            x_symbol = st.selectbox("X-axis variable", free_syms, key="line_x")
-            other_syms = [s for s in free_syms if s != x_symbol]
-
-            param_values = {}
-            if other_syms:
-                st.caption("Adjust the remaining parameters -- the plot updates live:")
-                pcols = st.columns(min(4, len(other_syms)))
-                for i, s in enumerate(other_syms):
-                    default = edited_values.get(s, 1.0) or 1.0
-                    with pcols[i % len(pcols)]:
-                        param_values[s] = st.slider(
-                            s, min_value=float(default) - 10, max_value=float(default) + 10,
-                            value=float(default), key=f"slider_{s}",
-                        )
-
-            x_default = edited_values.get(x_symbol, 10.0) or 10.0
-            x_range = st.slider("X-axis range", -50.0, 50.0,
-                                 (min(0.0, x_default - 10), x_default + 10), key="line_xr")
-
-            y_target = None
-            if model.solve_for:
-                candidates = [t for t in model.solve_for
-                               if t != x_symbol and target_kind(model, t) == "equation"]
-                if candidates:
-                    y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
-
-            log_cols = st.columns(2)
-            with log_cols[0]:
-                x_log = st.checkbox("Log X-axis", key="line_x_log")
-            with log_cols[1]:
-                y_log = st.checkbox("Log Y-axis", key="line_y_log")
-            if x_log or y_log:
-                st.caption("A power-law relationship is a straight line on log-log axes; an "
-                            "exponential one is a straight line with only the Y-axis logged.")
-
-            fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target,
-                               x_log=x_log, y_log=y_log)
-            st.plotly_chart(fig, width='stretch')
-
-            line_caption = (
-                f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}]"
-                + (f" | y solved for: {y_target}" if y_target else "")
-                + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
-                   if param_values else "")
-            )
-            snapshot_button(
-                key=f"line_{eq_choice.name}_{x_symbol}",
-                title=f"{eq_choice.name}: {y_target or 'residual'} vs {x_symbol}",
-                caption=line_caption,
-                render_fn=lambda ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target,
-                                 xl=x_log, yl=y_log:
-                    snapshot_line_plot(ec, xs, pv, xr, y_target=yt, x_log=xl, y_log=yl),
-            )
-            format_download_button(
-                key=f"line_{eq_choice.name}_{x_symbol}",
-                file_stem=f"{eq_choice.name}_line",
-                render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target,
-                                    xl=x_log, yl=y_log:
-                    snapshot_line_plot(ec, xs, pv, xr, y_target=yt, x_log=xl, y_log=yl, fmt=fmt),
-            )
-
-    # ---- feasible region (multiple inequality constraints, 2 free variables)
-    inequality_eqs = [e for e in model.equations if e.kind == "inequality" and e.sympy_eq is not None]
-    if len(inequality_eqs) >= 1:
-        all_ineq_symbols = set()
-        for e in inequality_eqs:
-            all_ineq_symbols |= {s.name for s in e.sympy_eq.free_symbols}
-        # only known-fixed symbols get sliders; the rest are candidate plot axes
-        ineq_free_syms = sorted(all_ineq_symbols)
-        if len(ineq_free_syms) >= 2:
-            st.markdown("### Feasible region")
-            st.caption("Shades where every selected constraint holds at once -- e.g. a budget "
-                        "AND a time limit AND non-negativity, simultaneously.")
-            selected_constraints = st.multiselect(
-                "Constraints to include", [e.name for e in inequality_eqs],
-                default=[e.name for e in inequality_eqs], key="region_constraints",
-            )
-            region_x = st.selectbox("X-axis variable", ineq_free_syms, key="region_x")
-            region_y_candidates = [s for s in ineq_free_syms if s != region_x]
-            region_y = st.selectbox("Y-axis variable", region_y_candidates, key="region_y")
-            other_ineq_syms = [s for s in ineq_free_syms if s not in (region_x, region_y)]
-
-            region_params = {}
-            if other_ineq_syms:
-                st.caption("Fix the remaining constraint parameters:")
-                rcols = st.columns(min(4, len(other_ineq_syms)))
-                for i, s in enumerate(other_ineq_syms):
-                    default = edited_values.get(s, 1.0) or 1.0
-                    with rcols[i % len(rcols)]:
-                        region_params[s] = st.number_input(s, value=float(default), key=f"region_param_{s}")
-
-            rx_default = edited_values.get(region_x, 10.0) or 10.0
-            ry_default = edited_values.get(region_y, 10.0) or 10.0
-            region_x_range = st.slider("X-axis range", -50.0, 50.0,
-                                         (min(0.0, rx_default - 10), rx_default + 10), key="region_xr")
-            region_y_range = st.slider("Y-axis range", -50.0, 50.0,
-                                         (min(0.0, ry_default - 10), ry_default + 10), key="region_yr")
-
-            chosen = [e for e in inequality_eqs if e.name in selected_constraints]
-            if chosen:
-                fig = build_feasible_region_plot(chosen, region_x, region_y, region_params,
-                                                   region_x_range, region_y_range)
+                fig = build_surface_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
+                                           z_target=z_target)
                 st.plotly_chart(fig, width='stretch')
 
-                region_caption = (
-                    f"Constraints: {', '.join(c.name for c in chosen)} | x={region_x} "
-                    f"[{region_x_range[0]:g}, {region_x_range[1]:g}] | y={region_y} "
-                    f"[{region_y_range[0]:g}, {region_y_range[1]:g}]"
-                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in region_params.items())
-                       if region_params else "")
+                surf_caption = (
+                    f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}] | "
+                    f"y={y_symbol} [{y_range[0]:g}, {y_range[1]:g}]"
+                    + (f" | z solved for: {z_target}" if z_target else "")
+                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
+                       if param_values else "")
                 )
                 snapshot_button(
-                    key=f"region_{region_x}_{region_y}",
-                    title="Feasible region",
-                    caption=region_caption,
-                    render_fn=lambda ch=chosen, rx=region_x, ry=region_y, rp=region_params,
-                                     rxr=region_x_range, ryr=region_y_range:
-                        snapshot_feasible_region(ch, rx, ry, rp, rxr, ryr),
+                    key=f"surface_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                    title=f"{eq_choice.name}: {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
+                    caption=surf_caption,
+                    render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                     xr=x_range, yr=y_range, zt=z_target:
+                        snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt),
                 )
+                format_download_button(
+                    key=f"surface_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                    file_stem=f"{eq_choice.name}_surface",
+                    render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                        xr=x_range, yr=y_range, zt=z_target:
+                        snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt, fmt=fmt),
+                )
+
+            elif plot_mode == "Contour" and len(free_syms) >= 2:
+                x_symbol = st.selectbox("X-axis variable", free_syms, key="contour_x")
+                y_candidates = [s for s in free_syms if s != x_symbol]
+                y_symbol = st.selectbox("Y-axis variable", y_candidates, key="contour_y")
+                other_syms = [s for s in free_syms if s not in (x_symbol, y_symbol)]
+
+                param_values = {}
+                if other_syms:
+                    st.caption("Adjust the remaining parameters:")
+                    pcols = st.columns(min(4, len(other_syms)))
+                    for i, s in enumerate(other_syms):
+                        default = edited_values.get(s, 1.0) or 1.0
+                        with pcols[i % len(pcols)]:
+                            param_values[s] = st.slider(
+                                s, min_value=float(default) - 10, max_value=float(default) + 10,
+                                value=float(default), key=f"contour_slider_{s}",
+                            )
+
+                x_default = edited_values.get(x_symbol, 10.0) or 10.0
+                y_default = edited_values.get(y_symbol, 10.0) or 10.0
+                x_range = st.slider("X-axis range", -50.0, 50.0,
+                                     (min(0.0, x_default - 10), x_default + 10), key="contour_xr")
+                y_range = st.slider("Y-axis range", -50.0, 50.0,
+                                     (min(0.0, y_default - 10), y_default + 10), key="contour_yr")
+
+                z_target = None
+                if model.solve_for:
+                    z_candidates = [t for t in model.solve_for
+                                     if t not in (x_symbol, y_symbol) and target_kind(model, t) == "equation"]
+                    if z_candidates:
+                        z_target = st.selectbox("Contour value (solve equation for)", z_candidates,
+                                                  key="contour_z_target")
+
+                fig = build_contour_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
+                                           z_target=z_target)
+                st.plotly_chart(fig, width='stretch')
+                st.caption("Same relationship as the 3D surface, viewed from directly above as level "
+                            "lines -- often easier to read exact values off of, with no rotation needed.")
+
+                contour_caption = (
+                    f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}] | "
+                    f"y={y_symbol} [{y_range[0]:g}, {y_range[1]:g}]"
+                    + (f" | contours of: {z_target}" if z_target else "")
+                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
+                       if param_values else "")
+                )
+                snapshot_button(
+                    key=f"contour_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                    title=f"{eq_choice.name}: contours of {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
+                    caption=contour_caption,
+                    render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                     xr=x_range, yr=y_range, zt=z_target:
+                        snapshot_contour_plot(ec, xs, ys, pv, xr, yr, z_target=zt),
+                )
+                format_download_button(
+                    key=f"contour_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                    file_stem=f"{eq_choice.name}_contour",
+                    render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                        xr=x_range, yr=y_range, zt=z_target:
+                        snapshot_contour_plot(ec, xs, ys, pv, xr, yr, z_target=zt, fmt=fmt),
+                )
+
+            else:
+                x_symbol = st.selectbox("X-axis variable", free_syms, key="line_x")
+                other_syms = [s for s in free_syms if s != x_symbol]
+
+                param_values = {}
+                if other_syms:
+                    st.caption("Adjust the remaining parameters -- the plot updates live:")
+                    pcols = st.columns(min(4, len(other_syms)))
+                    for i, s in enumerate(other_syms):
+                        default = edited_values.get(s, 1.0) or 1.0
+                        with pcols[i % len(pcols)]:
+                            param_values[s] = st.slider(
+                                s, min_value=float(default) - 10, max_value=float(default) + 10,
+                                value=float(default), key=f"slider_{s}",
+                            )
+
+                x_default = edited_values.get(x_symbol, 10.0) or 10.0
+                x_range = st.slider("X-axis range", -50.0, 50.0,
+                                     (min(0.0, x_default - 10), x_default + 10), key="line_xr")
+
+                y_target = None
+                if model.solve_for:
+                    candidates = [t for t in model.solve_for
+                                   if t != x_symbol and target_kind(model, t) == "equation"]
+                    if candidates:
+                        y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
+
+                log_cols = st.columns(2)
+                with log_cols[0]:
+                    x_log = st.checkbox("Log X-axis", key="line_x_log")
+                with log_cols[1]:
+                    y_log = st.checkbox("Log Y-axis", key="line_y_log")
+                if x_log or y_log:
+                    st.caption("A power-law relationship is a straight line on log-log axes; an "
+                                "exponential one is a straight line with only the Y-axis logged.")
+
+                fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target,
+                                   x_log=x_log, y_log=y_log)
+                st.plotly_chart(fig, width='stretch')
+
+                line_caption = (
+                    f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}]"
+                    + (f" | y solved for: {y_target}" if y_target else "")
+                    + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in param_values.items())
+                       if param_values else "")
+                )
+                snapshot_button(
+                    key=f"line_{eq_choice.name}_{x_symbol}",
+                    title=f"{eq_choice.name}: {y_target or 'residual'} vs {x_symbol}",
+                    caption=line_caption,
+                    render_fn=lambda ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target,
+                                     xl=x_log, yl=y_log:
+                        snapshot_line_plot(ec, xs, pv, xr, y_target=yt, x_log=xl, y_log=yl),
+                )
+                format_download_button(
+                    key=f"line_{eq_choice.name}_{x_symbol}",
+                    file_stem=f"{eq_choice.name}_line",
+                    render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target,
+                                        xl=x_log, yl=y_log:
+                        snapshot_line_plot(ec, xs, pv, xr, y_target=yt, x_log=xl, y_log=yl, fmt=fmt),
+                )
+
+        # ---- feasible region (multiple inequality constraints, 2 free variables)
+        inequality_eqs = [e for e in model.equations if e.kind == "inequality" and e.sympy_eq is not None]
+        if len(inequality_eqs) >= 1:
+            all_ineq_symbols = set()
+            for e in inequality_eqs:
+                all_ineq_symbols |= {s.name for s in e.sympy_eq.free_symbols}
+            # only known-fixed symbols get sliders; the rest are candidate plot axes
+            ineq_free_syms = sorted(all_ineq_symbols)
+            if len(ineq_free_syms) >= 2:
+                st.markdown("### Feasible region")
+                st.caption("Shades where every selected constraint holds at once -- e.g. a budget "
+                            "AND a time limit AND non-negativity, simultaneously.")
+                selected_constraints = st.multiselect(
+                    "Constraints to include", [e.name for e in inequality_eqs],
+                    default=[e.name for e in inequality_eqs], key="region_constraints",
+                )
+                region_x = st.selectbox("X-axis variable", ineq_free_syms, key="region_x")
+                region_y_candidates = [s for s in ineq_free_syms if s != region_x]
+                region_y = st.selectbox("Y-axis variable", region_y_candidates, key="region_y")
+                other_ineq_syms = [s for s in ineq_free_syms if s not in (region_x, region_y)]
+
+                region_params = {}
+                if other_ineq_syms:
+                    st.caption("Fix the remaining constraint parameters:")
+                    rcols = st.columns(min(4, len(other_ineq_syms)))
+                    for i, s in enumerate(other_ineq_syms):
+                        default = edited_values.get(s, 1.0) or 1.0
+                        with rcols[i % len(rcols)]:
+                            region_params[s] = st.number_input(s, value=float(default), key=f"region_param_{s}")
+
+                rx_default = edited_values.get(region_x, 10.0) or 10.0
+                ry_default = edited_values.get(region_y, 10.0) or 10.0
+                region_x_range = st.slider("X-axis range", -50.0, 50.0,
+                                             (min(0.0, rx_default - 10), rx_default + 10), key="region_xr")
+                region_y_range = st.slider("Y-axis range", -50.0, 50.0,
+                                             (min(0.0, ry_default - 10), ry_default + 10), key="region_yr")
+
+                chosen = [e for e in inequality_eqs if e.name in selected_constraints]
+                if chosen:
+                    fig = build_feasible_region_plot(chosen, region_x, region_y, region_params,
+                                                       region_x_range, region_y_range)
+                    st.plotly_chart(fig, width='stretch')
+
+                    region_caption = (
+                        f"Constraints: {', '.join(c.name for c in chosen)} | x={region_x} "
+                        f"[{region_x_range[0]:g}, {region_x_range[1]:g}] | y={region_y} "
+                        f"[{region_y_range[0]:g}, {region_y_range[1]:g}]"
+                        + (" | fixed: " + ", ".join(f"{k}={v:g}" for k, v in region_params.items())
+                           if region_params else "")
+                    )
+                    snapshot_button(
+                        key=f"region_{region_x}_{region_y}",
+                        title="Feasible region",
+                        caption=region_caption,
+                        render_fn=lambda ch=chosen, rx=region_x, ry=region_y, rp=region_params,
+                                         rxr=region_x_range, ryr=region_y_range:
+                            snapshot_feasible_region(ch, rx, ry, rp, rxr, ryr),
+                    )
 
     # ---- export
     st.divider()

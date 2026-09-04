@@ -776,6 +776,40 @@ See `ARCHITECTURE.md` for the full design. In short:
     disagreement directly visible rather than only inferable from a
     similarity percentage.
 
+## UI streamlining
+
+A few changes aimed purely at making the interface easier to navigate as
+the feature list above has grown, with no changes to the underlying
+solving/verification logic:
+
+- **Secondary panels are grouped into tabs.** Right after the confidence
+  banner, a solved problem now shows three tabs -- **🔎 Verify**
+  (verification detail, domain of validity, physical plausibility,
+  paranoid mode, self-consistency check), **📊 Explore** (dependency
+  graph, the interactive plot/contour/feasible-region section), and
+  **🎯 Practice** (grade my work, generate worksheet variants) -- instead
+  of all of those expanders stacking in one long vertical scroll. The
+  core content everyone always wants (derived equations, variables,
+  step-by-step solution, ODE/recurrence solutions, follow-up Q&A) stays
+  in the main flow below the tabs, always visible.
+- **Mode navigation moved to the sidebar.** The word-problem-solver /
+  curve-fitting / equivalence-checking / batch-solver / problem-chains
+  selector used to be a horizontal radio competing for attention right
+  above the main input box; it's now the first thing in the sidebar, so
+  switching tools doesn't require scrolling past whatever's currently in
+  the main content area.
+- **Recent error patterns and the active chain are now visible in the
+  sidebar at all times**, not just inside the one problem's own tabs/
+  expanders where they'd disappear once you moved to a different
+  problem -- both matter across an entire session, not just the problem
+  currently on screen. The active-chain panel includes an "Open in
+  Problem chains" button that switches modes directly.
+- **A "🔗 Send this result to a chain" shortcut** on every solved
+  problem (right below the confidence banner) creates a new chain -- or
+  adds a step to an existing one -- from the CURRENT solved model in one
+  click, rather than needing to re-paste the problem's text into the
+  separate Problem chains mode.
+
 ## Extending it
 
 - Swap Streamlit for a desktop shell (e.g. `pywebview` wrapping the same
