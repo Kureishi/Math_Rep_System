@@ -29,6 +29,9 @@ from modules.proof import build_proof
 from modules.paranoid import run_paranoid_check
 from modules.self_consistency import run_self_consistency_check, numeric_answer_spread
 from modules.monte_carlo import run_monte_carlo, UncertainVariable, MAX_SAMPLES as MC_MAX_SAMPLES
+from modules.error_propagation import propagate_error, UncertainVariable as ErrorPropUncertainVariable
+from modules.interval_arithmetic import propagate_interval
+from modules.goal_seek import goal_seek
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
@@ -1395,6 +1398,132 @@ if model:
                             )
                         elif mc_result is not None:
                             st.warning("No samples produced a real result -- try smaller std values.")
+
+                # ---- analytic error propagation: the textbook first-
+                # order propagation-of-uncertainty formula, instant and
+                # exact for a linear target -- complementary to the
+                # Monte Carlo panel above (which is more trustworthy for
+                # a highly nonlinear target or large uncertainties, but
+                # needs sampling and gives no formula).
+                if known_vars_here:
+                    with st.expander(f"📐 Analytic error propagation for {target_name}"):
+                        st.caption("The standard first-order formula (σ² = Σ (∂f/∂xᵢ)² σᵢ²) -- "
+                                    "instant, and exact when the target is linear in its uncertain "
+                                    "inputs. Shows the actual formula, not just a number.")
+                        ep_symbols = st.multiselect(
+                            "Which inputs have uncertainty?", [v.symbol for v in known_vars_here],
+                            key=f"ep_vars_{target_name}",
+                        )
+                        ep_uncertain_vars = []
+                        if ep_symbols:
+                            ep_cols = st.columns(len(ep_symbols))
+                            for i, sym in enumerate(ep_symbols):
+                                var = next(v for v in known_vars_here if v.symbol == sym)
+                                with ep_cols[i]:
+                                    std_val = st.number_input(
+                                        f"± std for {sym}", min_value=0.0,
+                                        value=abs(var.known_value) * 0.05 or 0.1,
+                                        key=f"ep_std_{target_name}_{sym}",
+                                    )
+                                    if std_val > 0:
+                                        ep_uncertain_vars.append(
+                                            ErrorPropUncertainVariable(symbol=sym, mean=var.known_value,
+                                                                         std=std_val))
+                        if st.button("Compute", key=f"ep_run_{target_name}") and ep_uncertain_vars:
+                            try:
+                                ep_result = propagate_error(model, target_name, ep_uncertain_vars)
+                            except ValueError as e:
+                                st.error(str(e))
+                                ep_result = None
+                            st.session_state[f"ep_result_{target_name}"] = ep_result
+                        ep_result = st.session_state.get(f"ep_result_{target_name}")
+                        if ep_result is not None:
+                            st.write(f"**{target_name} = {ep_result.value:.6g} ± {ep_result.std:.4g}**")
+                            if ep_result.formula_latex:
+                                st.latex(f"{target_name} = {ep_result.formula_latex}")
+                            st.caption("Contribution to total variance:")
+                            for sym, frac in sorted(ep_result.contributions.items(), key=lambda kv: -kv[1]):
+                                st.write(f"- `{sym}`: {frac:.0%} "
+                                          f"(∂{target_name}/∂{sym} = {ep_result.partials[sym]:.4g})")
+
+                # ---- interval arithmetic: a GUARANTEED bound instead of
+                # a statistical one -- "cannot be outside this range"
+                # rather than "95% likely to be in this range", given
+                # each input as a hard [lo, hi] range instead of a
+                # distribution.
+                if known_vars_here:
+                    with st.expander(f"📏 Guaranteed bounds for {target_name}"):
+                        st.caption("Give each uncertain input a hard range (not a probability "
+                                    "distribution) and get back a range for this target that is "
+                                    "GUARANTEED to contain every possible result -- not a confidence "
+                                    "interval, a proof.")
+                        iv_symbols = st.multiselect(
+                            "Which inputs have a range?", [v.symbol for v in known_vars_here],
+                            key=f"iv_vars_{target_name}",
+                        )
+                        iv_ranges = {}
+                        if iv_symbols:
+                            iv_cols = st.columns(len(iv_symbols))
+                            for i, sym in enumerate(iv_symbols):
+                                var = next(v for v in known_vars_here if v.symbol == sym)
+                                with iv_cols[i]:
+                                    center = float(var.known_value)
+                                    default_width = abs(center) * 0.1 or 0.5
+                                    lo, hi = st.slider(
+                                        f"Range for {sym}", center - 10 * default_width,
+                                        center + 10 * default_width,
+                                        (center - default_width, center + default_width),
+                                        key=f"iv_range_{target_name}_{sym}",
+                                    )
+                                    iv_ranges[sym] = (lo, hi)
+                        if st.button("Compute bounds", key=f"iv_run_{target_name}") and iv_ranges:
+                            try:
+                                iv_result = propagate_interval(model, target_name, iv_ranges)
+                            except ValueError as e:
+                                st.error(str(e))
+                                iv_result = None
+                            st.session_state[f"iv_result_{target_name}"] = iv_result
+                        iv_result = st.session_state.get(f"iv_result_{target_name}")
+                        if iv_result is not None:
+                            st.success(f"**{target_name} is guaranteed to fall within "
+                                        f"[{iv_result.lo:.6g}, {iv_result.hi:.6g}]** "
+                                        f"(width {iv_result.width:.4g})")
+                            if iv_result.formula_latex:
+                                st.latex(f"{target_name} = {iv_result.formula_latex}")
+
+                # ---- goal seek / inverse solve: the inverse of
+                # chains.sweep_step_binding's "vary this input and see
+                # what happens" -- "what value of this input gives a
+                # SPECIFIC target number", solved directly rather than
+                # by sweeping and reading a chart.
+                other_vars = [v for v in model.variables if v.symbol != target_name]
+                if other_vars:
+                    with st.expander(f"🎯 Goal seek: find the input for a target {target_name}"):
+                        st.caption("What value of an input makes this target hit a specific number? "
+                                    "Solves for it directly -- exactly when possible, numerically "
+                                    "otherwise.")
+                        gs_symbol = st.selectbox("Solve for which input?",
+                                                   [v.symbol for v in other_vars],
+                                                   key=f"gs_symbol_{target_name}")
+                        gs_target_value = st.number_input(f"Desired value of {target_name}",
+                                                             key=f"gs_target_{target_name}")
+                        if st.button("Seek", key=f"gs_run_{target_name}"):
+                            try:
+                                gs_result = goal_seek(model, target_name, gs_target_value, gs_symbol)
+                            except ValueError as e:
+                                st.error(str(e))
+                                gs_result = None
+                            else:
+                                st.session_state[f"gs_result_{target_name}"] = gs_result
+                        gs_result = st.session_state.get(f"gs_result_{target_name}")
+                        if gs_result is not None:
+                            values_str = ", ".join(f"{v:.6g}" for v in gs_result.solutions)
+                            st.write(f"**{gs_result.seek_symbol} = {values_str}**")
+                            if gs_result.is_numerical:
+                                st.caption("Found numerically (no exact closed-form inverse) -- "
+                                            "treat as an approximation.")
+                            if gs_result.formula:
+                                st.latex(f"{gs_result.seek_symbol} = {gs_result.formula}")
 
                 # ---- sensitivity / what-if analysis: which input
                 # matters most to this target, and how does the answer

@@ -776,6 +776,65 @@ See `ARCHITECTURE.md` for the full design. In short:
     disagreement directly visible rather than only inferable from a
     similarity percentage.
 
+## Rigor & analysis
+
+Three additions that give a solved problem's uncertainty/sensitivity a
+harder mathematical treatment than the existing Monte Carlo panel alone,
+each shown as its own expander inside a target's per-target analysis
+section:
+
+- **Analytic (closed-form) error propagation**
+  (`modules/error_propagation.py`, "📐 Analytic error propagation for
+  `<target>`") -- the textbook first-order propagation-of-uncertainty
+  formula, `σ_f² = Σ (∂f/∂xᵢ)² σᵢ²`, computed instantly with no
+  sampling. Exact when the target is linear in its uncertain inputs, a
+  good local approximation otherwise -- the standard alternative
+  `monte_carlo.py`'s sampling-based approach, and the one most intro
+  physics/chem courses actually grade against by name. Solves the
+  system symbolically once (the same "solve once, evaluate the closed
+  form" pattern `monte_carlo.py` and `chains.py` both use), then
+  differentiates that one expression with respect to each uncertain
+  input and evaluates every partial at the given central values --
+  shown alongside a tornado-style breakdown of which input's
+  uncertainty actually dominates the total variance.
+- **Interval arithmetic / guaranteed bounds**
+  (`modules/interval_arithmetic.py`, "📏 Guaranteed bounds for
+  `<target>`") -- a genuinely different flavor of "how wrong could this
+  be" than either of the above: given each uncertain input as a hard
+  range (not a probability distribution), computes a range for the
+  target that's PROVABLY guaranteed to contain every possible result --
+  "cannot be outside this band," not "95% likely to be in this band."
+  Implemented as a small, dependency-free `Interval` type with the
+  standard (conservative) interval-arithmetic rules for +, -, *, /, and
+  a few elementary functions; because Python's operator overloading
+  means `sp.lambdify()`'s generated `+`/`-`/`*`/`/`/`**` expression works
+  unmodified against `Interval` operands, the same "solve symbolically
+  once" approach applies here too, just evaluated with different
+  arithmetic underneath. Careful about the well-known interval-
+  arithmetic gotchas: multiplication/division always check all four
+  corner combinations rather than assuming positive operands (wrong
+  whenever a range spans zero), and an even power of a range spanning
+  zero has its minimum AT zero, not at either endpoint.
+- **Goal-seek / inverse solve** (`modules/goal_seek.py`, "🎯 Goal seek:
+  find the input for a target `<target>`") -- the inverse of
+  `chains.sweep_step_binding`'s "vary this input and see what happens":
+  "what value of this input makes the target hit a SPECIFIC number,"
+  solved directly rather than by sweeping a range and reading a chart.
+  Works by substituting the DESIRED value in place of the target's own
+  symbol -- turning "solve for target, given inputs" into "solve for
+  one input, given the desired target" -- and inverting that system.
+  Tries an exact symbolic `sp.solve()` first (and shows the resulting
+  formula, worth seeing as its own small derivation), falling back to
+  `numerical_fallback.py`'s `mpmath.findroot` machinery -- the same
+  fallback `verifier.py` itself uses whenever `sp.solve` can't invert an
+  equation symbolically -- when the system doesn't yield to that
+  (implicit or transcendental relationships, mainly). A declared domain
+  restriction on the variable being sought (see
+  `equation_engine.Variable.domain`) narrows a multi-root result (a
+  quadratic goal, e.g., commonly has two) down to the physically
+  sensible one or ones, without ever filtering the result down to
+  nothing.
+
 ## UI streamlining
 
 A few changes aimed purely at making the interface easier to navigate as
