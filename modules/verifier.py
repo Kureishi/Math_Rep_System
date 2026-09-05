@@ -804,8 +804,22 @@ def _solve_sympy(model: ProblemModel) -> dict[str, float]:
     result = {}
     for t, sym in zip(algebraic_targets, targets):
         val = sol[0].get(sym)
-        if val is not None and val.is_number:
-            result[t] = float(val)
+        if val is None or not val.is_number:
+            continue
+        # a target can legitimately solve to a COMPLEX number (e.g. sqrt
+        # of a negative distance) when the given inputs describe a
+        # physically impossible scenario -- val.is_number is True for
+        # complex values too, so a bare float(val) here would raise
+        # TypeError and crash the whole verify() pipeline around it;
+        # skip it the same tolerant way monte_carlo.py/goal_seek.py
+        # already treat a near-zero imaginary part as effectively real
+        try:
+            c = complex(val)
+        except TypeError:
+            continue
+        if abs(c.imag) > 1e-9:
+            continue
+        result[t] = c.real
     return result
 
 

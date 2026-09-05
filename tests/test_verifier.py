@@ -196,3 +196,37 @@ def test_ode_dimensional_check_skips_gracefully_without_units(fake_client_factor
     dim_checks = [c for c in report.checks if "Dimensional consistency" in c.label]
     assert dim_checks == []  # skipped entirely, not treated as a failure
     assert report.passed
+
+
+def test_solve_sympy_handles_complex_solution_without_crashing():
+    """Regression test: a target that solves to a complex number (e.g.
+    sqrt of a negative input, describing a physically impossible
+    scenario) must be skipped gracefully, not raise TypeError -- found
+    by modules/adversarial_testing.py, which discovered this could crash
+    verify() for any real problem whose given inputs happen to produce a
+    non-real root."""
+    from modules.verifier import _solve_sympy
+    model = build_model({
+        "problem_domain": "kinematics", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "d", "meaning": "distance", "known_value": "-9", "unit": "m"},
+            {"symbol": "t", "meaning": "time", "known_value": None, "unit": "s"},
+        ],
+        "equations": [{"name": "e", "kind": "equation", "expression": "Eq(t, sqrt(d))", "derivation": ""}],
+        "solve_for": ["t"], "assumptions": [],
+    })
+    assert _solve_sympy(model) == {}  # no crash, and no bogus complex-derived answer either
+
+
+def test_verify_survives_a_complex_solution_end_to_end(fake_client_factory):
+    model = build_model({
+        "problem_domain": "kinematics", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "d", "meaning": "distance", "known_value": "-9", "unit": "m"},
+            {"symbol": "t", "meaning": "time", "known_value": None, "unit": "s"},
+        ],
+        "equations": [{"name": "e", "kind": "equation", "expression": "Eq(t, sqrt(d))", "derivation": ""}],
+        "solve_for": ["t"], "assumptions": [],
+    })
+    report = verify(model, fake_client_factory(), "x")  # must not raise
+    assert "t" not in report.sympy_numeric_answers

@@ -32,6 +32,8 @@ from modules.monte_carlo import run_monte_carlo, UncertainVariable, MAX_SAMPLES 
 from modules.error_propagation import propagate_error, UncertainVariable as ErrorPropUncertainVariable
 from modules.interval_arithmetic import propagate_interval
 from modules.goal_seek import goal_seek
+from modules.adversarial_testing import run_adversarial_suite
+from modules.extraction_diff import diff_extractions
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
@@ -401,7 +403,7 @@ with st.sidebar:
     # input box, as it used to be) so switching tools doesn't require
     # scrolling past whatever's currently in the main content area.
     mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
-                              "📚 Batch solver", "🔗 Problem chains"],
+                              "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff"],
                       key="app_mode")
     st.divider()
 
@@ -763,6 +765,89 @@ def render_chains_tab():
                     st.rerun()
 
 
+def render_extraction_diff_tab():
+    """Debugging/QA tool: given two DIFFERENT wordings of (nominally)
+    the same problem, extracts both independently and shows a
+    structural, side-by-side diff -- which variables/equations matched,
+    which didn't -- rather than only self_consistency.py's single
+    similarity score for repeated runs of the SAME wording. Answers the
+    debugging question self-consistency raises but doesn't answer:
+    given two SPECIFIC wordings, what EXACTLY differs? See
+    extraction_diff.py."""
+    st.subheader("🔬 Extraction diff")
+    st.caption("Paste two different wordings of the same underlying problem and see exactly how "
+                "their extractions differ -- which variables matched, which equations matched, and "
+                "what changed. A debugging tool for understanding phrasing sensitivity, not a "
+                "student-facing feature.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        text_a = st.text_area("Wording A", height=150, key="diff_text_a",
+                                placeholder="A car accelerates from 8 m/s to 20 m/s in 6 seconds. "
+                                            "Find its acceleration.")
+    with c2:
+        text_b = st.text_area("Wording B", height=150, key="diff_text_b",
+                                placeholder="A vehicle speeds up from an initial 8 m/s to a final "
+                                            "20 m/s over a 6 second interval. What's the acceleration?")
+
+    if not st.button("Extract & diff", type="primary", key="diff_run_button"):
+        return
+    if not text_a.strip() or not text_b.strip():
+        st.warning("Enter both wordings.")
+        return
+
+    with st.spinner("Extracting both..."):
+        try:
+            model_a = extract_model(client, text_a)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Extraction A failed: {e}")
+            return
+        try:
+            model_b = extract_model(client, text_b)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Extraction B failed: {e}")
+            return
+
+    diff = diff_extractions(model_a, model_b)
+
+    m1, m2 = st.columns(2)
+    m1.metric("Equation shape similarity", f"{diff.equation_shape_similarity:.0%}")
+    m2.metric("Variables matched", f"{sum(1 for e in diff.variables if e.status == 'matched')}"
+                                     f"/{len(diff.variables)}")
+
+    if diff.domain_matches:
+        st.success(f"Domain matches: '{model_a.problem_domain}'")
+    else:
+        st.warning(f"Domain differs: '{model_a.problem_domain}' vs '{model_b.problem_domain}'")
+    if diff.solve_for_matches:
+        st.success("solve_for target(s) match (compared by meaning, not symbol name).")
+    else:
+        st.warning(f"solve_for targets differ: {sorted(diff.solve_for_meanings_a)} vs "
+                    f"{sorted(diff.solve_for_meanings_b)}")
+
+    st.write("### Variables")
+    icons = {"matched": "✅", "changed": "🟡", "only_in_a": "◀️", "only_in_b": "▶️"}
+    for e in diff.variables:
+        if e.status == "matched":
+            st.write(f"{icons[e.status]} `{e.symbol_a}` (A) / `{e.symbol_b}` (B) -- matched")
+        elif e.status == "changed":
+            st.write(f"{icons[e.status]} `{e.symbol_a}` (A) / `{e.symbol_b}` (B) -- {e.detail}")
+        elif e.status == "only_in_a":
+            st.write(f"{icons[e.status]} only in A: `{e.symbol_a}` ({e.detail})")
+        else:
+            st.write(f"{icons[e.status]} only in B: `{e.symbol_b}` ({e.detail})")
+
+    st.write("### Equations")
+    for e in diff.equations:
+        if e.status == "matched":
+            st.write(f"✅ `{e.name_a}` (A) / `{e.name_b}` (B) -- same structure, ignoring "
+                      "variable names")
+        elif e.status == "only_in_a":
+            st.write(f"◀️ only in A: `{e.name_a}`")
+        else:
+            st.write(f"▶️ only in B: `{e.name_b}`")
+
+
 st.title("🧮 Math Representation System")
 st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
 
@@ -784,6 +869,9 @@ elif mode == "📚 Batch solver":
     st.stop()
 elif mode == "🔗 Problem chains":
     render_chains_tab()
+    st.stop()
+elif mode == "🔬 Extraction diff":
+    render_extraction_diff_tab()
     st.stop()
 
 # ---------------------------------------------------------------- input
@@ -1081,6 +1169,38 @@ if model:
                                              key="download_spread_png")
                     elif len(spread_values) == 1:
                         st.caption(f"Only one run solved for {sc_target} -- need at least 2 to show a spread.")
+
+        # ---- adversarial edge-case testing: a QA tool for the SYSTEM
+        # itself (not the student) -- perturbs this problem's own known
+        # inputs to zero, negative, tiny, and huge values and runs each
+        # through the real solving/plausibility pipeline, reporting
+        # exactly what happened rather than pre-judging whether it's
+        # acceptable. See adversarial_testing.py.
+        adv_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
+        if adv_targets:
+            with st.expander("🧪 Adversarial edge-case testing (developer QA)"):
+                st.caption("Perturbs this problem's own known inputs to zero, negative, tiny, and "
+                            "huge values and runs each through the real solving + plausibility "
+                            "pipeline -- not to check if the ANSWER makes sense, but to check "
+                            "whether the PIPELINE survives being handed something nasty without an "
+                            "unhandled crash. A developer/debugging tool.")
+                adv_target = st.selectbox("Target to test", adv_targets, key="adv_target")
+                if st.button("Run adversarial suite", key="adv_run_button"):
+                    with st.spinner("Running edge cases..."):
+                        st.session_state["adv_outcomes"] = run_adversarial_suite(model, adv_target)
+                adv_outcomes = st.session_state.get("adv_outcomes")
+                if adv_outcomes:
+                    status_icon = {"solved": "✅", "unsolvable": "➖", "timeout": "⏱️", "exception": "❌"}
+                    n_exceptions = sum(1 for o in adv_outcomes if o.status == "exception")
+                    if n_exceptions:
+                        st.error(f"{n_exceptions} of {len(adv_outcomes)} edge case(s) raised an "
+                                  "unhandled exception -- worth a look.")
+                    else:
+                        st.success(f"All {len(adv_outcomes)} edge cases handled without an "
+                                    "unhandled exception (solved, correctly unsolvable, or timed out).")
+                    for o in adv_outcomes:
+                        icon = status_icon.get(o.status, "❓")
+                        st.write(f"{icon} **{o.variant.label}** ({o.status}): {o.detail}")
 
     st.subheader(f"Domain: {model.problem_domain}")
 

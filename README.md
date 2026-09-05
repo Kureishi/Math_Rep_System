@@ -835,6 +835,51 @@ section:
   sensible one or ones, without ever filtering the result down to
   nothing.
 
+## Robustness / QA
+
+Two developer-facing tools aimed at hardening the pipeline itself,
+distinct from every student-facing feature above -- neither cares
+whether an ANSWER looks sensible, both care whether the SYSTEM survives
+what it's handed:
+
+- **Adversarial edge-case generator** (`modules/adversarial_testing.py`,
+  "🧪 Adversarial edge-case testing (developer QA)" in the Verify tab)
+  -- takes an already-solved problem's own known inputs and generates
+  deliberately nasty variants of each one (zero, a flipped sign, an
+  extremely large or extremely small magnitude), then runs every
+  variant through the real solving + plausibility pipeline and reports
+  exactly what happened: solved cleanly, correctly recognized as
+  unsolvable, timed out, or raised an exception. Wrapped in its own
+  short timeout separate from the normal computation timeout, since an
+  extreme magnitude can (through the same `sp.nsimplify()` performance
+  cliff `monte_carlo.py`'s docstring describes hitting and routing
+  around) occasionally make a solve pathologically slow rather than
+  fast-failing -- that slowness is itself a finding worth surfacing, not
+  something this tool should silently wait out. **This immediately
+  found a real bug on first use**: `verifier._solve_sympy()` was calling
+  a bare `float()` on every numeric solution, which raises an unhandled
+  `TypeError` for a target that solves to a complex number (e.g. `sqrt`
+  of a negative input) -- meaning ANY real problem whose given inputs
+  happened to produce a non-real root could crash the whole app around
+  it. Fixed at the source with the same tolerant complex-to-real
+  conversion `monte_carlo.py`/`goal_seek.py` already use, with two
+  regression tests locking it in.
+- **Extraction diff mode** (`modules/extraction_diff.py`, "🔬 Extraction
+  diff" mode) -- paste two DIFFERENT wordings of the same underlying
+  problem and get back a structural, side-by-side diff of their
+  independent extractions: which variables matched, which equations
+  matched (via the same variable-name-independent canonicalization
+  `similarity.py` already uses), and what changed. Distinct from
+  `self_consistency.py`, which re-extracts the SAME wording several
+  times and reports one aggregate similarity score -- this answers the
+  debugging question that raises but doesn't answer: given two SPECIFIC
+  wordings, what EXACTLY differs? Variables are matched by normalized
+  MEANING text, not symbol name, since two independent extractions
+  routinely pick different symbol letters for the same quantity (v_i vs
+  v0) -- matching by name alone would report that mismatch as a
+  "difference" on every single run, drowning out the differences that
+  actually matter.
+
 ## UI streamlining
 
 A few changes aimed purely at making the interface easier to navigate as
