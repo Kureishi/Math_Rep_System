@@ -979,6 +979,57 @@ different KIND of problem than anything else in this app:
   is) -- a real, deliberate confirmation that the tool doesn't paper
   over an SI-specific subtlety just because a formula is famous.
 
+## Mobile browser optimization
+
+A pass focused specifically on using this app from a phone browser,
+following an assessment of where the existing layout would create
+unnecessary friction on a narrow screen -- no changes to solving or
+verification logic:
+
+- **Camera capture for both photo-upload features.** The problem-
+  statement Image input tab and Grade my work's handwritten-work photo
+  panel both previously only offered `st.file_uploader`, which on a
+  phone means tapping through an OS file-picker sheet even to reach the
+  camera. Both now offer an "📁 Upload a file" / "📷 Take a photo"
+  choice, with `st.camera_input` going straight to the camera when
+  selected. `st.camera_input` returns the same `UploadedFile`-shaped
+  object `st.file_uploader` does, so the extraction code downstream
+  (`vision_extract`/`vision_extract_work`, the Tesseract OCR fallback,
+  the upload-size check) needed no changes regardless of which input
+  method was used.
+- **Dense per-variable widget rows replaced with compact tables.** The
+  Monte Carlo, analytic error propagation, and interval arithmetic
+  panels each let someone select several uncertain inputs and set a
+  value per input -- previously one `st.columns(len(symbols))` slot per
+  selected variable, each containing its own `st.number_input`/
+  `st.slider`. On a narrow screen, Streamlit stacks those into a long
+  scroll of full-width blocks: selecting 4 variables meant 4 separate
+  full-width inputs to scroll past just to run one analysis. All three
+  now use a single `st.data_editor` table instead -- one row per
+  variable, edited in place -- which renders as one compact, bounded
+  widget regardless of row count, on both desktop and mobile. Keyed by
+  the sorted set of currently-selected symbols, so changing the
+  multiselect always produces a fresh, correctly-shaped table rather
+  than stale rows left over from a previous selection.
+- **Sidebar reorganized around what's actually looked at often.** The
+  LM Studio connection block (model selection, connection status) --
+  set once and rarely touched again -- moved into its own collapsed-
+  by-default expander (auto-expanded only when there's actually a
+  connection problem to see), rather than sitting permanently at the
+  top of the sidebar pushing everything else down. The two session-
+  persistent status panels (recent error patterns, the active problem
+  chain) moved up to sit directly under mode navigation instead, since
+  those are the quick-glance items someone actually wants on every
+  visit -- meaningful on a phone's sidebar overlay, where every extra
+  screen of scrolling before reaching what you're looking for is
+  actual friction, not just visual noise.
+- Columns that already capped their count at `min(4, N)` for a
+  variable-length set of sliders (the interactive plot's parameter
+  sliders, sensitivity sweep ranges, and similar) were left as they
+  were -- already a reasonable middle ground, and not the kind of
+  wide-open `len(...)`-sized row that caused the worse mobile scrolling
+  the three panels above did.
+
 ## UI streamlining
 
 A few changes aimed purely at making the interface easier to navigate as

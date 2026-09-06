@@ -10,6 +10,7 @@ Requires LM Studio running locally with its server started
 import streamlit as st
 import sympy as sp
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 
 from config import settings
@@ -410,33 +411,71 @@ with st.sidebar:
                               "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff",
                               "📐 Dimensional analysis"],
                       key="app_mode")
+
+    # ---- persistent status panels: these matter across MULTIPLE
+    # problems in a session (a recurring mistake, a chain in progress),
+    # not just the one currently on screen, so they live in the sidebar
+    # rather than inside a single problem's own tabs/expanders where
+    # they'd only be visible while that specific problem is showing.
+    # Placed right under navigation -- these are quick-glance, day-to-
+    # day status the person actually wants to see without first
+    # scrolling past the (set-once, rarely-touched) connection config
+    # below, which matters most on a phone's narrower sidebar overlay.
+    error_patterns = history.summarize_error_patterns()
+    if error_patterns:
+        st.divider()
+        st.header("📊 Recent patterns")
+        for p in error_patterns[:3]:
+            st.warning(p["message"])
+        st.caption("See the Practice tab on a solved problem to target these with a worksheet.")
+
+    active_chain_id = st.session_state.get("active_chain_id")
+    if active_chain_id is not None:
+        active_chain = chains.load_chain(active_chain_id)
+        if active_chain is not None:
+            st.divider()
+            st.header("🔗 Active chain")
+            st.caption(f"**{active_chain.name}** -- {len(active_chain.steps)} step(s)")
+            for step in active_chain.steps:
+                icon = {"ok": "✅", "error": "❌", "stale": "➖"}.get(step.status, "➖")
+                value = f"{step.output_value:.6g}" if step.output_value is not None else "--"
+                st.caption(f"{icon} step {step.position + 1}: {step.output_symbol} = {value}")
+            if st.button("Open in Problem chains", key="sidebar_open_chain",
+                          on_click=lambda: st.session_state.update(app_mode="🔗 Problem chains")):
+                st.rerun()
+
     st.divider()
 
-    st.header("LM Studio")
+    # ---- LM Studio connection: collapsed by default once things are
+    # working -- this is "set once and forget" content, and unlike the
+    # status panels above it doesn't change from problem to problem, so
+    # it shouldn't cost a full screen of scrolling on every visit. Left
+    # expanded automatically when there's actually a problem to see.
     ok, msg = client.is_available()
-    (st.success if ok else st.error)(msg)
+    with st.expander("LM Studio", expanded=not ok):
+        (st.success if ok else st.error)(msg)
 
-    loaded_models = client.list_models() if ok else []
-    if ok and not loaded_models:
-        st.warning("Connected, but no models are loaded. Load one in LM Studio's Developer tab.")
-    elif loaded_models:
-        # Fall back to whatever's actually loaded if config.py's default
-        # isn't among the currently-served models, instead of silently
-        # trying to call a model that doesn't exist.
-        default_reasoning = settings.reasoning_model if settings.reasoning_model in loaded_models else loaded_models[0]
-        settings.reasoning_model = st.selectbox(
-            "Reasoning model", loaded_models,
-            index=loaded_models.index(default_reasoning),
-            help="Used for equation extraction, verification cross-checks, narration, and scenarios.",
-        )
+        loaded_models = client.list_models() if ok else []
+        if ok and not loaded_models:
+            st.warning("Connected, but no models are loaded. Load one in LM Studio's Developer tab.")
+        elif loaded_models:
+            # Fall back to whatever's actually loaded if config.py's default
+            # isn't among the currently-served models, instead of silently
+            # trying to call a model that doesn't exist.
+            default_reasoning = settings.reasoning_model if settings.reasoning_model in loaded_models else loaded_models[0]
+            settings.reasoning_model = st.selectbox(
+                "Reasoning model", loaded_models,
+                index=loaded_models.index(default_reasoning),
+                help="Used for equation extraction, verification cross-checks, narration, and scenarios.",
+            )
 
-        default_vision = settings.vision_model if settings.vision_model in loaded_models else loaded_models[0]
-        settings.vision_model = st.selectbox(
-            "Vision model", loaded_models,
-            index=loaded_models.index(default_vision),
-            help="Used to transcribe problem statements from uploaded images. Pick a multimodal "
-                 "model here -- a text-only model will error on image input; use OCR fallback instead.",
-        )
+            default_vision = settings.vision_model if settings.vision_model in loaded_models else loaded_models[0]
+            settings.vision_model = st.selectbox(
+                "Vision model", loaded_models,
+                index=loaded_models.index(default_vision),
+                help="Used to transcribe problem statements from uploaded images. Pick a multimodal "
+                     "model here -- a text-only model will error on image input; use OCR fallback instead.",
+            )
 
     with st.expander("⚙️ Advanced settings"):
         st.caption("Tune verification strictness and generation behavior without editing config.py "
@@ -495,34 +534,6 @@ with st.sidebar:
             settings.cross_check_tolerance = defaults.cross_check_tolerance
             settings.computation_timeout_seconds = defaults.computation_timeout_seconds
             st.rerun()
-
-    # ---- persistent status panels: these matter across MULTIPLE
-    # problems in a session (a recurring mistake, a chain in progress),
-    # not just the one currently on screen, so they live in the sidebar
-    # rather than inside a single problem's own tabs/expanders where
-    # they'd only be visible while that specific problem is showing.
-    error_patterns = history.summarize_error_patterns()
-    if error_patterns:
-        st.divider()
-        st.header("📊 Recent patterns")
-        for p in error_patterns[:3]:
-            st.warning(p["message"])
-        st.caption("See the Practice tab on a solved problem to target these with a worksheet.")
-
-    active_chain_id = st.session_state.get("active_chain_id")
-    if active_chain_id is not None:
-        active_chain = chains.load_chain(active_chain_id)
-        if active_chain is not None:
-            st.divider()
-            st.header("🔗 Active chain")
-            st.caption(f"**{active_chain.name}** -- {len(active_chain.steps)} step(s)")
-            for step in active_chain.steps:
-                icon = {"ok": "✅", "error": "❌", "stale": "➖"}.get(step.status, "➖")
-                value = f"{step.output_value:.6g}" if step.output_value is not None else "--"
-                st.caption(f"{icon} step {step.position + 1}: {step.output_symbol} = {value}")
-            if st.button("Open in Problem chains", key="sidebar_open_chain",
-                          on_click=lambda: st.session_state.update(app_mode="🔗 Problem chains")):
-                st.rerun()
 
     st.divider()
     st.header("Variable Workspace")
@@ -962,7 +973,21 @@ with tab_text:
     )
 
 with tab_image:
-    uploaded = st.file_uploader("Upload a photo or screenshot of the problem", type=["png", "jpg", "jpeg"])
+    # ---- camera vs file: a phone user taking a picture of the problem
+    # in front of them right now wants the camera directly, not a file
+    # picker that then makes them choose "Camera" from an OS sheet --
+    # st.camera_input returns the same UploadedFile-like object
+    # st.file_uploader does (.getvalue(), .type), so everything
+    # downstream (size check, vision/OCR extraction) works unchanged
+    # regardless of which one was used.
+    image_input_method = st.radio("Input method", ["📁 Upload a file", "📷 Take a photo"],
+                                    horizontal=True, key="image_input_method",
+                                    label_visibility="collapsed")
+    if image_input_method == "📷 Take a photo":
+        uploaded = st.camera_input("Take a photo of the problem")
+    else:
+        uploaded = st.file_uploader("Upload a photo or screenshot of the problem",
+                                      type=["png", "jpg", "jpeg"])
     if uploaded is not None and check_upload_size(uploaded):
         st.image(uploaded, caption="Uploaded image", width=400)
         use_vision = st.toggle("Use LM Studio vision model (falls back to Tesseract OCR if off/unavailable)",
@@ -1603,18 +1628,31 @@ if model:
                         )
                         uncertain_vars = []
                         if mc_symbols:
-                            mc_cols = st.columns(len(mc_symbols))
-                            for i, sym in enumerate(mc_symbols):
-                                var = next(v for v in known_vars_here if v.symbol == sym)
-                                with mc_cols[i]:
-                                    std_val = st.number_input(
-                                        f"± std for {sym}", min_value=0.0,
-                                        value=abs(var.known_value) * 0.05 or 0.1,
-                                        key=f"mc_std_{target_name}_{sym}",
-                                    )
-                                    if std_val > 0:
-                                        uncertain_vars.append(
-                                            UncertainVariable(symbol=sym, mean=var.known_value, std=std_val))
+                            # a compact table -- one row per selected input -- rather than one
+                            # st.columns() slot per variable, which stacks into a long scroll of
+                            # full-width blocks on a narrow (phone) screen; a data_editor renders
+                            # as a single scrollable widget regardless of row count
+                            mc_default_rows = [
+                                {"Symbol": sym, "Std (±)": abs(next(
+                                    v for v in known_vars_here if v.symbol == sym).known_value) * 0.05 or 0.1}
+                                for sym in mc_symbols
+                            ]
+                            mc_edited = st.data_editor(
+                                pd.DataFrame(mc_default_rows), hide_index=True, width='stretch',
+                                key=f"mc_editor_{target_name}_{','.join(sorted(mc_symbols))}",
+                                column_config={
+                                    "Symbol": st.column_config.TextColumn("Symbol", disabled=True),
+                                    "Std (±)": st.column_config.NumberColumn("Std (±)", min_value=0.0,
+                                                                                format="%.4g"),
+                                },
+                            )
+                            for _, row in mc_edited.iterrows():
+                                std_val = row["Std (\u00b1)"]
+                                if std_val is not None and std_val > 0:
+                                    var = next(v for v in known_vars_here if v.symbol == row["Symbol"])
+                                    uncertain_vars.append(
+                                        UncertainVariable(symbol=row["Symbol"], mean=var.known_value,
+                                                            std=float(std_val)))
                         mc_n = st.slider("Number of samples", 100, min(MC_MAX_SAMPLES, 10000), 1000,
                                            key=f"mc_n_{target_name}")
                         if st.button("Run Monte Carlo", key=f"mc_run_{target_name}") and uncertain_vars:
@@ -1662,19 +1700,28 @@ if model:
                         )
                         ep_uncertain_vars = []
                         if ep_symbols:
-                            ep_cols = st.columns(len(ep_symbols))
-                            for i, sym in enumerate(ep_symbols):
-                                var = next(v for v in known_vars_here if v.symbol == sym)
-                                with ep_cols[i]:
-                                    std_val = st.number_input(
-                                        f"± std for {sym}", min_value=0.0,
-                                        value=abs(var.known_value) * 0.05 or 0.1,
-                                        key=f"ep_std_{target_name}_{sym}",
-                                    )
-                                    if std_val > 0:
-                                        ep_uncertain_vars.append(
-                                            ErrorPropUncertainVariable(symbol=sym, mean=var.known_value,
-                                                                         std=std_val))
+                            ep_default_rows = [
+                                {"Symbol": sym, "Std (±)": abs(next(
+                                    v for v in known_vars_here if v.symbol == sym).known_value) * 0.05 or 0.1}
+                                for sym in ep_symbols
+                            ]
+                            ep_edited = st.data_editor(
+                                pd.DataFrame(ep_default_rows), hide_index=True, width='stretch',
+                                key=f"ep_editor_{target_name}_{','.join(sorted(ep_symbols))}",
+                                column_config={
+                                    "Symbol": st.column_config.TextColumn("Symbol", disabled=True),
+                                    "Std (±)": st.column_config.NumberColumn("Std (±)", min_value=0.0,
+                                                                                format="%.4g"),
+                                },
+                            )
+                            for _, row in ep_edited.iterrows():
+                                std_val = row["Std (\u00b1)"]
+                                if std_val is not None and std_val > 0:
+                                    var = next(v for v in known_vars_here if v.symbol == row["Symbol"])
+                                    ep_uncertain_vars.append(
+                                        ErrorPropUncertainVariable(symbol=row["Symbol"],
+                                                                     mean=var.known_value,
+                                                                     std=float(std_val)))
                         if st.button("Compute", key=f"ep_run_{target_name}") and ep_uncertain_vars:
                             try:
                                 ep_result = propagate_error(model, target_name, ep_uncertain_vars)
@@ -1709,19 +1756,26 @@ if model:
                         )
                         iv_ranges = {}
                         if iv_symbols:
-                            iv_cols = st.columns(len(iv_symbols))
-                            for i, sym in enumerate(iv_symbols):
+                            iv_default_rows = []
+                            for sym in iv_symbols:
                                 var = next(v for v in known_vars_here if v.symbol == sym)
-                                with iv_cols[i]:
-                                    center = float(var.known_value)
-                                    default_width = abs(center) * 0.1 or 0.5
-                                    lo, hi = st.slider(
-                                        f"Range for {sym}", center - 10 * default_width,
-                                        center + 10 * default_width,
-                                        (center - default_width, center + default_width),
-                                        key=f"iv_range_{target_name}_{sym}",
-                                    )
-                                    iv_ranges[sym] = (lo, hi)
+                                center = float(var.known_value)
+                                default_width = abs(center) * 0.1 or 0.5
+                                iv_default_rows.append({"Symbol": sym, "Low": center - default_width,
+                                                          "High": center + default_width})
+                            iv_edited = st.data_editor(
+                                pd.DataFrame(iv_default_rows), hide_index=True, width='stretch',
+                                key=f"iv_editor_{target_name}_{','.join(sorted(iv_symbols))}",
+                                column_config={
+                                    "Symbol": st.column_config.TextColumn("Symbol", disabled=True),
+                                    "Low": st.column_config.NumberColumn("Low", format="%.4g"),
+                                    "High": st.column_config.NumberColumn("High", format="%.4g"),
+                                },
+                            )
+                            for _, row in iv_edited.iterrows():
+                                lo, hi = row["Low"], row["High"]
+                                if lo is not None and hi is not None:
+                                    iv_ranges[row["Symbol"]] = (float(min(lo, hi)), float(max(lo, hi)))
                         if st.button("Compute bounds", key=f"iv_run_{target_name}") and iv_ranges:
                             try:
                                 iv_result = propagate_interval(model, target_name, iv_ranges)
@@ -1856,8 +1910,16 @@ if model:
                 # single biggest piece of friction in actually using
                 # this feature: retyping work that's already on paper.
                 with st.expander("📷 Or upload a photo of your handwritten work"):
-                    uploaded_work = st.file_uploader("Upload a photo", type=["png", "jpg", "jpeg"],
-                                                       key="grade_work_photo")
+                    work_input_method = st.radio(
+                        "Input method", ["📁 Upload a file", "📷 Take a photo"], horizontal=True,
+                        key="grade_work_input_method", label_visibility="collapsed",
+                    )
+                    if work_input_method == "📷 Take a photo":
+                        uploaded_work = st.camera_input("Take a photo of your work",
+                                                          key="grade_work_camera")
+                    else:
+                        uploaded_work = st.file_uploader("Upload a photo", type=["png", "jpg", "jpeg"],
+                                                           key="grade_work_photo")
                     if uploaded_work is not None and check_upload_size(uploaded_work):
                         st.image(uploaded_work, caption="Uploaded work", width=300)
                         use_vision_grading = st.toggle(
