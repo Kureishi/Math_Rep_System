@@ -34,6 +34,9 @@ from modules.interval_arithmetic import propagate_interval
 from modules.goal_seek import goal_seek
 from modules.adversarial_testing import run_adversarial_suite
 from modules.extraction_diff import diff_extractions
+from modules.named_formulas import recognize_formula
+from modules.sig_figs import check_sig_figs, raw_known_value_strings
+from modules.step_explainer import explain_step
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
@@ -1219,6 +1222,7 @@ if model:
     st.markdown("### Derived equations")
     KIND_BADGES = {"equation": "🟢 equation", "inequality": "🟡 inequality",
                     "ode": "🔵 differential equation", "recurrence": "🟣 recurrence relation"}
+    var_by_symbol_for_names = {v.symbol: v for v in model.variables}
     for eq in model.equations:
         cols = st.columns([2, 3])
         with cols[0]:
@@ -1229,6 +1233,25 @@ if model:
         with cols[1]:
             st.markdown(f"**{eq.name}**  `{KIND_BADGES.get(eq.kind, eq.kind)}`")
             st.write(eq.derivation)
+            # ---- named-formula recognizer: purely a provenance/
+            # pedagogy touch -- see named_formulas.py for why matching
+            # needs the equation's own variable MEANINGS, not just the
+            # problem's domain label, to disambiguate collisions like
+            # F=m*a vs p=m*v (identical shape once canonicalized).
+            if eq.sympy_eq is not None and eq.kind == "equation":
+                eq_symbols = {s.name for s in eq.sympy_eq.free_symbols}
+                meanings_text = " ".join(
+                    var_by_symbol_for_names[s].meaning for s in eq_symbols
+                    if s in var_by_symbol_for_names and var_by_symbol_for_names[s].meaning
+                )
+                context_text = f"{model.problem_domain} {meanings_text}"
+                named = recognize_formula(eq, context_text)
+                if len(named) == 1:
+                    name, desc = named[0]
+                    st.caption(f"📖 Recognized as **{name}** ({desc})")
+                elif len(named) > 1:
+                    names = ", ".join(n for n, _ in named)
+                    st.caption(f"📖 Matches the shape of several named formulas: {names}")
 
     opt_result = solve_optimization(model) if model.objective is not None else None
 
@@ -1395,6 +1418,28 @@ if model:
                 st.latex(step.expression)
                 if step.explanation:
                     st.caption(step.explanation)
+                # ---- step-level "explain just this" drill-down: a
+                # narrower, more surgical sibling of the whole-problem
+                # follow-up Q&A further down -- grounds the LLM only in
+                # THIS step's own content, not the full derivation. See
+                # step_explainer.py.
+                with st.expander(f"🔍 Explain just step {i}"):
+                    explain_mode = st.radio(
+                        "How?", ["default", "simpler", "example"], horizontal=True,
+                        key=f"explain_mode_{target_name}_{i}",
+                        format_func=lambda m: {"default": "Explain", "simpler": "Simpler",
+                                                 "example": "With an example"}[m],
+                    )
+                    if st.button("Explain this step", key=f"explain_btn_{target_name}_{i}"):
+                        with st.spinner("Explaining..."):
+                            st.session_state[f"explain_result_{target_name}_{i}"] = explain_step(
+                                client, model, steps, i, target_name, explain_mode)
+                    explain_result = st.session_state.get(f"explain_result_{target_name}_{i}")
+                    if explain_result is not None:
+                        if explain_result.error:
+                            st.error(explain_result.error)
+                        else:
+                            st.info(explain_result.text)
 
             sympy_val = report.sympy_numeric_answers.get(target_name)
             if sympy_val is not None:
@@ -1403,6 +1448,16 @@ if model:
                     ws.store(target_name, sympy_val,
                              source=f"{problem_text[:60]}...", unit=unit)
                     st.rerun()
+
+                # ---- sig-fig discipline check: flags a final answer
+                # reported with implausibly MORE precision than the
+                # problem's own given inputs actually support -- see
+                # sig_figs.py. Advisory only, same spirit as
+                # plausibility.py's magnitude check, just for PRECISION
+                # instead of magnitude.
+                sig_fig_note = check_sig_figs(raw_known_value_strings(model), sympy_val, target_name)
+                if sig_fig_note is not None:
+                    st.warning(f"🔢 {sig_fig_note.message}")
 
                 # ---- unit conversion sweep: offer the same numeric
                 # answer in a handful of common alternate units, once its

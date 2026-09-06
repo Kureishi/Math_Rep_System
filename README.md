@@ -835,6 +835,61 @@ section:
   sensible one or ones, without ever filtering the result down to
   nothing.
 
+## Pedagogy / reference
+
+Three smaller, quieter additions aimed at the learning experience rather
+than at solving power:
+
+- **Named-formula recognizer** (`modules/named_formulas.py`, a "📖
+  Recognized as..." caption under a matching derived equation) -- a
+  small curated table (Newton's second law, Ohm's law, the Pythagorean
+  theorem, compound interest, the ideal gas law, and a dozen more) that
+  recognizes when a derived equation matches a well-known named result
+  and labels it, purely for the credibility/learning-hook value of a
+  name a student may already recognize from a textbook. Matching is
+  structural and variable-name-independent, and covers a formula being
+  solved for any one of its own variables (F=m·a, a=F/m, or m=F/a all
+  recognized) by precomputing every algebraic rearrangement once at
+  first use. Two different named formulas commonly collide on shape
+  alone once canonicalized (F=m·a, p=m·v, and W=F·d, e.g., are ALL
+  "y = a·b") -- resolved using the equation's own variable MEANING
+  strings (far more specific than a broad domain label), falling back
+  to listing every tied candidate honestly when even that doesn't
+  settle it. Building this surfaced a genuine, subtle limitation in
+  `similarity.py`'s existing `canonicalize_equation()`: its placeholder
+  order comes from a single preorder traversal, which turns out NOT to
+  be purely a function of an equation's structure -- sympy's own
+  internal storage order for commutative +/× arguments is partly
+  determined by the actual symbol NAMES involved, so two structurally
+  identical equations with different variable names can occasionally
+  fail to match. Worked around locally with a true permutation-
+  invariant canonicalization (capped at 4 free symbols for performance,
+  falling back to the simpler approach above that) rather than touching
+  the shared `similarity.py` function other features depend on.
+- **Sig-fig discipline check** (`modules/sig_figs.py`, a "🔢" warning
+  under a solved target) -- tracks the precision implied by the
+  problem's own given inputs (`"8"` implies 1 significant figure,
+  `"8.0"` implies 2) and flags a final answer reported with
+  implausibly MORE precision than those inputs support -- a classic
+  thing intro science/engineering grading cares about that nothing else
+  here checks. Counts significant figures on the ORIGINAL TEXT of each
+  known value, not the parsed float, since parsing already erases the
+  "8" vs "8.0" distinction the count depends on -- pulled straight from
+  the model's own `raw_json`, not the already-parsed `Variable.known_
+  value`. Advisory only, with a full digit of slack before flagging
+  anything, the same "worth a second look, not a verdict" posture as
+  `plausibility.py`.
+- **Step-level "explain just this" drill-down** (`modules/step_
+  explainer.py`, a "🔍 Explain just step N" expander under every step)
+  -- a narrower, more surgical sibling of the whole-problem follow-up
+  Q&A further down the page. Grounds the LLM in ONLY that one step's
+  own description/expression/explanation, not the full derivation --
+  the point is a tighter explanation of one specific move, not a
+  second whole-problem summary squeezed into a smaller box. Three
+  scaffolding modes: a plain explanation, a "simpler" more broken-down
+  version for when the first one didn't land, and a "worked example"
+  version illustrating the same operation with small made-up numbers.
+
 ## Robustness / QA
 
 Two developer-facing tools aimed at hardening the pipeline itself,
