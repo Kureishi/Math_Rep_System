@@ -1,0 +1,12 @@
+# Committed (see .gitignore's exception for this one file -- everything
+# else under .streamlit/ stays ignored, e.g. a local secrets.toml).
+
+[server]
+# Hard server-side cap (megabytes) on any single file upload -- CSV data
+# for curve fitting, PDF worksheets for batch import, or a problem photo.
+# Streamlit rejects an over-limit upload before it's fully received,
+# rather than the app having to notice and reject it afterward. Paired
+# with a second, defense-in-depth check in app.py itself at each
+# uploader, which gives a clearer, upload-specific error message than
+# Streamlit's own generic rejection.
+maxUploadSize = 500

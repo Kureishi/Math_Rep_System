@@ -132,6 +132,53 @@ class LMStudioClient:
         )
         return resp.choices[0].message.content
 
+    def vision_extract_work(self, image_bytes: bytes, mime_type: str = "image/png",
+                              model: str | None = None) -> str:
+        """Sibling of vision_extract() above, for a DIFFERENT kind of
+        photo: a student's own handwritten scratch work being graded
+        (see grading.py / the "Grade my work" panel), not a problem
+        statement. Reuses the exact same underlying multimodal API call
+        -- a base64 image sent to a vision-capable model -- but with a
+        prompt tailored to transcribing WORKED STEPS rather than a
+        problem, and critically asking for one line per step: grade_work()
+        expects to split the returned text on newlines and check each
+        line as its own algebraic step, the same shape it already expects
+        from someone typing their work in by hand. Removes the single
+        biggest piece of friction in actually using that feature day to
+        day -- retyping work that already exists on paper."""
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        resp = self._client.chat.completions.create(
+            model=model or settings.vision_model,
+            temperature=0.0,
+            max_tokens=1024,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You transcribe a student's own handwritten (or typed-then-photographed) "
+                        "worked math steps from an image, exactly as written, one step per line. "
+                        "Preserve the original line breaks/step boundaries as best you can infer "
+                        "them -- if a single logical step spans multiple handwritten lines, join "
+                        "it into one output line. Do not solve, correct, grade, or complete the "
+                        "work -- transcribe only what is actually written, including any mistakes. "
+                        "Output plain text only, no commentary, no markdown formatting."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Transcribe the handwritten work in this image, "
+                                                   "one step per line."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{b64}"},
+                        },
+                    ],
+                },
+            ],
+        )
+        return resp.choices[0].message.content
+
 
 class LLMOutputError(Exception):
     """Raised when the model's response couldn't be parsed as expected.

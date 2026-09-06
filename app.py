@@ -37,6 +37,7 @@ from modules.extraction_diff import diff_extractions
 from modules.named_formulas import recognize_formula
 from modules.sig_figs import check_sig_figs, raw_known_value_strings
 from modules.step_explainer import explain_step
+from modules.dimensional_analysis import analyze_dimensions
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
@@ -406,7 +407,8 @@ with st.sidebar:
     # input box, as it used to be) so switching tools doesn't require
     # scrolling past whatever's currently in the main content area.
     mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
-                              "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff"],
+                              "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff",
+                              "📐 Dimensional analysis"],
                       key="app_mode")
     st.divider()
 
@@ -851,6 +853,72 @@ def render_extraction_diff_tab():
             st.write(f"▶️ only in B: `{e.name_b}`")
 
 
+def render_dimensional_analysis_tab():
+    """Dimensional-analysis-only mode: no numbers, no explicit formula --
+    just the DIMENSIONS of a set of candidate input quantities and a
+    desired output dimension, exploring which exponent combinations
+    could possibly reach it. A genuinely different kind of problem from
+    the rest of this app: nothing here solves a stated equation, it
+    DISCOVERS which combinations of units could even plausibly combine
+    into a target unit at all. See dimensional_analysis.py."""
+    st.subheader("📐 Dimensional analysis")
+    st.caption("Given just the UNITS of some candidate inputs and a desired output unit -- no "
+                "numbers, no equation -- find which combinations of exponents could possibly "
+                "reach it. The Buckingham-Pi-style exploration physics problems sometimes ask for "
+                "directly, before any formula is even proposed.")
+
+    st.write("**Candidate inputs** (one per line, `name: unit`):")
+    inputs_text = st.text_area(
+        "Inputs", height=120, key="dim_inputs_text", label_visibility="collapsed",
+        placeholder="m: kg\na: m/s^2",
+    )
+    target_unit = st.text_input("Target unit", key="dim_target_unit", placeholder="N")
+
+    if not st.button("Analyze", type="primary", key="dim_analyze_button"):
+        return
+    if not inputs_text.strip() or not target_unit.strip():
+        st.warning("Enter at least one input and a target unit.")
+        return
+
+    input_units = {}
+    for line in inputs_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if ":" not in line:
+            st.error(f"Couldn't parse line '{line}' -- expected `name: unit`.")
+            return
+        name, unit = line.split(":", 1)
+        name, unit = name.strip(), unit.strip()
+        if not name or not unit:
+            st.error(f"Couldn't parse line '{line}' -- expected `name: unit`.")
+            return
+        input_units[name] = unit
+
+    result = analyze_dimensions(input_units, target_unit.strip())
+
+    if not result.feasible:
+        st.error(result.message)
+        return
+
+    st.success(result.message)
+    if result.particular_solution:
+        exps = ", ".join(f"{name}^{exp}" for name, exp in result.particular_solution.items())
+        st.write(f"**A particular solution:** {exps}")
+
+    if result.candidates:
+        st.write("### Candidate formulas")
+        st.caption("Every combination found by a bounded search over small rational exponents "
+                    "(from \u22123 to 3 in steps of \u00bd) that matches the target dimension "
+                    "exactly -- up to an unknown dimensionless constant C.")
+        for c in result.candidates:
+            st.write(f"- {c.description}")
+    else:
+        st.caption("No small-exponent candidates found in the search range, but the system is "
+                    "still feasible (see the particular solution above, which may involve larger "
+                    "or non-half-integer exponents).")
+
+
 st.title("🧮 Math Representation System")
 st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
 
@@ -875,6 +943,9 @@ elif mode == "🔗 Problem chains":
     st.stop()
 elif mode == "🔬 Extraction diff":
     render_extraction_diff_tab()
+    st.stop()
+elif mode == "📐 Dimensional analysis":
+    render_dimensional_analysis_tab()
     st.stop()
 
 # ---------------------------------------------------------------- input
@@ -1777,8 +1848,40 @@ if model:
             with st.expander("📝 Grade my work"):
                 grade_target = st.selectbox("Which target are you solving for?", algebraic_targets,
                                               key="grade_target")
+
+                # ---- handwritten work via photo: reuses the same
+                # vision/OCR machinery as the problem-statement image
+                # tab, just with a prompt tailored to transcribing
+                # WORKED STEPS instead of a problem -- removes the
+                # single biggest piece of friction in actually using
+                # this feature: retyping work that's already on paper.
+                with st.expander("📷 Or upload a photo of your handwritten work"):
+                    uploaded_work = st.file_uploader("Upload a photo", type=["png", "jpg", "jpeg"],
+                                                       key="grade_work_photo")
+                    if uploaded_work is not None and check_upload_size(uploaded_work):
+                        st.image(uploaded_work, caption="Uploaded work", width=300)
+                        use_vision_grading = st.toggle(
+                            "Use LM Studio vision model (falls back to Tesseract OCR -- much less "
+                            "reliable on handwriting -- if off/unavailable)",
+                            value=True, key="grade_work_use_vision",
+                        )
+                        if st.button("Extract work from photo", key="grade_work_extract_button"):
+                            with st.spinner("Reading handwriting..."):
+                                try:
+                                    if use_vision_grading:
+                                        extracted = client.vision_extract_work(
+                                            uploaded_work.getvalue(), mime_type=uploaded_work.type)
+                                    else:
+                                        extracted = ocr_extract(uploaded_work.getvalue())
+                                except Exception as e:  # noqa: BLE001
+                                    st.error(f"Extraction failed: {e}")
+                                    extracted = None
+                            if extracted is not None:
+                                st.session_state["grade_work_text"] = extracted
+                                st.rerun()
+
                 student_work = st.text_area(
-                    "Paste your work, one step per line",
+                    "Paste your work, one step per line (or extract from a photo above)",
                     placeholder="a = (v_f - v_i) / t\na = (20 - 8) / 6\na = 2.0",
                     height=120, key="grade_work_text",
                 )

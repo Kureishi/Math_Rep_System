@@ -935,6 +935,50 @@ what it's handed:
   "difference" on every single run, drowning out the differences that
   actually matter.
 
+## Slightly offbeat
+
+Two additions that don't fit neatly into any of the categories above --
+one closes a real usability gap, the other explores a genuinely
+different KIND of problem than anything else in this app:
+
+- **Handwritten "grade my work" via photo**
+  (`LMStudioClient.vision_extract_work` in `modules/llm_client.py`, a
+  "📷 Or upload a photo of your handwritten work" panel inside Grade my
+  work) -- the app already does image-to-text extraction for PROBLEM
+  STATEMENTS (the Image input tab); this points that same underlying
+  vision-model call at a photo of a student's own worked steps instead,
+  with a prompt tailored to transcribing WORKED STEPS line-by-line
+  rather than a problem statement, then feeds the result straight into
+  the existing typed-work flow. Removes what was probably the single
+  biggest piece of everyday friction in actually using Grade my work:
+  retyping steps that already exist on paper. Falls back to the same
+  Tesseract OCR path the Image input tab already offers when no vision
+  model is loaded, with an explicit caveat that OCR is considerably
+  less reliable on handwriting specifically than on printed text.
+- **Dimensional-analysis-only mode** (`modules/dimensional_analysis.py`,
+  "📐 Dimensional analysis" mode) -- given just the UNITS of some
+  candidate input quantities and a desired output unit -- no numbers,
+  no explicit formula -- finds which combinations of exponents could
+  possibly reach it: the Buckingham-Pi-style "what could this even be"
+  exploration physics problems sometimes ask for directly, before any
+  equation is proposed. A genuinely different KIND of problem from
+  everything else in this app, which is otherwise entirely about
+  solving and verifying a STATED equation. Reuses `units_checker.py`'s
+  existing SI unit-parsing (the same machinery `verifier.py`'s own
+  dimensional-consistency pass depends on) and adds only the exponent-
+  solving layer on top: each unit becomes a vector of exponents over
+  the 7 SI base dimensions, and finding a dimensionally-valid
+  combination reduces to solving a linear system for those exponents.
+  When more inputs are given than there are independent dimensions
+  actually involved, the system is genuinely underdetermined -- a
+  bounded search over small rational exponents surfaces several
+  concrete, readable candidate formulas from that family rather than
+  only an abstract particular solution. Correctly reports Coulomb's law
+  as dimensionally infeasible from q₁, q₂, and r alone in SI units (its
+  constant *k* isn't itself dimensionless the way Newton's second law's
+  is) -- a real, deliberate confirmation that the tool doesn't paper
+  over an SI-specific subtlety just because a formula is famous.
+
 ## UI streamlining
 
 A few changes aimed purely at making the interface easier to navigate as

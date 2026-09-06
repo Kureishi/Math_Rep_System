@@ -104,3 +104,69 @@ def test_validate_model_distinguishes_unreachable_from_not_loaded():
     assert unreachable_msg != not_loaded_msg
     assert "reach" in unreachable_msg.lower()
     assert "model-a" in not_loaded_msg
+
+
+# ---------------------------------------------------------------- vision_extract_work
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = type("Msg", (), {"content": content})()
+
+
+class _FakeCompletionResponse:
+    def __init__(self, content):
+        self.choices = [_FakeChoice(content)]
+
+
+class _FakeCompletionsAPI:
+    def __init__(self, reply):
+        self.reply = reply
+        self.last_call_kwargs = None
+
+    def create(self, **kwargs):
+        self.last_call_kwargs = kwargs
+        return _FakeCompletionResponse(self.reply)
+
+
+def _client_with_fake_vision(reply):
+    from modules.llm_client import LMStudioClient
+    client = LMStudioClient()
+    fake_completions = _FakeCompletionsAPI(reply)
+    client._client = type("FakeSDK", (), {
+        "chat": type("Chat", (), {"completions": fake_completions})(),
+    })()
+    return client, fake_completions
+
+
+def test_vision_extract_work_returns_transcribed_text():
+    client, fake = _client_with_fake_vision("a = (v_f - v_i) / t\na = (20 - 8) / 6\na = 2.0")
+    result = client.vision_extract_work(b"fake image bytes", mime_type="image/png")
+    assert result == "a = (v_f - v_i) / t\na = (20 - 8) / 6\na = 2.0"
+
+
+def test_vision_extract_work_sends_base64_image_and_grading_prompt():
+    client, fake = _client_with_fake_vision("a = 2.0")
+    client.vision_extract_work(b"fake image bytes", mime_type="image/jpeg")
+    messages = fake.last_call_kwargs["messages"]
+    system_msg = messages[0]["content"]
+    assert "handwritten" in system_msg.lower()
+    assert "do not solve" in system_msg.lower()
+    user_content = messages[1]["content"]
+    image_block = next(c for c in user_content if c["type"] == "image_url")
+    assert image_block["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_vision_extract_work_and_vision_extract_use_different_prompts():
+    """Regression guard: these two methods must NOT share a prompt --
+    one transcribes a problem STATEMENT, the other a student's worked
+    STEPS, and conflating them would produce garbled results for both."""
+    client, fake = _client_with_fake_vision("some text")
+    client.vision_extract_work(b"img", mime_type="image/png")
+    work_system_prompt = fake.last_call_kwargs["messages"][0]["content"]
+
+    client.vision_extract(b"img", mime_type="image/png")
+    statement_system_prompt = fake.last_call_kwargs["messages"][0]["content"]
+
+    assert work_system_prompt != statement_system_prompt
+    assert "problem statement" in statement_system_prompt.lower()
+    assert "handwritten" in work_system_prompt.lower()
