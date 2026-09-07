@@ -1655,11 +1655,41 @@ if model:
                                                             std=float(std_val)))
                         mc_n = st.slider("Number of samples", 100, min(MC_MAX_SAMPLES, 10000), 1000,
                                            key=f"mc_n_{target_name}")
+
+                        # ---- reproducibility: a Monte Carlo run is only
+                        # a citable/reproducible result if the seed that
+                        # produced it is visible and reusable -- default
+                        # to a fresh random seed each time this panel is
+                        # first opened for this target, but keep it
+                        # STABLE across reruns (not re-randomized on
+                        # every rerun) so the number shown always
+                        # matches what "Run Monte Carlo" will actually
+                        # use until the person explicitly asks for a
+                        # new one.
+                        mc_seed_key = f"mc_seed_{target_name}"
+                        if mc_seed_key not in st.session_state:
+                            st.session_state[mc_seed_key] = int(
+                                np.random.default_rng().integers(0, 2**31 - 1))
+                        mc_seed_cols = st.columns([3, 1])
+                        with mc_seed_cols[0]:
+                            st.number_input(
+                                "Seed", min_value=0, max_value=2**31 - 1, key=mc_seed_key,
+                                help="Same seed + same inputs always reproduces the exact same "
+                                     "samples -- note this down alongside a result you're citing.",
+                            )
+                        with mc_seed_cols[1]:
+                            st.button(
+                                "🎲 New seed", key=f"mc_randomize_{target_name}",
+                                on_click=lambda k=mc_seed_key: st.session_state.update(
+                                    {k: int(np.random.default_rng().integers(0, 2**31 - 1))}),
+                            )
+
                         if st.button("Run Monte Carlo", key=f"mc_run_{target_name}") and uncertain_vars:
                             with st.spinner(f"Sampling {mc_n} times..."):
                                 try:
                                     mc_result = run_monte_carlo(model, target_name, uncertain_vars,
-                                                                  n_samples=mc_n)
+                                                                  n_samples=mc_n,
+                                                                  seed=st.session_state[mc_seed_key])
                                 except ValueError as e:
                                     st.error(str(e))
                                     mc_result = None
@@ -1668,6 +1698,8 @@ if model:
                         if mc_result is not None and mc_result.samples:
                             st.write(f"**{target_name} = {mc_result.mean:.6g} ± {mc_result.std:.4g}** "
                                       f"(5th–95th percentile: {mc_result.p5:.6g} to {mc_result.p95:.6g})")
+                            st.caption(f"Seed used: {mc_result.seed} -- reuse it above to reproduce "
+                                        "this exact run.")
                             if mc_result.n_failed:
                                 st.caption(f"{mc_result.n_failed} of {mc_result.n_requested} samples "
                                             "didn't produce a real result and were excluded.")
@@ -1676,7 +1708,8 @@ if model:
                                                                p95=mc_result.p95)
                             st.plotly_chart(hist_fig, width='stretch', key=f"mc_hist_{target_name}")
                             format_download_button(
-                                key=f"mc_hist_{target_name}", file_stem=f"monte_carlo_{target_name}",
+                                key=f"mc_hist_{target_name}",
+                                file_stem=f"monte_carlo_{target_name}_seed{mc_result.seed}",
                                 render_fn=lambda fmt, r=mc_result: snapshot_histogram_plot(
                                     r.samples, target_name, mean=r.mean, p5=r.p5, p95=r.p95, fmt=fmt),
                             )

@@ -979,6 +979,50 @@ different KIND of problem than anything else in this app:
   is) -- a real, deliberate confirmation that the tool doesn't paper
   over an SI-specific subtlety just because a formula is famous.
 
+## Reproducibility & scripting
+
+Two additions aimed specifically at researchers and advanced users --
+being able to reproduce a stated result exactly, and being able to run
+this outside a browser at all:
+
+- **Monte Carlo runs are now reproducible.** `run_monte_carlo()` always
+  attaches the actual seed it used to `MonteCarloResult.seed` -- even
+  when the caller didn't pass one, in which case a fresh one is
+  generated and returned rather than being silently thrown away (a
+  result with no way back to its own seed isn't reproducible at all,
+  whatever else about it is deterministic). The Monte Carlo panel in
+  the app shows this seed in an editable field next to a "🎲 New seed"
+  button: the field stays stable across reruns (it's not re-randomized
+  every time the page redraws), the result caption echoes back
+  whichever seed actually produced it, and the downloaded histogram's
+  filename includes it -- so a number worth citing always comes with
+  the seed needed to regenerate it exactly.
+- **`cli.py`: a command-line entry point with no Streamlit dependency
+  at all.** app.py is really just one consumer of `modules/` --
+  `equation_engine`, `verifier`, `monte_carlo`, and the rest are plain
+  Python with no UI framework baked in. `cli.py` is a second, scriptable
+  front end onto that same pipeline, for the workflows point-and-click
+  can't reasonably serve:
+  - `python cli.py solve problems.json --output results.csv` --
+    extracts, verifies, and solves a whole batch of problems (a JSON
+    array of problem-text strings, or of `{"text": ..., "known_
+    context": ...}` objects for more control) in one run, writing a
+    results table rather than requiring one click-through per problem.
+  - `python cli.py montecarlo problem.txt --target a --uncertain
+    v:1.0 --seed 42 --output samples.csv` -- runs uncertainty
+    propagation on a single problem and writes the raw samples out,
+    for further analysis in a researcher's own pandas/numpy pipeline
+    rather than only ever looking at a histogram in a browser tab.
+
+  Both subcommands still talk to LM Studio the same way the app does
+  (this isn't an offline mode, just a different front end), and both
+  accept `--format csv|json` with the format auto-inferred from
+  `--output`'s extension when given. Genuinely useful for batch-
+  processing dozens of problem variants overnight, wiring this into an
+  existing Python analysis pipeline, or running it as a scripted
+  regression check against a formula library in CI -- none of which is
+  realistic through the browser UI alone.
+
 ## Mobile browser optimization
 
 A pass focused specifically on using this app from a phone browser,

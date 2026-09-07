@@ -59,6 +59,10 @@ class MonteCarloResult:
     n_failed: int = 0        # samples where the symbolic expression evaluated to a complex or
                                # non-finite value at that particular random draw (e.g. a sqrt of a
                                # negative number at an extreme sample) -- excluded from `samples`/stats
+    seed: int = 0             # the ACTUAL seed used -- always a concrete int, never None, even
+                               # when the caller didn't specify one (see run_monte_carlo): a result
+                               # with no reproducible seed attached isn't reproducible at all, which
+                               # defeats a large part of the point of tracking this
     mean: float | None = None
     std: float | None = None
     p5: float | None = None
@@ -74,7 +78,14 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
     result rather than raising -- an occasional failed sample at an
     extreme random draw is expected, but see `n_failed` to catch a run
     where MOST samples fail (usually a sign the given std is too large
-    relative to the model's valid domain)."""
+    relative to the model's valid domain).
+
+    `seed=None` (the default) does NOT mean "no seed" -- a fresh
+    unpredictable one is generated and used, and returned on the result
+    as `MonteCarloResult.seed`, so the exact run can be reproduced later
+    by passing that same value back in. A result whose seed was silently
+    thrown away wouldn't actually be reproducible even with everything
+    else identical, which defeats the point of tracking it at all."""
     if target not in model.solve_for or target_kind(model, target) != "equation":
         raise ValueError(f"'{target}' isn't an algebraic solve_for target of this model.")
     if not uncertain_vars:
@@ -82,6 +93,9 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
     for uv in uncertain_vars:
         if uv.std <= 0:
             raise ValueError(f"'{uv.symbol}' has a non-positive std ({uv.std}) -- not actually uncertain.")
+
+    if seed is None:
+        seed = int(np.random.SeedSequence().generate_state(1, dtype=np.uint32)[0])
 
     n_samples = max(10, min(n_samples, MAX_SAMPLES))
     rng = np.random.default_rng(seed)
@@ -128,7 +142,7 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
         # the target doesn't depend on any uncertain input -- deterministic
         value = float(target_expr)
         return MonteCarloResult(target=target, samples=[value] * n_samples, n_requested=n_samples,
-                                  n_failed=0, mean=value, std=0.0, p5=value, p95=value)
+                                  n_failed=0, seed=seed, mean=value, std=0.0, p5=value, p95=value)
 
     f = sp.lambdify([sp.Symbol(uv.symbol) for uv in active_vars], target_expr, "numpy")
     arg_arrays = [draws[uv.symbol] for uv in active_vars]
@@ -156,11 +170,12 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
     n_failed = n_samples - len(samples)
 
     if not samples:
-        return MonteCarloResult(target=target, samples=[], n_requested=n_samples, n_failed=n_failed)
+        return MonteCarloResult(target=target, samples=[], n_requested=n_samples, n_failed=n_failed,
+                                  seed=seed)
 
     arr = np.array(samples)
     return MonteCarloResult(
-        target=target, samples=samples, n_requested=n_samples, n_failed=n_failed,
+        target=target, samples=samples, n_requested=n_samples, n_failed=n_failed, seed=seed,
         mean=float(np.mean(arr)), std=float(np.std(arr)),
         p5=float(np.percentile(arr, 5)), p95=float(np.percentile(arr, 95)),
     )

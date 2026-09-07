@@ -121,3 +121,52 @@ def test_failed_samples_tracked_separately_from_successful_ones():
     result = run_monte_carlo(model, "p", [UncertainVariable("m", 1.0, 5.0)], n_samples=150, seed=11)
     assert result.n_requested == 150
     assert len(result.samples) + result.n_failed == 150
+
+
+# ---------------------------------------------------------------- seed reproducibility
+
+def test_auto_generated_seed_is_a_concrete_int():
+    model = _kinematics_model()
+    result = run_monte_carlo(model, "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=100)
+    assert isinstance(result.seed, int)
+    assert result.seed != 0  # extremely unlikely to land exactly on the dataclass default by chance
+
+
+def test_two_auto_generated_seeds_differ():
+    model = _kinematics_model()
+    r1 = run_monte_carlo(model, "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=100)
+    r2 = run_monte_carlo(model, "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=100)
+    assert r1.seed != r2.seed
+
+
+def test_reusing_the_returned_seed_reproduces_identical_samples():
+    model = _kinematics_model()
+    r1 = run_monte_carlo(model, "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=200)
+    r2 = run_monte_carlo(model, "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=200, seed=r1.seed)
+    assert r1.samples == r2.samples
+    assert r1.seed == r2.seed
+
+
+def test_explicit_seed_is_echoed_back_unchanged():
+    model = _kinematics_model()
+    result = run_monte_carlo(model, "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=100, seed=42)
+    assert result.seed == 42
+
+
+def test_seed_is_set_even_on_the_deterministic_no_dependence_path():
+    """When the target doesn't actually depend on any uncertain input,
+    the early-return 'deterministic' branch must still carry a real
+    seed -- every result should be reproducible-by-seed, not just the
+    common case."""
+    model = build_model({
+        "problem_domain": "physics", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "x", "meaning": "x", "known_value": None, "unit": None},
+            {"symbol": "y", "meaning": "y", "known_value": "3", "unit": None},
+            {"symbol": "z", "meaning": "z", "known_value": None, "unit": None},
+        ],
+        "equations": [{"name": "e", "kind": "equation", "expression": "Eq(z, y * 2)", "derivation": ""}],
+        "solve_for": ["z"], "assumptions": [],
+    })
+    result = run_monte_carlo(model, "z", [UncertainVariable("x", 1.0, 0.5)], n_samples=50, seed=7)
+    assert result.seed == 7
