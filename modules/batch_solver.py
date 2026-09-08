@@ -144,3 +144,32 @@ def batch_summary(results: list[BatchItemResult]) -> dict:
     needed_retry = sum(1 for r in results if r.retries > 0 and r.report is not None and r.report.passed)
     failed = sum(1 for r in results if r.error is not None or r.report is None or not r.report.passed)
     return {"total": total, "solved": solved, "needed_retry": needed_retry, "failed": failed}
+
+
+def batch_results_table(results: list[BatchItemResult]) -> list[dict]:
+    """Flattens a batch run into one row per (problem, target) pair --
+    the shape a spreadsheet or pandas DataFrame wants, rather than the
+    nested per-problem Markdown/PDF report this module already builds
+    for reading. A problem with multiple solve_for targets gets one row
+    per target; a problem that errored out or has no algebraic target
+    still gets exactly one row (target/value left blank) so every input
+    problem is represented at least once in the output table, never
+    silently dropped just because it didn't produce a numeric answer."""
+    rows = []
+    for r in results:
+        base = {
+            "index": r.index + 1,
+            "problem_text": r.problem_text,
+            "domain": r.model.problem_domain if r.model else None,
+            "confidence": r.report.confidence_report().label if r.report else None,
+            "passed": r.report.passed if r.report else None,
+            "retries": r.retries,
+            "error": r.error,
+        }
+        answers = r.report.sympy_numeric_answers if r.report else {}
+        if answers:
+            for target, value in answers.items():
+                rows.append({**base, "target": target, "value": value})
+        else:
+            rows.append({**base, "target": None, "value": None})
+    return rows

@@ -437,3 +437,20 @@ def build_histogram_plot(samples: list[float], target_symbol: str,
     fig.update_layout(xaxis_title=target_symbol, yaxis_title="count",
                         title=f"Monte Carlo distribution of {target_symbol} ({len(samples)} samples)")
     return fig
+
+
+def build_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: str, y_label: str,
+                          target_symbol: str) -> go.Figure:
+    """A 2D parameter sweep's result as a heatmap -- x/y are the two
+    swept variables, color is the target value at each grid point. The
+    natural visualization for parameter_sweep.py's 2-variable case,
+    since a results table alone doesn't make the SHAPE of a sensitivity
+    surface (a ridge, a saddle, a monotonic gradient) visible at a
+    glance the way a heatmap does."""
+    fig = go.Figure(data=go.Heatmap(
+        x=x_values, y=y_values, z=z_matrix, colorscale="Viridis",
+        colorbar=dict(title=target_symbol), hoverongaps=False,
+    ))
+    fig.update_layout(xaxis_title=x_label, yaxis_title=y_label,
+                        title=f"{target_symbol} across {x_label} \u00d7 {y_label}")
+    return fig

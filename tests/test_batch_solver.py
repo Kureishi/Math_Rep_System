@@ -1,7 +1,8 @@
 import json
 import pytest
 
-from modules.batch_solver import split_batch_text, solve_one, solve_batch, batch_summary, BatchItemResult, extract_text_from_pdf
+from modules.batch_solver import split_batch_text, solve_one, solve_batch, batch_summary, batch_results_table, BatchItemResult, extract_text_from_pdf
+from tests.conftest import KINEMATICS_JSON
 
 
 # ---------------------------------------------------------------- split_batch_text
@@ -233,3 +234,62 @@ def test_extract_text_from_pdf_empty_pdf_returns_empty_string():
     pdf_bytes = bytes(pdf.output())
     text = extract_text_from_pdf(pdf_bytes)
     assert text == ""
+
+
+# ---------------------------------------------------------------- batch_results_table
+
+def _solved_item(index, problem_text, fake_client_factory, target_value=2.0):
+    from modules.equation_engine import build_model
+    from modules.verifier import verify
+    model = build_model(json.loads(KINEMATICS_JSON))
+    client = fake_client_factory(final_answers={"a": target_value})
+    report = verify(model, client, problem_text)
+    return BatchItemResult(index=index, problem_text=problem_text, model=model, report=report)
+
+
+def test_batch_results_table_one_row_per_solved_problem(fake_client_factory):
+    item = _solved_item(0, "A car problem", fake_client_factory)
+    rows = batch_results_table([item])
+    assert len(rows) == 1
+    assert rows[0]["index"] == 1
+    assert rows[0]["problem_text"] == "A car problem"
+    assert rows[0]["domain"] == "kinematics"
+    assert rows[0]["target"] == "a"
+    assert rows[0]["value"] == pytest.approx(2.0)
+    assert rows[0]["error"] is None
+
+
+def test_batch_results_table_error_item_still_gets_a_row():
+    item = BatchItemResult(index=0, problem_text="a broken problem", error="extraction failed: boom")
+    rows = batch_results_table([item])
+    assert len(rows) == 1
+    assert rows[0]["target"] is None
+    assert rows[0]["value"] is None
+    assert "boom" in rows[0]["error"]
+
+
+def test_batch_results_table_multiple_problems_preserve_order(fake_client_factory):
+    item0 = _solved_item(0, "problem A", fake_client_factory, target_value=1.0)
+    item1 = _solved_item(1, "problem B", fake_client_factory, target_value=3.0)
+    rows = batch_results_table([item0, item1])
+    assert [r["problem_text"] for r in rows] == ["problem A", "problem B"]
+    assert [r["index"] for r in rows] == [1, 2]
+
+
+def test_batch_results_table_no_algebraic_answers_still_one_row(fake_client_factory):
+    """A model that solved with no numeric answers (report.sympy_numeric_answers
+    empty) should still produce exactly one row, not zero."""
+    from modules.equation_engine import build_model
+    from modules.verifier import verify
+    model = build_model(json.loads(KINEMATICS_JSON))
+    client = fake_client_factory(final_answers={})
+    report = verify(model, client, "a problem")
+    report.sympy_numeric_answers = {}  # force the no-answers case explicitly
+    item = BatchItemResult(index=0, problem_text="a problem", model=model, report=report)
+    rows = batch_results_table([item])
+    assert len(rows) == 1
+    assert rows[0]["target"] is None
+
+
+def test_batch_results_table_empty_results_list():
+    assert batch_results_table([]) == []

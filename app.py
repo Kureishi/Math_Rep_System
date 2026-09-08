@@ -7,6 +7,7 @@ Run with:
 Requires LM Studio running locally with its server started
 (Developer tab -> Start Server, default port 1234).
 """
+import io
 import streamlit as st
 import sympy as sp
 import numpy as np
@@ -39,17 +40,18 @@ from modules.named_formulas import recognize_formula
 from modules.sig_figs import check_sig_figs, raw_known_value_strings
 from modules.step_explainer import explain_step
 from modules.dimensional_analysis import analyze_dimensions
+from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
 from modules.grading import grade_work, classify_mistake
 from modules.worksheet import generate_worksheet_problems, generate_targeted_worksheet_problems
-from modules.batch_solver import solve_batch, batch_summary, split_batch_text, extract_text_from_pdf
+from modules.batch_solver import solve_batch, batch_summary, batch_results_table, split_batch_text, extract_text_from_pdf
 from modules.vector_utils import vector_summary
 from modules.scenarios import generate_alternative_scenarios
-from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot, build_tornado_chart, build_sweep_chart, build_dependency_graph_plot, build_contour_plot, build_overlay_plot, build_chain_sweep_plot, build_spread_plot, build_histogram_plot
-from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot, snapshot_fit_plot, snapshot_tornado_chart, snapshot_sweep_chart, snapshot_dependency_graph, snapshot_contour_plot, snapshot_overlay_plot, snapshot_chain_sweep_plot, snapshot_spread_plot, snapshot_histogram_plot
+from modules.plotter import plottable_free_symbols, build_plot, build_surface_plot, build_feasible_region_plot, build_vector_plot, build_fit_plot, build_tornado_chart, build_sweep_chart, build_dependency_graph_plot, build_contour_plot, build_overlay_plot, build_chain_sweep_plot, build_spread_plot, build_histogram_plot, build_sweep_heatmap
+from modules.plot_snapshot import snapshot_line_plot, snapshot_surface_plot, snapshot_feasible_region, snapshot_ode_plot, snapshot_recurrence_plot, snapshot_vector_plot, snapshot_fit_plot, snapshot_tornado_chart, snapshot_sweep_chart, snapshot_dependency_graph, snapshot_contour_plot, snapshot_overlay_plot, snapshot_chain_sweep_plot, snapshot_spread_plot, snapshot_histogram_plot, snapshot_sweep_heatmap
 from modules.curve_fitting import fit_curve, best_fit, parse_xy_csv, BUILTIN_FAMILIES
 from modules.equivalence import check_equivalence
 from modules.workspace import Workspace
@@ -378,6 +380,28 @@ def render_batch_solver_tab():
             st.download_button("⬇️ Download combined PDF report", data=pdf_bytes,
                                  file_name="batch_report.pdf", mime="application/pdf",
                                  key="batch_pdf_download")
+
+    # ---- tabular export: a spreadsheet of (problem, target, value,
+    # confidence, passed) rows, one per solved target -- what a
+    # researcher running dozens of variants almost always actually
+    # wants, rather than a prose report meant to be read top to bottom
+    # one problem at a time. See batch_solver.batch_results_table().
+    results_df = pd.DataFrame(batch_results_table(results))
+    table_cols = st.columns(2)
+    with table_cols[0]:
+        st.download_button("⬇️ Download results as CSV", data=results_df.to_csv(index=False),
+                             file_name="batch_results.csv", mime="text/csv", key="batch_csv_download")
+    with table_cols[1]:
+        xlsx_buf = io.BytesIO()
+        results_df.to_excel(xlsx_buf, index=False, sheet_name="results")
+        st.download_button(
+            "⬇️ Download results as Excel", data=xlsx_buf.getvalue(),
+            file_name="batch_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="batch_xlsx_download",
+        )
+    with st.expander("Preview results table"):
+        st.dataframe(results_df, width='stretch', hide_index=True)
 
     for r in results:
         preview = r.problem_text.strip().splitlines()[0][:80]
@@ -1422,6 +1446,167 @@ if model:
                     caption=f"{model.problem_domain} -- variable/equation dependencies",
                     render_fn=lambda: snapshot_dependency_graph(dep_nodes, dep_edges),
                 )
+
+        # ---- N-dimensional parameter sweep: grid-sweep two or more of
+        # a problem's own inputs at once and get a results TABLE (plus
+        # a heatmap for exactly 2 swept variables) -- distinct from
+        # chains.sweep_step_binding (one variable, across a whole
+        # CHAIN) and the interactive plot's own single-variable 1D
+        # sweep. See parameter_sweep.py.
+        sweep_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
+        sweepable_vars = [v for v in model.variables if v.known_value is not None]
+        if sweep_targets and len(sweepable_vars) >= 2:
+            with st.expander("📊 N-dimensional parameter sweep"):
+                st.caption("Grid-sweep two or more inputs at once and get a results table -- the "
+                            "shape of a real sensitivity study, not just a single line read one "
+                            "point at a time.")
+                sweep_target = st.selectbox("Target", sweep_targets, key="sweep_target")
+                sweep_symbols = st.multiselect(
+                    "Which inputs to sweep? (2 or more for a genuine grid)",
+                    [v.symbol for v in sweepable_vars], key="sweep_symbols",
+                )
+                sweep_ranges = {}
+                if sweep_symbols:
+                    sweep_default_rows = []
+                    for sym in sweep_symbols:
+                        var = next(v for v in sweepable_vars if v.symbol == sym)
+                        center = float(var.known_value)
+                        width = abs(center) * 0.2 or 1.0
+                        sweep_default_rows.append({"Symbol": sym, "Low": center - width,
+                                                     "High": center + width, "Points": 5})
+                    sweep_edited = st.data_editor(
+                        pd.DataFrame(sweep_default_rows), hide_index=True, width='stretch',
+                        key=f"sweep_editor_{','.join(sorted(sweep_symbols))}",
+                        column_config={
+                            "Symbol": st.column_config.TextColumn("Symbol", disabled=True),
+                            "Low": st.column_config.NumberColumn("Low", format="%.4g"),
+                            "High": st.column_config.NumberColumn("High", format="%.4g"),
+                            "Points": st.column_config.NumberColumn("Points", min_value=2,
+                                                                       max_value=50, step=1),
+                        },
+                    )
+                    for _, row in sweep_edited.iterrows():
+                        lo, hi, n_points = row["Low"], row["High"], row["Points"]
+                        if lo is not None and hi is not None and n_points and int(n_points) >= 2:
+                            sweep_ranges[row["Symbol"]] = list(
+                                np.linspace(min(lo, hi), max(lo, hi), int(n_points)))
+
+                if st.button("Run sweep", key="sweep_run_button") and sweep_ranges:
+                    try:
+                        sweep_result = sweep_parameters(model, sweep_target, sweep_ranges)
+                    except ValueError as e:
+                        st.error(str(e))
+                        sweep_result = None
+                    st.session_state["sweep_result"] = sweep_result
+
+                sweep_result = st.session_state.get("sweep_result")
+                if sweep_result is not None:
+                    sweep_df = pd.DataFrame(sweep_result.rows)
+                    st.dataframe(sweep_df, width='stretch', hide_index=True)
+
+                    if len(sweep_result.swept_symbols) == 2:
+                        x_sym, y_sym = sweep_result.swept_symbols
+                        gx, gy, gz = sweep_result_to_grid(sweep_result)
+                        heatmap_fig = build_sweep_heatmap(gx, gy, gz, x_sym, y_sym, sweep_result.target)
+                        st.plotly_chart(heatmap_fig, width='stretch', key="sweep_heatmap")
+                        format_download_button(
+                            key="sweep_heatmap", file_stem=f"sweep_{sweep_result.target}",
+                            render_fn=lambda fmt, gx=gx, gy=gy, gz=gz, xs=x_sym, ys=y_sym,
+                                             t=sweep_result.target:
+                                snapshot_sweep_heatmap(gx, gy, gz, xs, ys, t, fmt=fmt),
+                        )
+
+                    st.download_button("⬇️ Download sweep as CSV", data=sweep_df.to_csv(index=False),
+                                         file_name=f"sweep_{sweep_result.target}.csv", mime="text/csv",
+                                         key="sweep_csv_download")
+
+        # ---- bulk uncertainty propagation across ALL targets: pick
+        # uncertain inputs ONCE and run Monte Carlo for every algebraic
+        # target with a SHARED seed (so every target's samples are
+        # drawn from the same underlying random draws, for a
+        # consistent comparison), rather than repeating the single-
+        # target panel further down once per target. Only meaningful
+        # when there's more than one target to begin with.
+        bulk_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
+        bulk_known_vars = [v for v in model.variables if v.known_value is not None]
+        if len(bulk_targets) >= 2 and bulk_known_vars:
+            with st.expander("🎲 Uncertainty propagation across all targets"):
+                st.caption("Pick uncertain inputs once and run Monte Carlo for every target at "
+                            "once, reusing the same random draws for each, rather than repeating "
+                            "the single-target panel below once per target.")
+                bulk_symbols = st.multiselect(
+                    "Which inputs have uncertainty?", [v.symbol for v in bulk_known_vars],
+                    key="bulk_mc_vars",
+                )
+                bulk_uncertain_vars = []
+                if bulk_symbols:
+                    bulk_default_rows = [
+                        {"Symbol": sym, "Std (±)": abs(next(
+                            v for v in bulk_known_vars if v.symbol == sym).known_value) * 0.05 or 0.1}
+                        for sym in bulk_symbols
+                    ]
+                    bulk_edited = st.data_editor(
+                        pd.DataFrame(bulk_default_rows), hide_index=True, width='stretch',
+                        key=f"bulk_mc_editor_{','.join(sorted(bulk_symbols))}",
+                        column_config={
+                            "Symbol": st.column_config.TextColumn("Symbol", disabled=True),
+                            "Std (±)": st.column_config.NumberColumn("Std (±)", min_value=0.0,
+                                                                        format="%.4g"),
+                        },
+                    )
+                    for _, row in bulk_edited.iterrows():
+                        std_val = row["Std (\u00b1)"]
+                        if std_val is not None and std_val > 0:
+                            var = next(v for v in bulk_known_vars if v.symbol == row["Symbol"])
+                            bulk_uncertain_vars.append(
+                                UncertainVariable(symbol=row["Symbol"], mean=var.known_value,
+                                                    std=float(std_val)))
+
+                bulk_seed_key = "bulk_mc_seed"
+                if bulk_seed_key not in st.session_state:
+                    st.session_state[bulk_seed_key] = int(
+                        np.random.default_rng().integers(0, 2**31 - 1))
+                bulk_seed_cols = st.columns([3, 1])
+                with bulk_seed_cols[0]:
+                    st.number_input(
+                        "Seed", min_value=0, max_value=2**31 - 1, key=bulk_seed_key,
+                        help="Same seed across every target -- the same underlying random draws "
+                             "are reused for each, for a consistent comparison.",
+                    )
+                with bulk_seed_cols[1]:
+                    st.button(
+                        "🎲 New seed", key="bulk_mc_randomize",
+                        on_click=lambda: st.session_state.update(
+                            {bulk_seed_key: int(np.random.default_rng().integers(0, 2**31 - 1))}),
+                    )
+
+                bulk_n = st.slider("Number of samples", 100, min(MC_MAX_SAMPLES, 10000), 1000,
+                                     key="bulk_mc_n")
+
+                if st.button("Run for all targets", key="bulk_mc_run") and bulk_uncertain_vars:
+                    bulk_rows = []
+                    with st.spinner(f"Sampling {bulk_n} times for {len(bulk_targets)} targets..."):
+                        for t in bulk_targets:
+                            try:
+                                r = run_monte_carlo(model, t, bulk_uncertain_vars, n_samples=bulk_n,
+                                                      seed=st.session_state[bulk_seed_key])
+                            except ValueError as e:
+                                bulk_rows.append({"target": t, "mean": None, "std": None, "p5": None,
+                                                    "p95": None, "n_failed": None, "seed": None,
+                                                    "error": str(e)})
+                                continue
+                            bulk_rows.append({"target": t, "mean": r.mean, "std": r.std, "p5": r.p5,
+                                                "p95": r.p95, "n_failed": r.n_failed, "seed": r.seed,
+                                                "error": None})
+                    st.session_state["bulk_mc_results"] = bulk_rows
+
+                bulk_rows = st.session_state.get("bulk_mc_results")
+                if bulk_rows:
+                    bulk_df = pd.DataFrame(bulk_rows)
+                    st.dataframe(bulk_df, width='stretch', hide_index=True)
+                    st.download_button("⬇️ Download as CSV", data=bulk_df.to_csv(index=False),
+                                         file_name="uncertainty_all_targets.csv", mime="text/csv",
+                                         key="bulk_mc_csv_download")
 
     if model.assumptions:
         st.markdown("**Assumptions made:**")

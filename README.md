@@ -979,6 +979,57 @@ different KIND of problem than anything else in this app:
   is) -- a real, deliberate confirmation that the tool doesn't paper
   over an SI-specific subtlety just because a formula is famous.
 
+## Bulk / tabular analysis
+
+Three additions aimed at the shape a real sensitivity study or batch
+run actually takes -- a spreadsheet of results, a swept grid, one
+combined comparison -- rather than reading one prose report or one
+chart at a time:
+
+- **CSV/Excel export for Batch solver results**
+  (`batch_solver.batch_results_table`, "⬇️ Download results as
+  CSV"/"⬇️ Download results as Excel") -- Batch solver previously only
+  produced a combined Markdown or PDF *report* (prose, meant to be read
+  problem by problem); it now also flattens every solved problem into
+  one row per (problem, target) pair -- the shape a spreadsheet or
+  `pandas.DataFrame` actually wants. A problem with multiple `solve_for`
+  targets gets one row per target; a problem that errored out still
+  gets exactly one row (target/value left blank) so nothing is silently
+  dropped from the table just because it didn't produce a numeric
+  answer.
+- **N-dimensional parameter sweep** (`modules/parameter_sweep.py`, "📊
+  N-dimensional parameter sweep" in the Explore tab) -- grid-sweeps TWO
+  OR MORE of a problem's own inputs at once and returns a results
+  table, plus a heatmap when exactly two variables are swept. Distinct
+  from `chains.sweep_step_binding` (one variable, across a whole chain)
+  and the interactive plot's own single-variable 1D sweep -- this is
+  the actual shape of a real sensitivity study ("how does the answer
+  vary across every combination of these 5 masses and these 5 forces"),
+  not a single line read one point at a time. Solves the target
+  symbolically ONCE (the same "solve once, evaluate the closed form
+  many times" pattern `monte_carlo.py`, `error_propagation.py`, and
+  `interval_arithmetic.py` all use) and evaluates it vectorized across
+  the full grid via `numpy.meshgrid`, so a 10×10 sweep is one lambdify
+  call and one vectorized array evaluation, not 100 separate
+  `sp.solve()` calls.
+- **Bulk uncertainty propagation across all targets** ("🎲 Uncertainty
+  propagation across all targets" in the Explore tab, shown when a
+  problem has 2+ algebraic targets) -- pick which inputs are uncertain
+  ONCE and run Monte Carlo for every target in one pass, rather than
+  repeating the same single-target panel's expander dance once per
+  target. Deliberately reuses the SAME random seed across every target
+  in a run (not a fresh one each time), so every target's samples are
+  drawn from the same underlying joint draws -- a coherent, comparable
+  set of results rather than independently-noisy ones -- with a
+  combined summary table (mean/std/percentiles/seed per target) and a
+  CSV download.
+
+All three per-variable input tables (the sweep's ranges, the bulk
+uncertainty panel's std values) use the same `st.data_editor`-based
+compact table pattern introduced in the mobile-optimization pass above,
+for the same reason: one bounded widget regardless of how many
+variables are involved, rather than one `st.columns()` slot each.
+
 ## Reproducibility & scripting
 
 Two additions aimed specifically at researchers and advanced users --

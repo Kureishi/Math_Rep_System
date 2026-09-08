@@ -1,11 +1,11 @@
 from modules.equation_engine import build_model
 from modules.plotter import (
     build_plot, build_fit_plot, build_contour_plot, build_overlay_plot,
-    build_chain_sweep_plot, build_spread_plot, build_histogram_plot,
+    build_chain_sweep_plot, build_spread_plot, build_histogram_plot, build_sweep_heatmap,
 )
 from modules.plot_snapshot import (
     snapshot_line_plot, snapshot_fit_plot, snapshot_contour_plot, snapshot_overlay_plot,
-    snapshot_chain_sweep_plot, snapshot_spread_plot, snapshot_histogram_plot,
+    snapshot_chain_sweep_plot, snapshot_spread_plot, snapshot_histogram_plot, snapshot_sweep_heatmap,
 )
 
 
@@ -226,4 +226,24 @@ def test_build_histogram_plot_without_reference_lines():
 def test_snapshot_histogram_plot_produces_png_bytes():
     samples = [1.0, 2.0, 3.0, 4.0, 5.0] * 20
     png = snapshot_histogram_plot(samples, "d", mean=3.0, p5=1.2, p95=4.8)
+    assert png.startswith(b"\x89PNG")
+
+
+# ---------------------------------------------------------------- sweep heatmap
+
+
+def test_build_sweep_heatmap_has_heatmap_trace():
+    x = [1.0, 2.0, 3.0]
+    y = [10.0, 20.0]
+    z = [[10.0, 20.0, 30.0], [20.0, 40.0, 60.0]]
+    fig = build_sweep_heatmap(x, y, z, "m", "a", "F")
+    assert len(fig.data) == 1
+    assert fig.data[0].type == "heatmap"
+
+
+def test_snapshot_sweep_heatmap_produces_png_bytes():
+    x = [1.0, 2.0, 3.0]
+    y = [10.0, 20.0]
+    z = [[10.0, 20.0, 30.0], [20.0, 40.0, 60.0]]
+    png = snapshot_sweep_heatmap(x, y, z, "m", "a", "F")
     assert png.startswith(b"\x89PNG")

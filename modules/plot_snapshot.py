@@ -452,3 +452,16 @@ def snapshot_chain_sweep_plot(sweep_rows: list[dict], swept_symbol: str,
     ax.grid(alpha=0.3)
     ax.legend()
     return _finish(fig, fmt)
+
+
+def snapshot_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: str, y_label: str,
+                             target_symbol: str, fmt: str = "png") -> bytes:
+    """Static counterpart to plotter.build_sweep_heatmap()."""
+    fig, ax = plt.subplots(figsize=(7, 5.5))
+    im = ax.imshow(z_matrix, aspect="auto", origin="lower", cmap="viridis",
+                     extent=[min(x_values), max(x_values), min(y_values), max(y_values)])
+    fig.colorbar(im, ax=ax, label=target_symbol)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(f"{target_symbol} across {x_label} \u00d7 {y_label}", fontsize=10)
+    return _finish(fig, fmt)
