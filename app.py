@@ -40,6 +40,12 @@ from modules.named_formulas import recognize_formula
 from modules.sig_figs import check_sig_figs, raw_known_value_strings
 from modules.step_explainer import explain_step
 from modules.dimensional_analysis import analyze_dimensions
+from modules.transforms import (
+    laplace_transform_expr, inverse_laplace_transform_expr,
+    fourier_transform_expr, inverse_fourier_transform_expr,
+)
+from modules.series_asymptotics import taylor_series, asymptotic_expansion
+from modules.pde_utils import solve_first_order_pde, solve_heat_equation_dirichlet, solve_wave_equation_dirichlet
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
@@ -435,7 +441,7 @@ with st.sidebar:
     # scrolling past whatever's currently in the main content area.
     mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
                               "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff",
-                              "📐 Dimensional analysis"],
+                              "📐 Dimensional analysis", "🔄 Transforms & series", "🌡️ PDE solver"],
                       key="app_mode")
 
     # ---- persistent status panels: these matter across MULTIPLE
@@ -1035,6 +1041,165 @@ def render_dimensional_analysis_tab():
                     "or non-half-integer exponents).")
 
 
+def render_transforms_series_tab():
+    """Integral transforms (Laplace/Fourier) and series/asymptotic
+    expansions -- direct symbolic-expression input, same standalone
+    pattern as render_dimensional_analysis_tab. See transforms.py and
+    series_asymptotics.py."""
+    st.subheader("🔄 Transforms & series")
+    tab_laplace, tab_fourier, tab_series = st.tabs(
+        ["Laplace transform", "Fourier transform", "Series & asymptotics"])
+
+    with tab_laplace:
+        st.caption("Enter a function of t (t > 0 assumed) to transform, or a function of s to "
+                    "inverse-transform. Every result is round-tripped through the opposite "
+                    "transform and compared back to your input as a check.")
+        direction = st.radio("Direction", ["Forward (t → s)", "Inverse (s → t)"],
+                              key="laplace_direction", horizontal=True)
+        expr_str = st.text_input("Expression", key="laplace_expr",
+                                  placeholder="exp(-2*t)*sin(3*t)" if direction.startswith("Forward")
+                                  else "3/((s+2)**2+9)")
+        if st.button("Transform", key="laplace_button") and expr_str.strip():
+            result = laplace_transform_expr(expr_str) if direction.startswith("Forward") \
+                else inverse_laplace_transform_expr(expr_str)
+            _render_transform_result(result)
+
+    with tab_fourier:
+        st.caption("Enter a function of x to transform, or a function of k to inverse-transform.")
+        direction_f = st.radio("Direction", ["Forward (x → k)", "Inverse (k → x)"],
+                                key="fourier_direction", horizontal=True)
+        expr_str_f = st.text_input("Expression", key="fourier_expr",
+                                    placeholder="exp(-x**2)" if direction_f.startswith("Forward")
+                                    else "sqrt(pi)*exp(-pi**2*k**2)")
+        if st.button("Transform", key="fourier_button") and expr_str_f.strip():
+            result = fourier_transform_expr(expr_str_f) if direction_f.startswith("Forward") \
+                else inverse_fourier_transform_expr(expr_str_f)
+            _render_transform_result(result)
+
+    with tab_series:
+        st.caption("Taylor/Laurent series around a finite point, or asymptotic behavior as "
+                    "x → ∞ -- each numerically checked against the original function to confirm "
+                    "the approximation actually improves toward the expansion point.")
+        series_kind = st.radio("Kind", ["Taylor / Laurent (finite point)", "Asymptotic (x → ∞)"],
+                                key="series_kind", horizontal=True)
+        expr_str_s = st.text_input("Expression (function of x)", key="series_expr",
+                                    placeholder="sin(x)")
+        col1, col2 = st.columns(2)
+        with col1:
+            if series_kind.startswith("Taylor"):
+                point = st.number_input("Expansion point", value=0.0, key="series_point")
+            order = st.slider("Order", 2, 12, 6, key="series_order")
+        if st.button("Expand", key="series_button") and expr_str_s.strip():
+            result = taylor_series(expr_str_s, point=point, order=order) \
+                if series_kind.startswith("Taylor") else asymptotic_expansion(expr_str_s, order=order)
+            _render_series_result(result)
+
+
+def _render_transform_result(result):
+    if result.error:
+        st.error(result.error)
+        return
+    if not result.evaluated:
+        st.warning(f"SymPy could not evaluate this in closed form. {result.verification_detail}")
+        st.latex(sp.latex(result.output_expr))
+        return
+    st.latex(sp.latex(result.output_expr))
+    if result.convergence_condition is not None and result.convergence_condition is not True:
+        st.caption(f"Valid for: {result.convergence_condition}")
+    if result.verified:
+        st.success(f"Verified ({result.verification_method}): {result.verification_detail}")
+    else:
+        st.warning(f"Could not verify: {result.verification_detail}")
+
+
+def _render_series_result(result):
+    if result.error:
+        st.error(result.error)
+        return
+    if not result.expansion_available:
+        st.warning(result.verification_detail)
+        return
+    st.latex(sp.latex(result.truncated) + (r"+\ O(\ldots)" if result.order_term is not None else ""))
+    if result.terms:
+        st.write("**Terms:** " + ", ".join(f"`{t}`" for t in result.terms))
+    if result.verified:
+        st.success(f"Verified: {result.verification_detail}")
+    else:
+        st.warning(f"Could not verify: {result.verification_detail}")
+
+
+def render_pde_tab():
+    """Two genuinely different PDE capabilities, not one solver that
+    overpromises -- see pde_utils.py's module docstring for why they're
+    split this way. Direct symbolic input, same standalone pattern as
+    render_dimensional_analysis_tab."""
+    st.subheader("🌡️ PDE solver")
+    tab_general, tab_heat, tab_wave = st.tabs(["First-order PDE", "Heat equation", "Wave equation"])
+
+    with tab_general:
+        st.caption("First-order (or quasilinear first-order) PDEs in two variables, via SymPy's "
+                    "pdsolve. Use the same Derivative(...) syntax as the ODE mode. NOT for the "
+                    "heat or wave equation -- those are second-order; use the other tabs.")
+        pde_str = st.text_input("PDE", key="pde_general_expr",
+                                  placeholder="Eq(Derivative(u(x,y), x) + Derivative(u(x,y), y), 2*u(x,y))")
+        if st.button("Solve", key="pde_general_button") and pde_str.strip():
+            result = solve_first_order_pde(pde_str)
+            if result.error:
+                st.error(result.error)
+            else:
+                st.latex(sp.latex(result.solution))
+                if result.classification:
+                    st.caption(f"Classified as: {', '.join(result.classification)}")
+                if result.verified:
+                    st.success(f"Verified: {result.verification_detail}")
+                else:
+                    st.warning(f"Could not verify: {result.verification_detail}")
+
+    with tab_heat:
+        st.caption("u_t = α·u_xx on [0, L] with u(0,t) = u(L,t) = 0 (both ends held at zero), "
+                    "solved by separation of variables / Fourier sine series for any initial "
+                    "condition f(x).")
+        ic_heat = st.text_input("Initial condition f(x)", key="heat_ic", placeholder="x*(1-x)")
+        col1, col2 = st.columns(2)
+        with col1:
+            length_h = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_length")
+        with col2:
+            alpha_h = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_alpha")
+        if st.button("Solve", key="heat_button") and ic_heat.strip():
+            result = solve_heat_equation_dirichlet(ic_heat, length=length_h, alpha=alpha_h)
+            _render_fourier_pde_result(result)
+
+    with tab_wave:
+        st.caption("u_tt = c²·u_xx on [0, L] with u(0,t) = u(L,t) = 0, given initial displacement "
+                    "f(x) and initial velocity g(x), solved via Fourier sine series.")
+        ic_disp = st.text_input("Initial displacement f(x)", key="wave_ic_disp", placeholder="sin(pi*x)")
+        ic_vel = st.text_input("Initial velocity g(x)", key="wave_ic_vel", value="0")
+        col1, col2 = st.columns(2)
+        with col1:
+            length_w = st.number_input("Length L", value=1.0, min_value=0.01, key="wave_length")
+        with col2:
+            speed_w = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_speed")
+        if st.button("Solve", key="wave_button") and ic_disp.strip():
+            result = solve_wave_equation_dirichlet(ic_disp, ic_vel, length=length_w, wave_speed=speed_w)
+            _render_fourier_pde_result(result)
+
+
+def _render_fourier_pde_result(result):
+    if result.error:
+        st.error(result.error)
+        return
+    st.latex(sp.latex(result.solution))
+    st.caption(f"{result.modes_used} Fourier modes used ({result.coefficient_method}).")
+    if result.pde_residual_zero:
+        st.success("PDE satisfied exactly (each mode is an exact eigenfunction solution).")
+    else:
+        st.warning("Could not confirm the PDE is satisfied exactly.")
+    if result.ic_fit_ok:
+        st.success(f"Initial condition matched within {result.ic_fit_error:.2e} at sample points.")
+    else:
+        st.warning(result.verification_detail)
+
+
 st.title("🧮 Math Representation System")
 st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
 
@@ -1062,6 +1227,12 @@ elif mode == "🔬 Extraction diff":
     st.stop()
 elif mode == "📐 Dimensional analysis":
     render_dimensional_analysis_tab()
+    st.stop()
+elif mode == "🔄 Transforms & series":
+    render_transforms_series_tab()
+    st.stop()
+elif mode == "🌡️ PDE solver":
+    render_pde_tab()
     st.stop()
 
 # ---------------------------------------------------------------- input
