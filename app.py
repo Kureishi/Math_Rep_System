@@ -45,7 +45,15 @@ from modules.transforms import (
     fourier_transform_expr, inverse_fourier_transform_expr,
 )
 from modules.series_asymptotics import taylor_series, asymptotic_expansion
-from modules.pde_utils import solve_first_order_pde, solve_heat_equation_dirichlet, solve_wave_equation_dirichlet
+from modules.pde_utils import (
+    solve_first_order_pde, solve_heat_equation_dirichlet, solve_wave_equation_dirichlet,
+    solve_heat_equation_neumann, solve_wave_equation_neumann, solve_heat_equation_robin,
+    solve_laplace_rectangle, solve_pde_finite_difference_2d,
+)
+from modules.tensor_calculus import (
+    analyze_metric, nonzero_christoffel_symbols, covariant_derivative_of_vector,
+    lower_index, raise_index,
+)
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
@@ -441,7 +449,8 @@ with st.sidebar:
     # scrolling past whatever's currently in the main content area.
     mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
                               "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff",
-                              "📐 Dimensional analysis", "🔄 Transforms & series", "🌡️ PDE solver"],
+                              "📐 Dimensional analysis", "🔄 Transforms & series", "🌡️ PDE solver",
+                              "🧮 Tensor calculus"],
                       key="app_mode")
 
     # ---- persistent status panels: these matter across MULTIPLE
@@ -1129,12 +1138,15 @@ def _render_series_result(result):
 
 
 def render_pde_tab():
-    """Two genuinely different PDE capabilities, not one solver that
-    overpromises -- see pde_utils.py's module docstring for why they're
-    split this way. Direct symbolic input, same standalone pattern as
+    """PDE capabilities, split by what they can actually solve rather
+    than one solver that overpromises -- see pde_utils.py's module
+    docstring. Direct symbolic input, same standalone pattern as
     render_dimensional_analysis_tab."""
     st.subheader("🌡️ PDE solver")
-    tab_general, tab_heat, tab_wave = st.tabs(["First-order PDE", "Heat equation", "Wave equation"])
+    (tab_general, tab_heat_d, tab_heat_n, tab_heat_r, tab_wave_d, tab_wave_n,
+     tab_laplace, tab_fd) = st.tabs([
+        "First-order PDE", "Heat (fixed ends)", "Heat (insulated)", "Heat (convective)",
+        "Wave (fixed ends)", "Wave (free ends)", "Laplace's equation", "General (finite-difference)"])
 
     with tab_general:
         st.caption("First-order (or quasilinear first-order) PDEs in two variables, via SymPy's "
@@ -1155,7 +1167,7 @@ def render_pde_tab():
                 else:
                     st.warning(f"Could not verify: {result.verification_detail}")
 
-    with tab_heat:
+    with tab_heat_d:
         st.caption("u_t = α·u_xx on [0, L] with u(0,t) = u(L,t) = 0 (both ends held at zero), "
                     "solved by separation of variables / Fourier sine series for any initial "
                     "condition f(x).")
@@ -1169,7 +1181,38 @@ def render_pde_tab():
             result = solve_heat_equation_dirichlet(ic_heat, length=length_h, alpha=alpha_h)
             _render_fourier_pde_result(result)
 
-    with tab_wave:
+    with tab_heat_n:
+        st.caption("u_t = α·u_xx on [0, L] with INSULATED ends (u_x(0,t) = u_x(L,t) = 0, no heat "
+                    "escapes) -- the rod equilibrates to the average initial temperature instead "
+                    "of cooling to zero.")
+        ic_heat_n = st.text_input("Initial condition f(x)", key="heat_n_ic", placeholder="x*(1-x)")
+        col1, col2 = st.columns(2)
+        with col1:
+            length_hn = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_n_length")
+        with col2:
+            alpha_hn = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_n_alpha")
+        if st.button("Solve", key="heat_n_button") and ic_heat_n.strip():
+            result = solve_heat_equation_neumann(ic_heat_n, length=length_hn, alpha=alpha_hn)
+            _render_fourier_pde_result(result)
+
+    with tab_heat_r:
+        st.caption("u_t = α·u_xx on [0, L] with u(0,t) = 0 and a convective (Robin) condition at "
+                    "the far end, u_x(L,t) + h·u(L,t) = 0 -- e.g. heat escaping into a surrounding "
+                    "medium at zero temperature. Eigenvalues found numerically (no closed form).")
+        ic_heat_r = st.text_input("Initial condition f(x)", key="heat_r_ic", placeholder="x*(1-x)")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            length_hr = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_r_length")
+        with col2:
+            alpha_hr = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_r_alpha")
+        with col3:
+            robin_h = st.number_input("Convective coefficient h", value=1.0, min_value=0.0001, key="heat_r_h")
+        if st.button("Solve", key="heat_r_button") and ic_heat_r.strip():
+            result = solve_heat_equation_robin(ic_heat_r, length=length_hr, alpha=alpha_hr,
+                                                robin_coefficient=robin_h)
+            _render_fourier_pde_result(result)
+
+    with tab_wave_d:
         st.caption("u_tt = c²·u_xx on [0, L] with u(0,t) = u(L,t) = 0, given initial displacement "
                     "f(x) and initial velocity g(x), solved via Fourier sine series.")
         ic_disp = st.text_input("Initial displacement f(x)", key="wave_ic_disp", placeholder="sin(pi*x)")
@@ -1182,6 +1225,168 @@ def render_pde_tab():
         if st.button("Solve", key="wave_button") and ic_disp.strip():
             result = solve_wave_equation_dirichlet(ic_disp, ic_vel, length=length_w, wave_speed=speed_w)
             _render_fourier_pde_result(result)
+
+    with tab_wave_n:
+        st.caption("u_tt = c²·u_xx on [0, L] with FREE ends (u_x(0,t) = u_x(L,t) = 0) -- e.g. a "
+                    "string or rod not clamped at either end. A nonzero average initial velocity "
+                    "produces rigid translation rather than oscillation.")
+        ic_disp_n = st.text_input("Initial displacement f(x)", key="wave_n_ic_disp", placeholder="cos(pi*x)")
+        ic_vel_n = st.text_input("Initial velocity g(x)", key="wave_n_ic_vel", value="0")
+        col1, col2 = st.columns(2)
+        with col1:
+            length_wn = st.number_input("Length L", value=1.0, min_value=0.01, key="wave_n_length")
+        with col2:
+            speed_wn = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_n_speed")
+        if st.button("Solve", key="wave_n_button") and ic_disp_n.strip():
+            result = solve_wave_equation_neumann(ic_disp_n, ic_vel_n, length=length_wn, wave_speed=speed_wn)
+            _render_fourier_pde_result(result)
+
+    with tab_laplace:
+        st.caption("u_xx + u_yy = 0 on a rectangle [0, width] × [0, height], with independent "
+                    "boundary functions on each of the four sides. Sides left at '0' contribute "
+                    "nothing (the default).")
+        col1, col2 = st.columns(2)
+        with col1:
+            bc_bottom = st.text_input("Bottom (function of x)", key="laplace_bottom", value="0")
+            bc_left = st.text_input("Left (function of y)", key="laplace_left", value="0")
+        with col2:
+            bc_top = st.text_input("Top (function of x)", key="laplace_top", value="0")
+            bc_right = st.text_input("Right (function of y)", key="laplace_right", value="0")
+        col3, col4 = st.columns(2)
+        with col3:
+            width_l = st.number_input("Width", value=1.0, min_value=0.01, key="laplace_width")
+        with col4:
+            height_l = st.number_input("Height", value=1.0, min_value=0.01, key="laplace_height")
+        if st.button("Solve", key="laplace_button"):
+            result = solve_laplace_rectangle(bc_bottom, bc_top, bc_left, bc_right,
+                                              width=width_l, height=height_l)
+            if result.error:
+                st.error(result.error)
+            else:
+                st.latex(sp.latex(result.solution))
+                st.caption(f"{result.modes_used} Fourier modes per active side.")
+                if result.pde_residual_zero:
+                    st.success("Laplace's equation satisfied exactly (each mode is an exact "
+                                "eigenfunction solution).")
+                if result.boundary_fit_ok:
+                    st.success(f"All boundary conditions matched within tolerance: "
+                                f"{result.boundary_fit_errors}")
+                else:
+                    st.warning(result.verification_detail)
+
+    with tab_fd:
+        st.caption("Numeric fallback for u_xx + u_yy = source(x,y) on ANY region (not just a "
+                    "rectangle) -- describe the domain with a true/false condition on x and y, "
+                    "e.g. x**2+y**2<=1 for a disk. First-order accurate at curved boundaries; "
+                    "verified by comparing against a doubled-resolution solve.")
+        col1, col2 = st.columns(2)
+        with col1:
+            source_fd = st.text_input("Source term (0 for Laplace's equation)", key="fd_source", value="0")
+            domain_fd = st.text_input("Domain (x, y) → True/False", key="fd_domain", value="x**2+y**2<=1")
+        with col2:
+            boundary_fd = st.text_input("Boundary value (function of x, y)", key="fd_boundary", value="0")
+        col3, col4, col5, col6 = st.columns(4)
+        with col3:
+            x_min = st.number_input("x min", value=-1.2, key="fd_xmin")
+        with col4:
+            x_max = st.number_input("x max", value=1.2, key="fd_xmax")
+        with col5:
+            y_min = st.number_input("y min", value=-1.2, key="fd_ymin")
+        with col6:
+            y_max = st.number_input("y max", value=1.2, key="fd_ymax")
+        grid_n = st.slider("Grid resolution", 21, 101, 41, step=10, key="fd_resolution")
+        if st.button("Solve", key="fd_button"):
+            result = solve_pde_finite_difference_2d(
+                source_fd, boundary_fd, domain_fd, (x_min, x_max), (y_min, y_max), grid_n, grid_n)
+            if result.error:
+                st.error(result.error)
+            else:
+                fig = go.Figure(data=go.Heatmap(z=result.solution_grid.T, x=result.grid_x,
+                                                 y=result.grid_y, colorscale="Viridis"))
+                fig.update_layout(title="Solution u(x, y)", xaxis_title="x", yaxis_title="y")
+                st.plotly_chart(fig, width='stretch')
+                if result.converged:
+                    st.success(f"{result.note} (max discrepancy vs. doubled resolution: "
+                                f"{result.convergence_error:.3g})")
+                else:
+                    st.warning(result.note)
+
+
+def render_tensor_calculus_tab():
+    """Metric-based tensor calculus -- direct symbolic input, same
+    standalone pattern as render_dimensional_analysis_tab. See
+    tensor_calculus.py's module docstring for scope and the sign-
+    convention note."""
+    st.subheader("🧮 Tensor calculus")
+    st.caption("Enter a metric tensor g_ij as a grid of expressions in your chosen coordinates. "
+                "Example (2-sphere of radius R, coordinates θ, φ): rows [[R**2, 0], [0, "
+                "R**2*sin(theta)**2]].")
+
+    coord_str = st.text_input("Coordinate names (comma-separated)", key="tensor_coords",
+                                value="theta, phi")
+    coord_names = [c.strip() for c in coord_str.split(",") if c.strip()]
+    n_coords = len(coord_names) if coord_names else 2
+
+    st.write("**Metric tensor g_ij:**")
+    metric_rows = []
+    default_metric = [["R**2", "0"], ["0", "R**2*sin(theta)**2"]]
+    for i in range(n_coords):
+        cols = st.columns(n_coords)
+        row = []
+        for j in range(n_coords):
+            default_val = default_metric[i][j] if i < 2 and j < 2 and n_coords == 2 else \
+                ("1" if i == j else "0")
+            with cols[j]:
+                val = st.text_input(f"g[{i}][{j}]", value=default_val, key=f"metric_{i}_{j}",
+                                      label_visibility="collapsed")
+            row.append(val)
+        metric_rows.append(row)
+
+    if st.button("Analyze", key="tensor_analyze_button"):
+        result = analyze_metric(metric_rows, coord_names)
+        if result.error:
+            st.error(result.error)
+        else:
+            st.session_state["_tensor_result"] = result
+
+    result = st.session_state.get("_tensor_result")
+    if result is not None and result.error is None:
+        st.write(f"**Ricci scalar (overall curvature):** ")
+        st.latex(sp.latex(result.ricci_scalar))
+        if result.is_flat:
+            st.info("This metric is flat (zero Riemann tensor everywhere) -- geometrically "
+                    "indistinguishable from ordinary Euclidean space, just in these coordinates.")
+
+        st.write("**Nonzero Christoffel symbols Γᵏ_ᵢⱼ:**")
+        symbols = nonzero_christoffel_symbols(result)
+        if symbols:
+            for k, i, j, val in symbols:
+                st.latex(rf"\Gamma^{{{k}}}_{{{i}{j}}} = {sp.latex(val)}")
+        else:
+            st.caption("All Christoffel symbols are zero (this metric has constant components).")
+
+        if result.metric_compatible:
+            st.success("Metric compatibility confirmed (∇g = 0 exactly) -- a self-consistency "
+                        "check on the Christoffel-symbol computation, not a property specific to "
+                        "this metric.")
+        else:
+            st.warning("Could not confirm metric compatibility -- this would indicate a "
+                        "computation error.")
+
+        st.write("---")
+        st.write("**Covariant derivative of a vector field** (components as functions of the coordinates):")
+        vec_cols = st.columns(n_coords)
+        vec_components = []
+        for i in range(n_coords):
+            with vec_cols[i]:
+                v = st.text_input(f"V^{i}", value="1" if i == 0 else "0", key=f"tensor_vec_{i}")
+            vec_components.append(v)
+        if st.button("Compute covariant derivative", key="tensor_cov_button"):
+            nabla = covariant_derivative_of_vector(result, vec_components)
+            if nabla is None:
+                st.error("Could not compute -- check the metric analysis above succeeded.")
+            else:
+                st.latex(r"\nabla_j V^i = " + sp.latex(nabla))
 
 
 def _render_fourier_pde_result(result):
@@ -1233,6 +1438,9 @@ elif mode == "🔄 Transforms & series":
     st.stop()
 elif mode == "🌡️ PDE solver":
     render_pde_tab()
+    st.stop()
+elif mode == "🧮 Tensor calculus":
+    render_tensor_calculus_tab()
     st.stop()
 
 # ---------------------------------------------------------------- input

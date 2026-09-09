@@ -114,3 +114,144 @@ def test_wave_equation_boundary_conditions_satisfied():
 def test_wave_equation_parse_error():
     result = solve_wave_equation_dirichlet("not @@ valid", "0")
     assert result.error is not None
+
+
+# ---------------------------------------------------------------- Neumann BCs
+def test_heat_equation_neumann_long_time_limit_is_average_temperature():
+    """An insulated rod (no heat escapes at either end) must equilibrate
+    to the average of its initial temperature distribution, not decay
+    to zero -- this is the key physical difference from the Dirichlet
+    case and a genuine correctness check, not just a residual check."""
+    from modules.pde_utils import solve_heat_equation_neumann
+    result = solve_heat_equation_neumann("x*(1-x)", length=1.0, alpha=0.5)
+    x = sp.Symbol("x", positive=True)
+    t = sp.Symbol("t", positive=True)
+    expected_average = sp.integrate(x * (1 - x), (x, 0, 1))
+    assert result.error is None
+    assert result.pde_residual_zero
+    late_time_value = float(result.solution.subs({t: 1000, x: 0.3}))
+    assert abs(late_time_value - float(expected_average)) < 1e-6
+
+
+def test_wave_equation_neumann_rigid_translation_from_uniform_velocity():
+    """A free string given a uniform initial velocity with no restoring
+    force at the k=0 mode must translate rigidly at that velocity (u =
+    v0 * t), not oscillate -- a real physical prediction, not just an
+    identity check."""
+    from modules.pde_utils import solve_wave_equation_neumann
+    result = solve_wave_equation_neumann("0", "2", length=1.0, wave_speed=1.0)
+    t = sp.Symbol("t", positive=True)
+    assert result.error is None
+    assert result.pde_residual_zero
+    assert result.solution.subs(t, 3) == 6
+
+
+def test_heat_equation_neumann_parse_error():
+    from modules.pde_utils import solve_heat_equation_neumann
+    result = solve_heat_equation_neumann("not @@ valid")
+    assert result.error is not None
+
+
+# ---------------------------------------------------------------- Robin BCs
+def test_heat_equation_robin_converges_and_satisfies_pde():
+    from modules.pde_utils import solve_heat_equation_robin
+    result = solve_heat_equation_robin("x*(1-x)", length=1.0, alpha=1.0, robin_coefficient=2.0)
+    assert result.error is None
+    assert result.pde_residual_zero
+    assert result.ic_fit_ok
+    assert result.ic_fit_error < 1e-3
+
+
+def test_heat_equation_robin_eigenvalues_are_not_multiples_of_pi():
+    """Distinguishing feature of Robin BCs versus Dirichlet/Neumann:
+    the eigenvalues are roots of a transcendental equation, NOT evenly
+    spaced multiples of pi/L -- this pins down that the numeric
+    eigenvalue solver is actually being used, not accidentally falling
+    back to a Dirichlet-style closed form."""
+    from modules.pde_utils import _robin_eigenvalues
+    eigenvalues = _robin_eigenvalues(L=1.0, h=2.0, n_modes=3)
+    import math
+    for lam in eigenvalues:
+        assert abs(lam % math.pi) > 1e-3  # not (approximately) a multiple of pi
+
+
+def test_heat_equation_robin_parse_error():
+    from modules.pde_utils import solve_heat_equation_robin
+    result = solve_heat_equation_robin("not @@ valid")
+    assert result.error is not None
+
+
+# ---------------------------------------------------------------- Laplace's equation
+def test_laplace_rectangle_single_side_boundary_recovered():
+    from modules.pde_utils import solve_laplace_rectangle
+    result = solve_laplace_rectangle(bottom="x*(1-x)", width=1.0, height=1.0)
+    x = sp.Symbol("x", positive=True)
+    y = sp.Symbol("y", positive=True)
+    assert result.error is None
+    assert result.pde_residual_zero
+    assert result.boundary_fit_ok
+    # the three zero sides must be (numerically) exactly zero everywhere on them
+    assert result.solution.subs(y, 1) == 0
+    assert result.solution.subs(x, 0) == 0
+    assert result.solution.subs(x, 1) == 0
+
+
+def test_laplace_rectangle_all_zero_boundaries_gives_zero_solution():
+    from modules.pde_utils import solve_laplace_rectangle
+    result = solve_laplace_rectangle()
+    assert result.error is None
+    assert result.solution == 0
+    assert result.boundary_fit_ok
+
+
+def test_laplace_rectangle_parse_error():
+    from modules.pde_utils import solve_laplace_rectangle
+    result = solve_laplace_rectangle(bottom="not @@ valid")
+    assert result.error is not None
+
+
+# ---------------------------------------------------------------- finite-difference fallback
+def test_finite_difference_matches_known_exact_poisson_solution_on_disk():
+    """u_xx + u_yy = -4 on the unit disk with u = 0 on the boundary has
+    the known exact solution u = 1 - x**2 - y**2 -- a real independent
+    check the finite-difference solver's answer can be measured against,
+    not just an internal residual check."""
+    import numpy as np
+    from modules.pde_utils import solve_pde_finite_difference_2d
+    result = solve_pde_finite_difference_2d(
+        source_str="-4", boundary_value_str="0", domain_predicate_str="x**2+y**2<=1",
+        x_range=(-1.2, 1.2), y_range=(-1.2, 1.2), nx=41, ny=41)
+    assert result.error is None
+    i = np.argmin(np.abs(result.grid_x - 0.0))
+    j = np.argmin(np.abs(result.grid_y - 0.0))
+    center_value = result.solution_grid[i, j]
+    assert abs(center_value - 1.0) < 0.1  # first-order boundary accuracy at this resolution
+
+
+def test_finite_difference_accuracy_improves_with_resolution():
+    """A real convergence check: the error against the known exact
+    solution above should shrink as the grid is refined, confirming
+    this isn't just coincidentally close at one resolution."""
+    import numpy as np
+    from modules.pde_utils import solve_pde_finite_difference_2d
+    errors = []
+    for n in (21, 81):
+        result = solve_pde_finite_difference_2d(
+            source_str="-4", boundary_value_str="0", domain_predicate_str="x**2+y**2<=1",
+            x_range=(-1.2, 1.2), y_range=(-1.2, 1.2), nx=n, ny=n)
+        i = np.argmin(np.abs(result.grid_x - 0.0))
+        j = np.argmin(np.abs(result.grid_y - 0.0))
+        errors.append(abs(result.solution_grid[i, j] - 1.0))
+    assert errors[1] < errors[0]
+
+
+def test_finite_difference_empty_domain_reports_error_not_crash():
+    from modules.pde_utils import solve_pde_finite_difference_2d
+    result = solve_pde_finite_difference_2d(domain_predicate_str="x>100")
+    assert result.error is not None
+
+
+def test_finite_difference_parse_error():
+    from modules.pde_utils import solve_pde_finite_difference_2d
+    result = solve_pde_finite_difference_2d(source_str="not @@ valid")
+    assert result.error is not None
