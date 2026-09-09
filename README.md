@@ -979,6 +979,48 @@ different KIND of problem than anything else in this app:
   is) -- a real, deliberate confirmation that the tool doesn't paper
   over an SI-specific subtlety just because a formula is famous.
 
+## Session / project management
+
+Two additions aimed at work that needs to survive past one browser
+session on one machine:
+
+- **Project bundle export & import** (`modules/project_bundle.py`,
+  "📦 Project" in the sidebar) -- bundles EVERYTHING that otherwise
+  lives tied to one machine (every solved-problem history record, every
+  chain, and the session-only Variable Workspace) into one portable
+  JSON file. Something that can be archived alongside a paper, emailed
+  to a collaborator, or reloaded on a different machine to pick up
+  exactly where a session left off -- none of which currently survives
+  on its own, since `history.db`/`chains.db` are local SQLite files and
+  the workspace lives only in Streamlit's in-memory session state.
+  Reuses `history.py`'s/`chains.py`'s own already-round-trippable
+  storage format directly (the same payload their own
+  `load()`/`load_chain()` already reconstruct a `ProblemModel` from,
+  with no LLM calls needed) rather than inventing a second
+  serialization scheme. Import is strictly ADDITIVE: every record is
+  always inserted as a brand-new row in the importing machine's own
+  database (new ids, no attempt to preserve or collide with the
+  exporting machine's), and a workspace entry whose name collides with
+  one already present is skipped rather than silently overwritten --
+  importing a bundle can never delete or clobber anything already
+  there. A malformed individual record is skipped with its error
+  recorded rather than aborting the rest of an otherwise-good import.
+- **Named settings profiles** (`modules/settings_profiles.py`, inside
+  the sidebar's "⚙️ Advanced settings" expander) -- the verification-
+  tuning sliders (extraction/narration temperature, retry count,
+  numeric and cross-check tolerances, computation timeout) are a single
+  live-tweaked object that resets to `config.py`'s hardcoded defaults
+  every session; this lets a chosen combination be saved under a name
+  ("strict verification," "fast exploratory," ...) and reloaded with
+  one click instead of re-typing every slider by hand each time.
+  Persisted to their own small local SQLite table (alongside
+  `history.db`/`chains.db` in the same `data/` directory) specifically
+  so profiles -- unlike the live settings object itself -- survive
+  across sessions. Deliberately covers only the verification/generation
+  tuning knobs, never connection config (the LM Studio URL, model
+  names) -- a profile is about "how strict should verification be," not
+  "which server to talk to."
+
 ## Bulk / tabular analysis
 
 Three additions aimed at the shape a real sensitivity study or batch

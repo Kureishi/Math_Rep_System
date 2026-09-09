@@ -41,6 +41,8 @@ from modules.sig_figs import check_sig_figs, raw_known_value_strings
 from modules.step_explainer import explain_step
 from modules.dimensional_analysis import analyze_dimensions
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
+from modules.project_bundle import export_bundle, import_bundle
+from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
 from modules.unit_conversion import sweep_conversions
@@ -559,6 +561,50 @@ with st.sidebar:
             settings.computation_timeout_seconds = defaults.computation_timeout_seconds
             st.rerun()
 
+        # ---- named settings profiles: unlike the sliders above (a
+        # single live-tweaked object that resets to config.py's
+        # hardcoded defaults every session), these persist across
+        # sessions -- switch between e.g. "strict" and "fast
+        # exploratory" verification tuning without re-typing every
+        # slider by hand each time. See settings_profiles.py.
+        st.divider()
+        st.caption("Save/load named presets of the settings above -- these persist across "
+                    "sessions, unlike the sliders themselves.")
+        existing_profiles = list_profiles()
+
+        load_cols = st.columns([2, 1])
+        with load_cols[0]:
+            selected_profile = st.selectbox("Load a saved profile", ["(choose one)"] + existing_profiles,
+                                              key="settings_profile_select", label_visibility="collapsed")
+        with load_cols[1]:
+            if st.button("Load", key="settings_profile_load") and selected_profile != "(choose one)":
+                profile = load_profile(selected_profile)
+                if profile is not None:
+                    apply_profile(profile, settings)
+                    st.rerun()
+
+        save_cols = st.columns([2, 1])
+        with save_cols[0]:
+            new_profile_name = st.text_input("Save current settings as...",
+                                                key="settings_profile_new_name",
+                                                placeholder="e.g. strict verification",
+                                                label_visibility="collapsed")
+        with save_cols[1]:
+            if st.button("💾 Save as...", key="settings_profile_save") and new_profile_name.strip():
+                save_profile(new_profile_name, settings)
+                st.rerun()
+
+        if existing_profiles:
+            del_cols = st.columns([2, 1])
+            with del_cols[0]:
+                delete_target = st.selectbox("Delete a profile", ["(choose one)"] + existing_profiles,
+                                                key="settings_profile_delete_select",
+                                                label_visibility="collapsed")
+            with del_cols[1]:
+                if st.button("🗑️ Delete", key="settings_profile_delete") and delete_target != "(choose one)":
+                    delete_profile(delete_target)
+                    st.rerun()
+
     st.divider()
     st.header("Variable Workspace")
     if ws.entries:
@@ -583,6 +629,41 @@ with st.sidebar:
                     "current name in a new problem below (e.g. \"using d = ...\").")
     else:
         st.caption("No stored variables yet. Solve a problem and extract a value to reuse it here.")
+
+    # ---- session/project bundling: everything above (workspace) plus
+    # everything below (history) plus every chain gets bundled into ONE
+    # portable JSON file -- something that can be archived alongside a
+    # paper, emailed to a collaborator, or reloaded on a different
+    # machine to pick up exactly where a session left off. None of that
+    # currently survives moving machines on its own: history.db/
+    # chains.db are local SQLite files, and the workspace is pure
+    # in-session state. See project_bundle.py.
+    st.divider()
+    st.header("📦 Project")
+    with st.expander("Export / import a project bundle"):
+        st.caption("Bundles your solved-problem history, chains, and workspace into one portable "
+                    "file, for archiving, handing off to a collaborator, or picking up on another "
+                    "machine.")
+        if st.button("Prepare export", key="bundle_export_button"):
+            st.session_state["bundle_export_json"] = export_bundle(workspace_entries=ws.entries)
+        bundle_export_json = st.session_state.get("bundle_export_json")
+        if bundle_export_json:
+            st.download_button("⬇️ Download project bundle", data=bundle_export_json,
+                                 file_name="math_rep_project.json", mime="application/json",
+                                 key="bundle_download")
+
+        st.divider()
+        uploaded_bundle = st.file_uploader("Import a project bundle", type=["json"], key="bundle_upload")
+        if uploaded_bundle is not None and st.button("Import", key="bundle_import_button"):
+            import_summary = import_bundle(uploaded_bundle.getvalue().decode("utf-8"), ws)
+            st.success(f"Imported {import_summary.history_imported} problem(s), "
+                        f"{import_summary.chains_imported} chain(s), and "
+                        f"{import_summary.workspace_imported} workspace value(s).")
+            for err in import_summary.errors:
+                st.warning(err)
+            if (import_summary.history_imported or import_summary.chains_imported
+                    or import_summary.workspace_imported):
+                st.rerun()
 
     st.divider()
     st.header("History")
