@@ -54,6 +54,9 @@ from modules.tensor_calculus import (
     analyze_metric, nonzero_christoffel_symbols, covariant_derivative_of_vector,
     lower_index, raise_index,
 )
+from modules.statistical_inference import (
+    regression_inference, residual_diagnostics, bayesian_linear_regression, compare_polynomial_degrees,
+)
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
@@ -158,6 +161,92 @@ def format_download_button(key: str, file_stem: str, render_fn):
             st.download_button(f"Save {file_stem}.{fmt}", data=data, file_name=f"{file_stem}.{fmt}",
                                  mime=mime, key=f"save_{key}")
 
+def _render_statistical_layer(xs, ys, family, degree, expr_str, param_names):
+    """The statistical/data layer on top of a fit: confidence intervals
+    and hypothesis tests on the parameters, residual diagnostics, and
+    Bayesian regression -- see statistical_inference.py. Kept inside
+    the curve-fitting tab (not a separate sidebar mode) since none of
+    this means anything without the fit it's built on."""
+    with st.expander("📊 Statistical inference"):
+        tab_ci, tab_diag, tab_bayes = st.tabs(
+            ["Confidence intervals & hypothesis tests", "Residual diagnostics", "Bayesian regression"])
+
+        with tab_ci:
+            result = regression_inference(xs, ys, family, degree=degree, expr_str=expr_str,
+                                            param_names=param_names)
+            if result.error:
+                st.warning(result.error)
+            else:
+                st.caption(f"{int(result.confidence_level * 100)}% confidence intervals, "
+                            f"{result.degrees_of_freedom} degrees of freedom. Each t-test's null "
+                            f"hypothesis is that the parameter is exactly zero.")
+                for p in result.parameters:
+                    st.write(f"**{p.name}** = {p.estimate:.5g} ± {p.std_error:.4g}  "
+                              f"(t={p.t_statistic:.3g}, p={p.p_value:.3g})  "
+                              f"CI: [{p.ci_lower:.5g}, {p.ci_upper:.5g}]")
+                if result.f_statistic is not None:
+                    verdict = "significant" if result.f_p_value < 0.05 else "not significant"
+                    st.info(f"Overall model F-test: F={result.f_statistic:.4g}, "
+                             f"p={result.f_p_value:.3g} ({verdict} at α=0.05) -- tests whether the "
+                             f"model explains significantly more than a flat mean would. "
+                             f"Adjusted R² = {result.adjusted_r_squared:.5f}.")
+
+            if family in ("linear", "polynomial"):
+                st.write("---")
+                st.caption("Nested-model F-test: does a higher polynomial degree explain "
+                            "significantly more variance, or just fit noise?")
+                col1, col2 = st.columns(2)
+                with col1:
+                    reduced_deg = st.number_input("Reduced degree", min_value=1, max_value=9,
+                                                    value=max(1, degree), key="nested_reduced_degree")
+                with col2:
+                    full_deg = st.number_input("Full degree", min_value=2, max_value=10,
+                                                 value=max(2, degree + 1), key="nested_full_degree")
+                if st.button("Compare", key="nested_compare_button"):
+                    nm = compare_polynomial_degrees(xs, ys, int(reduced_deg), int(full_deg))
+                    if nm.error:
+                        st.error(nm.error)
+                    elif nm.significant:
+                        st.success(nm.verification_detail)
+                    else:
+                        st.warning(nm.verification_detail)
+
+        with tab_diag:
+            diag = residual_diagnostics(xs, ys, family, degree=degree, expr_str=expr_str,
+                                          param_names=param_names)
+            if diag.error:
+                st.warning(diag.error)
+            else:
+                st.caption("These check whether the confidence intervals and p-values above are "
+                            "actually trustworthy -- they assume normal, independent, "
+                            "constant-variance residuals, and this is where that gets checked "
+                            "rather than assumed.")
+                (st.success if diag.normality_p_value is None or diag.normality_p_value > 0.05
+                 else st.warning)(diag.normality_note)
+                (st.success if 1.5 <= diag.durbin_watson <= 2.5 else st.warning)(diag.durbin_watson_note)
+                (st.success if diag.heteroscedasticity_p_value is None or diag.heteroscedasticity_p_value > 0.05
+                 else st.warning)(diag.heteroscedasticity_note)
+
+        with tab_bayes:
+            prior_precision = st.select_slider(
+                "Prior strength (how strongly parameters are pulled toward zero)",
+                options=[1e-6, 1e-3, 1e-1, 1.0, 10.0, 100.0], value=1e-6,
+                format_func=lambda v: "diffuse (≈ no prior)" if v <= 1e-3 else f"precision={v:g}",
+                key="bayes_prior_precision")
+            bayes = bayesian_linear_regression(xs, ys, family, degree=degree, expr_str=expr_str,
+                                                 param_names=param_names, prior_precision=prior_precision)
+            if bayes.error:
+                st.warning(bayes.error)
+            else:
+                st.caption(f"{int(bayes.credible_level * 100)}% credible intervals from a conjugate "
+                            f"Normal-Inverse-Gamma posterior (closed-form, no sampling).")
+                for p in bayes.parameters:
+                    st.write(f"**{p.name}** posterior mean = {p.posterior_mean:.5g} "
+                              f"(std = {p.posterior_std:.4g})  "
+                              f"credible interval: [{p.credible_lower:.5g}, {p.credible_upper:.5g}]")
+                st.caption(bayes.comparison_note)
+
+
 def render_curve_fitting_tab():
     """Sibling pipeline to the word-problem solver: input is a table of
     numbers (typed in or uploaded as CSV), not LLM-extracted text, and
@@ -209,8 +298,27 @@ def render_curve_fitting_tab():
         params_raw = st.text_input("Parameter names (comma-separated)", placeholder="a, b, c")
         param_names = [p.strip() for p in params_raw.split(",") if p.strip()]
 
-    if not st.button("Fit", type="primary"):
+    if st.button("Fit", type="primary"):
+        # snapshotted at click time -- everything below re-reads from this,
+        # NOT from the live widget values above, so that later widget
+        # interactions in this tab (the log-axis checkboxes, the nested-
+        # model "Compare" button added for the statistical layer) rerun
+        # the script without wiping the fit out. st.button() only returns
+        # True on the exact rerun triggered by clicking it -- any OTHER
+        # widget's rerun sees it as False -- so gating the whole rest of
+        # this function on that value directly (as this used to do) meant
+        # ANY other interaction on the page (even an unrelated checkbox)
+        # made the entire fit display vanish until "Fit" was clicked again.
+        st.session_state["cf_snapshot"] = dict(xs=xs, ys=ys, x_label=x_label, y_label=y_label,
+                                                 family=family, degree=degree, expr_str=expr_str,
+                                                 param_names=param_names)
+
+    snapshot = st.session_state.get("cf_snapshot")
+    if snapshot is None:
         return
+    xs, ys, x_label, y_label = snapshot["xs"], snapshot["ys"], snapshot["x_label"], snapshot["y_label"]
+    family, degree = snapshot["family"], snapshot["degree"]
+    expr_str, param_names = snapshot["expr_str"], snapshot["param_names"]
 
     if family == "best fit (try all)":
         results = best_fit(xs, ys)
@@ -224,6 +332,7 @@ def render_curve_fitting_tab():
             st.write(f"- **{fam}**: R² = {res.r_squared:.5f}, RMSE = {res.rmse:.5g}")
         best_family, result = ranked[0]
         st.success(f"Best fit: **{best_family}**")
+        stat_family, stat_degree, stat_expr_str, stat_param_names = best_family, 2, None, None
 
         if len(ranked) >= 2:
             with st.expander("📊 Compare every candidate fit on one plot"):
@@ -251,6 +360,9 @@ def render_curve_fitting_tab():
                 )
     else:
         result = fit_curve(xs, ys, family, degree=degree, expr_str=expr_str, param_names=param_names)
+        stat_family, stat_degree, stat_expr_str, stat_param_names = family, degree, expr_str, param_names
+        if family == "linear":
+            stat_degree = 1  # "linear" is fit_curve's degree-1 special case; keep the stat layer consistent
 
     if result.error:
         st.error(result.error)
@@ -277,6 +389,8 @@ def render_curve_fitting_tab():
     with st.expander("Residuals"):
         for x, y, r in zip(xs, ys, result.residuals):
             st.write(f"x={x:g}, y={y:g}, residual={r:.4g}")
+
+    _render_statistical_layer(xs, ys, stat_family, stat_degree, stat_expr_str, stat_param_names)
 
     format_download_button(
         key="curve_fit", file_stem="curve_fit",

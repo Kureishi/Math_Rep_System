@@ -251,7 +251,93 @@ def fit_custom(xs: list[float], ys: list[float], expr_str: str, param_names: lis
                        r_squared=r2, rmse=rmse, residuals=residuals)
 
 
-# --------------------------------------------------------------------------- dispatch + "best fit"
+# --------------------------------------------------------------------------- design-matrix export (for statistical_inference.py)
+
+
+@dataclass
+class RegressionDesign:
+    """The underlying linear-regression problem (design matrix X, target
+    vector y-or-transformed-y) that produced a given fit -- exposed so
+    statistical_inference.py can compute standard errors, confidence
+    intervals, and diagnostics on EXACTLY the regression that was
+    actually solved, rather than a second, possibly-inconsistent
+    reconstruction of it. For families fit via linearization
+    (exponential, power), `param_transforms` gives the back-transform
+    (e.g. exp()) needed to convert a linearized-space confidence
+    interval on ln(a) into one on a -- valid because exp() is monotonic,
+    so it maps interval endpoints to interval endpoints directly."""
+    design: np.ndarray | None
+    target: np.ndarray | None
+    param_names: list[str]
+    param_transforms: dict  # name -> callable, defaults to identity
+    error: str | None = None
+
+
+def regression_design_matrix(xs: list[float], ys: list[float], family: str, degree: int = 2,
+                              expr_str: str | None = None,
+                              param_names: list[str] | None = None) -> RegressionDesign:
+    """Reconstructs the exact linear-regression (design matrix, target)
+    pair that fit_curve's dispatch would use internally for the given
+    family -- the SAME linearization, not a fresh derivation of it, so
+    inferential statistics computed from this are guaranteed consistent
+    with what fit_curve actually reports."""
+    xs_a, ys_a = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
+    identity = lambda v: v  # noqa: E731
+
+    if family == "linear":
+        degree = 1
+    if family in ("linear", "polynomial"):
+        design = np.vander(xs_a, degree + 1)
+        names = [f"c{degree - i}" for i in range(degree + 1)]
+        return RegressionDesign(design, ys_a, names, {n: identity for n in names})
+
+    if family == "exponential":
+        if np.any(ys_a <= 0):
+            return RegressionDesign(None, None, [], {},
+                                     error="Exponential fit requires every y-value to be positive.")
+        design = np.column_stack([xs_a, np.ones_like(xs_a)])
+        return RegressionDesign(design, np.log(ys_a), ["b", "ln_a"],
+                                 {"b": identity, "ln_a": np.exp})
+
+    if family == "power":
+        if np.any(xs_a <= 0) or np.any(ys_a <= 0):
+            return RegressionDesign(None, None, [], {},
+                                     error="Power fit requires every x-value and y-value to be positive.")
+        design = np.column_stack([np.log(xs_a), np.ones_like(xs_a)])
+        return RegressionDesign(design, np.log(ys_a), ["b", "ln_a"],
+                                 {"b": identity, "ln_a": np.exp})
+
+    if family == "logarithmic":
+        if np.any(xs_a <= 0):
+            return RegressionDesign(None, None, [], {},
+                                     error="Logarithmic fit requires every x-value to be positive.")
+        design = np.column_stack([np.log(xs_a), np.ones_like(xs_a)])
+        return RegressionDesign(design, ys_a, ["a", "b"], {"a": identity, "b": identity})
+
+    if family == "custom":
+        if not expr_str or not param_names:
+            return RegressionDesign(None, None, [], {},
+                                     error="Custom fit needs both a model expression and parameter names.")
+        try:
+            params = [sp.Symbol(p) for p in param_names]
+            local_dict = {p.name: p for p in params}
+            local_dict["x"] = X
+            expr = sp.sympify(expr_str, locals=local_dict)
+        except (sp.SympifyError, TypeError, SyntaxError) as e:
+            return RegressionDesign(None, None, [], {}, error=f"Couldn't parse the model expression: {e}")
+        basis_exprs = [sp.diff(expr, p) for p in params]
+        offset_expr = sp.simplify(expr - sum(p * b for p, b in zip(params, basis_exprs)))
+        basis_funcs = [sp.lambdify(X, b, "numpy") for b in basis_exprs]
+        offset_func = sp.lambdify(X, offset_expr, "numpy")
+        try:
+            design = np.column_stack([np.broadcast_to(np.asarray(f(xs_a), dtype=float), xs_a.shape)
+                                        for f in basis_funcs])
+            offset_vals = np.broadcast_to(np.asarray(offset_func(xs_a), dtype=float), xs_a.shape)
+        except Exception as e:  # noqa: BLE001
+            return RegressionDesign(None, None, [], {}, error=f"Couldn't evaluate the model: {e}")
+        return RegressionDesign(design, ys_a - offset_vals, param_names, {n: identity for n in param_names})
+
+    return RegressionDesign(None, None, [], {}, error=f"Unknown model family '{family}'.")
 
 
 BUILTIN_FAMILIES = ("linear", "polynomial", "exponential", "power", "logarithmic")
