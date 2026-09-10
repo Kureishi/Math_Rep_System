@@ -22,6 +22,7 @@ evidence (see equivalence.py's own docstring on why that's evidence,
 not proof) or that isn't equivalent at all.
 """
 import sympy as sp
+from dataclasses import dataclass, field
 
 from modules.equivalence import EquivalenceResult
 from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
@@ -82,3 +83,106 @@ def build_proof(equivalence_result: EquivalenceResult) -> list[tuple[str, str]] 
             sp.latex(current),
         ))
     return steps
+
+
+# ------------------------------------------------------------- induction proofs
+@dataclass
+class InductionStep:
+    label: str
+    detail: str
+    verified: bool
+
+
+@dataclass
+class InductionProofResult:
+    steps: list = field(default_factory=list)   # list[InductionStep]
+    valid: bool = False
+    conclusion: str = ""
+    error: str | None = None
+
+
+def build_recurrence_induction_proof(eq_sympy: sp.Eq, func_name: str, closed_form: sp.Expr,
+                                       indep_var: sp.Symbol,
+                                       base_cases: dict[int, float]) -> InductionProofResult:
+    """A genuine proof by (strong) induction that closed_form(n) equals
+    the sequence defined by eq_sympy + base_cases, for every n at or
+    above the smallest base index -- not just a restatement of
+    recurrence_utils.verify_recurrence_solution's identity check, but
+    the actual two-part induction argument that check is one half of:
+
+    1. BASE CASE(S): closed_form evaluated at each given base index
+       must equal the stated base value -- checked here directly by
+       substitution, independently of the recurrence relation itself.
+       (This is the step recurrence_utils.solve_recurrence's rsolve()
+       already relies on internally when it solves for the closed
+       form's constants, but rsolve's own bookkeeping is exactly the
+       kind of thing a genuinely independent re-check is for -- the
+       same "don't just trust the first solve path" principle behind
+       ode_utils.numerical_cross_check.)
+    2. INDUCTIVE STEP: substituting closed_form for every shifted
+       occurrence of the function in the ORIGINAL recurrence relation
+       (a(n), a(n+1), a(n+2), ...) produces an identity that holds for
+       GENERAL n -- delegated to
+       recurrence_utils.verify_recurrence_solution, which is exactly
+       this substitution. Because this holds for a symbolic n rather
+       than one specific value, it establishes "IF the formula is
+       correct up through the indices this recurrence references, THEN
+       it's correct at the next index" for every n simultaneously --
+       which is precisely the inductive step's logical content.
+
+    Together, 1 and 2 constitute a complete induction proof: the base
+    case(s) anchor the formula at the start, and the inductive step
+    carries correctness forward from there to every subsequent index,
+    covering all n from the base upward with no separate case-by-case
+    checking needed."""
+    from modules.recurrence_utils import verify_recurrence_solution
+
+    if not base_cases:
+        return InductionProofResult(error="No base case(s) given -- an induction proof needs at "
+                                             "least one anchor point to start from.")
+
+    steps = []
+    base_ok = True
+    for index in sorted(base_cases):
+        expected = base_cases[index]
+        try:
+            actual = closed_form.subs(indep_var, index)
+            actual_val = complex(actual)
+            matches = abs(actual_val - complex(expected)) < 1e-6
+        except (TypeError, ValueError) as exc:
+            matches = False
+            actual = f"could not evaluate ({exc})"
+        base_ok = base_ok and matches
+        steps.append(InductionStep(
+            label=f"Base case: n = {index}",
+            detail=(f"Closed form gives {func_name}({index}) = {sp.nsimplify(actual) if matches else actual}, "
+                    f"matching the given value {expected}." if matches else
+                    f"Closed form gives {func_name}({index}) = {actual}, which does NOT match the "
+                    f"given value {expected}."),
+            verified=matches))
+
+    try:
+        inductive_ok, residual = verify_recurrence_solution(eq_sympy, func_name, closed_form, indep_var)
+    except Exception as exc:  # noqa: BLE001
+        inductive_ok, residual = False, f"could not verify ({exc})"
+    steps.append(InductionStep(
+        label=f"Inductive step: assume the formula holds up to n = k, show it then holds at the "
+              f"next index",
+        detail=(f"Substituting the closed form into the recurrence relation for a general (symbolic) "
+                f"n reduces the relation to an identity (residual = {residual}) -- so the formula "
+                f"being correct at the index/indices this recurrence relation references is enough "
+                f"to guarantee it's correct at the next one, for every n at once."
+                if inductive_ok else
+                f"Substituting the closed form into the recurrence relation for a general n leaves a "
+                f"nonzero residual ({residual}) -- the formula does not actually satisfy the "
+                f"recurrence relation, so the inductive step fails."),
+        verified=bool(inductive_ok)))
+
+    valid = base_ok and bool(inductive_ok)
+    conclusion = (
+        f"By induction: the base case(s) hold and the inductive step carries correctness forward "
+        f"from them, so {func_name}(n) = {sp.latex(closed_form)} for every n at or above "
+        f"{min(base_cases)}." if valid else
+        "The induction proof does NOT go through -- see the failing step above."
+    )
+    return InductionProofResult(steps=steps, valid=valid, conclusion=conclusion)

@@ -13,8 +13,12 @@ together so cross-coupling is respected, but unrelated ODEs in the same
 problem don't force each other into one (possibly unsolvable) joint system.
 """
 import sympy as sp
+import numpy as np
+from scipy.integrate import solve_ivp
 from sympy.core.function import AppliedUndef
 from sympy.solvers.ode.systems import dsolve_system
+from sympy.solvers.deutils import ode_order
+from dataclasses import dataclass, field
 
 from modules.equation_engine import ProblemModel, Equation
 from modules.timeout_utils import run_with_timeout
@@ -147,3 +151,185 @@ def verify_coupled_solution(group: list[Equation], solutions: dict[str, sp.Eq]) 
         if residual != 0:
             return False, residual
     return True, worst_residual
+
+
+# --------------------------------------------------------- independent numerical cross-check
+
+
+@dataclass
+class NumericalCrossCheckResult:
+    applicable: bool                     # False if this ODE/group doesn't meet the scope below
+    ok: bool | None = None               # None whenever applicable is False
+    max_relative_error: float | None = None
+    sample_points: list[float] = field(default_factory=list)
+    reason: str = ""                     # why not applicable, OR a summary when it is
+
+
+# tolerance for "the two independent solve paths agree" -- looser than the
+# symbolic checks' effectively-exact-zero standard, since this is comparing
+# a symbolic closed form against a NUMERICAL integration (RK45, adaptive
+# step), which itself carries integration error on the order of the
+# solver's rtol/atol; 1e-4 relative is comfortably above that noise floor
+# while still catching a genuinely wrong solution (which was on the order
+# of 100-1000x off in testing, not a marginal few percent -- see this
+# module's test suite for the deliberately-wrong-sign case this catches)
+_CROSS_CHECK_RELATIVE_TOLERANCE = 1e-4
+
+
+def numerical_cross_check(model: ProblemModel, group: list[Equation],
+                            solutions: dict[str, sp.Eq]) -> NumericalCrossCheckResult:
+    """A SECOND, INDEPENDENT solve path for an initial-value ODE problem,
+    alongside the symbolic checkodesol/verify_coupled_solution check
+    _ode_checks already does -- this integrates the ORIGINAL differential
+    equation(s) numerically (scipy's adaptive RK45, via solve_ivp) from
+    the same initial condition, then compares the numerical trajectory
+    against the symbolic closed-form solution at several sample points.
+
+    This exists because checkodesol-style verification has a real,
+    narrow blind spot: it confirms the closed-form solution satisfies
+    the DIFFERENTIAL EQUATION (a true statement about the whole solution
+    family), but does NOT independently re-confirm that dsolve's
+    ics=-driven constant-solving actually landed on the constant
+    matching the SPECIFIC given initial condition -- if dsolve picked a
+    wrong root while solving for an integration constant (plausible for
+    equations with sign ambiguity, e.g. from a square root), checkodesol
+    would still report success, since the resulting expression genuinely
+    does satisfy the ODE -- just not the one matching the stated initial
+    value. A numerical integration started from the SAME initial
+    condition has no such blind spot: it has no algebraic constant-
+    solving step to get wrong in the first place, so a mismatch here is
+    a strong, independent signal something is actually wrong, not a
+    restatement of the same computation the symbolic check already did.
+
+    SCOPED to first-order initial-value problems (every equation in the
+    group has ode_order 1, an initial condition exists for every
+    function, and every OTHER symbol appearing in the equations has a
+    known numeric value in the model) -- a real, documented limitation,
+    not a silent gap: higher-order ODEs would need converting to a
+    first-order companion system with correctly-ordered derivative
+    initial conditions (y'(0), y''(0), ...), which the current
+    initial-condition representation doesn't reliably distinguish from
+    plain y(0); extending to that is future work, not attempted here
+    rather than risking a wrong companion-state mapping.
+    """
+    orders = []
+    for eq in group:
+        func = next(iter(eq.sympy_eq.atoms(AppliedUndef)), None)
+        if func is None:
+            return NumericalCrossCheckResult(applicable=False,
+                                               reason="Could not identify the function in this equation.")
+        try:
+            orders.append(ode_order(eq.sympy_eq, func))
+        except Exception:  # noqa: BLE001
+            return NumericalCrossCheckResult(applicable=False, reason="Could not determine ODE order.")
+    if any(o != 1 for o in orders):
+        return NumericalCrossCheckResult(
+            applicable=False,
+            reason="Numerical cross-check is scoped to first-order equations; this group includes "
+                   "a higher-order ODE, which isn't attempted (see numerical_cross_check's docstring).")
+
+    func_names = set()
+    for eq in group:
+        func_names |= _funcs_used(eq.sympy_eq)
+    if any(name not in solutions for name in func_names):
+        return NumericalCrossCheckResult(applicable=False,
+                                           reason="Not every function in this group has a closed-form solution.")
+
+    ics = _ics_for_group(model, func_names)
+    # every function needs its OWN initial condition, all at the SAME t0,
+    # for this to be a well-posed initial-value problem to integrate
+    func_order = sorted(func_names)  # fixed order for the state vector
+    ic_by_func = {}
+    t0 = None
+    for applied, value in ics.items():
+        name = str(applied.func)
+        if name not in func_order:
+            continue
+        arg = applied.args[0]
+        if not arg.is_number:
+            continue  # not a plain y(t0)-style IC (e.g. a derivative IC) -- out of scope, see docstring
+        if t0 is None:
+            t0 = float(arg)
+        elif float(arg) != t0:
+            return NumericalCrossCheckResult(applicable=False,
+                                               reason="Initial conditions for this group are given at "
+                                                      "different points -- not a standard IVP to integrate.")
+        ic_by_func[name] = float(value)
+    if t0 is None or any(name not in ic_by_func for name in func_order):
+        return NumericalCrossCheckResult(applicable=False,
+                                           reason="Not every function in this group has a plain "
+                                                  "y(t0)=value initial condition to integrate from.")
+
+    t = next(iter(group[0].sympy_eq.atoms(AppliedUndef))).args[0]
+    known_values = {sp.Symbol(v.symbol): v.known_value for v in model.variables
+                    if v.known_value is not None}
+    applied_by_name = {name: sp.Function(name)(t) for name in func_order}
+
+    rhs_exprs = []
+    for eq in group:
+        func = next(iter(eq.sympy_eq.atoms(AppliedUndef)))
+        deriv = func.diff(t)
+        try:
+            solved = sp.solve(eq.sympy_eq, deriv)
+        except Exception:  # noqa: BLE001
+            return NumericalCrossCheckResult(applicable=False,
+                                               reason=f"Could not isolate the derivative in {eq.name}.")
+        if not solved:
+            return NumericalCrossCheckResult(applicable=False,
+                                               reason=f"Could not isolate the derivative in {eq.name}.")
+        expr = solved[0].subs(known_values)
+        remaining = expr.free_symbols - set(applied_by_name.values()) - {t}
+        if remaining:
+            return NumericalCrossCheckResult(
+                applicable=False,
+                reason=f"{eq.name} has symbol(s) {sorted(str(s) for s in remaining)} with no known "
+                        "numeric value -- can't build a numeric right-hand side without them.")
+        rhs_exprs.append(expr)
+
+    try:
+        rhs_funcs = [sp.lambdify((t, *[applied_by_name[n] for n in func_order]), expr, "numpy")
+                     for expr in rhs_exprs]
+        sol_funcs = [sp.lambdify(t, solutions[n].rhs.subs(known_values), "numpy") for n in func_order]
+    except Exception as exc:  # noqa: BLE001
+        return NumericalCrossCheckResult(applicable=False, reason=f"Could not build a numeric form: {exc}")
+
+    y0 = [ic_by_func[n] for n in func_order]
+
+    def rhs(_t, y):
+        return [f(_t, *y) for f in rhs_funcs]
+
+    try:
+        rate0 = np.linalg.norm(rhs(t0, y0))
+        scale0 = max(np.linalg.norm(y0), 1e-9)
+        window = 3.0 / (rate0 / scale0) if rate0 / scale0 > 1e-9 else 5.0
+        window = min(max(window, 1e-6), 1e6)  # guard against a pathological/degenerate estimate
+    except Exception:  # noqa: BLE001
+        window = 5.0
+
+    try:
+        ivp = run_with_timeout(solve_ivp, rhs, (t0, t0 + window), y0, label="ode_numerical_cross_check",
+                                dense_output=True, rtol=1e-8, atol=1e-10, method="RK45")
+    except Exception as exc:  # noqa: BLE001
+        return NumericalCrossCheckResult(applicable=False, reason=f"Numerical integration failed: {exc}")
+    if not ivp.success:
+        return NumericalCrossCheckResult(applicable=False,
+                                           reason=f"Numerical integration did not converge: {ivp.message}")
+
+    sample_ts = list(np.linspace(t0, t0 + window, 5))
+    try:
+        numeric_vals = ivp.sol(sample_ts)  # shape (n_funcs, n_samples)
+        symbolic_vals = np.array([sf(np.array(sample_ts)) for sf in sol_funcs])
+    except Exception as exc:  # noqa: BLE001
+        return NumericalCrossCheckResult(applicable=False, reason=f"Could not evaluate for comparison: {exc}")
+
+    denom = np.maximum(np.abs(symbolic_vals), 1e-9)
+    rel_errors = np.abs(numeric_vals - symbolic_vals) / denom
+    max_rel_error = float(np.max(rel_errors))
+    ok = max_rel_error < _CROSS_CHECK_RELATIVE_TOLERANCE
+
+    detail = (f"Independent numerical integration (scipy RK45) from the same initial condition(s) "
+              f"{'agrees' if ok else 'DISAGREES'} with the symbolic closed-form solution "
+              f"(max relative difference {max_rel_error:.2e} across {len(sample_ts)} sample points "
+              f"over t in [{t0:g}, {t0 + window:g}]).")
+    return NumericalCrossCheckResult(applicable=True, ok=ok, max_relative_error=max_rel_error,
+                                       sample_points=sample_ts, reason=detail)

@@ -79,3 +79,60 @@ def test_equivalence_result_carries_raw_difference_field():
     x = sp.Symbol("x")
     # the raw difference should NOT already be simplified to 0
     assert result.raw_difference != 0
+
+
+# ---------------------------------------------------------------- build_recurrence_induction_proof
+from modules.proof import build_recurrence_induction_proof
+
+
+def test_induction_proof_linear_recurrence_valid():
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 1), a(n) + 1)  # a(n) = n + 1, given a(0) = 1
+    result = build_recurrence_induction_proof(eq, "a", n + 1, n, {0: 1})
+    assert result.valid
+    assert result.error is None
+    assert len(result.steps) == 2  # one base case + one inductive step
+    assert all(s.verified for s in result.steps)
+
+
+def test_induction_proof_fibonacci_binet_formula_valid():
+    """A genuinely nontrivial case: Binet's closed form for Fibonacci
+    needs TWO base cases (second-order recurrence) and involves
+    irrational numbers (sqrt(5)) in the inductive step's algebra."""
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    phi = (1 + sp.sqrt(5)) / 2
+    psi = (1 - sp.sqrt(5)) / 2
+    closed_form = (phi ** n - psi ** n) / sp.sqrt(5)
+    eq = sp.Eq(a(n + 2), a(n + 1) + a(n))
+    result = build_recurrence_induction_proof(eq, "a", closed_form, n, {0: 0, 1: 1})
+    assert result.valid
+    assert len(result.steps) == 3  # two base cases + one inductive step
+
+
+def test_induction_proof_catches_wrong_base_case():
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 1), a(n) + 1)
+    result = build_recurrence_induction_proof(eq, "a", n + 1, n, {0: 5})  # should be 1, not 5
+    assert not result.valid
+    assert not result.steps[0].verified
+    assert result.steps[-1].verified  # inductive step itself is still fine on its own
+
+
+def test_induction_proof_catches_wrong_closed_form():
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 1), a(n) + 1)
+    result = build_recurrence_induction_proof(eq, "a", n ** 2, n, {0: 0})
+    assert not result.valid
+    assert not result.steps[-1].verified
+
+
+def test_induction_proof_requires_at_least_one_base_case():
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 1), a(n) + 1)
+    result = build_recurrence_induction_proof(eq, "a", n + 1, n, {})
+    assert result.error is not None

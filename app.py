@@ -27,7 +27,7 @@ from modules.optimization_utils import solve_optimization
 from modules.matrix_utils import linear_system_view
 from modules.sensitivity import sweep_input, tornado_analysis
 from modules.dependency_graph import build_dependency_graph
-from modules.proof import build_proof
+from modules.proof import build_proof, build_recurrence_induction_proof
 from modules.paranoid import run_paranoid_check
 from modules.self_consistency import run_self_consistency_check, numeric_answer_spread
 from modules.monte_carlo import run_monte_carlo, UncertainVariable, MAX_SAMPLES as MC_MAX_SAMPLES
@@ -2945,6 +2945,30 @@ if model:
                 indep_sym = sp.Symbol(model.independent_variable or "n")
 
             st.latex(f"{func_name}({indep_sym}) = {sp.latex(closed_form)}")
+
+            # ---- induction proof: base case(s) + inductive step, reusing
+            # the same substitution check verify_recurrence_solution already
+            # does for the inductive step -- see proof.py
+            if rec_eq is not None:
+                base_cases = {}
+                for ic in model.initial_conditions:
+                    if ic.sympy_eq is None:
+                        continue
+                    lhs_funcs = ic.sympy_eq.lhs.atoms(AppliedUndef)
+                    match = next((f for f in lhs_funcs if str(f.func) == func_name), None)
+                    if match is not None and match.args[0].is_number:
+                        base_cases[int(match.args[0])] = float(ic.sympy_eq.rhs)
+                if base_cases:
+                    with st.expander(f"📐 Show induction proof for {func_name}({indep_sym})"):
+                        induction = build_recurrence_induction_proof(
+                            rec_eq.sympy_eq, func_name, closed_form, indep_sym, base_cases)
+                        if induction.error:
+                            st.caption(induction.error)
+                        else:
+                            for step in induction.steps:
+                                (st.success if step.verified else st.error)(f"**{step.label}**  \n{step.detail}")
+                            (st.success if induction.valid else st.error)(induction.conclusion)
+
             closed_form_sub = closed_form.subs(_known_substitutions(model))
             remaining = sorted(closed_form_sub.free_symbols - {indep_sym}, key=str)
 

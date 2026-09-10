@@ -506,7 +506,9 @@ def _ode_checks(model: ProblemModel, report: VerificationReport):
     substitutes every function's solution into every equation in its group
     simultaneously, which is the correct check for coupling.
     """
-    from modules.ode_utils import solve_ode, group_coupled_odes, verify_coupled_solution
+    from modules.ode_utils import (
+        solve_ode, group_coupled_odes, verify_coupled_solution, numerical_cross_check,
+    )
 
     ode_eqs = [e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]
     if not ode_eqs:
@@ -565,6 +567,23 @@ def _ode_checks(model: ProblemModel, report: VerificationReport):
             except Exception as e:  # noqa: BLE001
                 report.add(f"Coupled ODE system check: {names_in_group}", False,
                             f"Could not verify: {e}")
+
+        # second, INDEPENDENT solve path (numerical integration, not
+        # symbolic substitution) -- see numerical_cross_check's docstring
+        # in ode_utils.py for exactly what blind spot this closes that
+        # the checkodesol-style check above cannot. Only added as a
+        # report entry when it actually ran (applicable=True): the scope
+        # limits (higher-order ODEs, missing initial conditions, unknown
+        # parameters) are common and expected, not failures worth
+        # surfacing as a check result every time they're hit.
+        try:
+            cross_check = numerical_cross_check(model, group, solutions)
+            if cross_check.applicable:
+                report.add(f"Independent numerical cross-check: {names_in_group}", bool(cross_check.ok),
+                            cross_check.reason,
+                            margin_ratio=0.0 if cross_check.ok else cross_check.max_relative_error)
+        except Exception:  # noqa: BLE001
+            pass  # this is a bonus rigor check; a failure here shouldn't hide the checks above
 
 
 def _recurrence_checks(model: ProblemModel, report: VerificationReport):
