@@ -18,6 +18,7 @@ from modules.equation_engine import ProblemModel, build_model
 from modules.verifier import VerificationReport, CheckResult
 from modules.solver import SolutionStep
 from modules.similarity import problem_shape, find_similar_shapes
+from modules.concept_index import concept_tags_for_model
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "history.db"
 
@@ -61,6 +62,14 @@ def _connect() -> sqlite3.Connection:
     # simply swallowed rather than checked for up front.
     try:
         conn.execute("ALTER TABLE problems ADD COLUMN equation_shapes TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    # concept_tags: same migration pattern as equation_shapes above, for
+    # concept_index.py's named-formula/domain tags -- see history.save()
+    # and list_concepts()/problems_for_concept() below.
+    try:
+        conn.execute("ALTER TABLE problems ADD COLUMN concept_tags TEXT")
     except sqlite3.OperationalError:
         pass
 
@@ -113,12 +122,19 @@ def save(problem_text: str, model: ProblemModel, report: VerificationReport,
         "scenarios": scenarios,
     }
     shapes_json = json.dumps(sorted(problem_shape(model)))
+    try:
+        concepts_json = json.dumps(concept_tags_for_model(model))
+    except Exception:  # noqa: BLE001
+        # concept tagging is a provenance nicety, not core to saving a
+        # solved problem -- a failure here (e.g. an unexpected shape in
+        # named_formulas' matcher) shouldn't block the save itself
+        concepts_json = json.dumps([])
     with _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO problems (timestamp, problem_text, domain, passed, payload, equation_shapes) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO problems (timestamp, problem_text, domain, passed, payload, equation_shapes, "
+            "concept_tags) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (datetime.now().isoformat(timespec="seconds"), problem_text, model.problem_domain,
-             int(report.passed), json.dumps(payload), shapes_json),
+             int(report.passed), json.dumps(payload), shapes_json, concepts_json),
         )
         new_id = cur.lastrowid
         _prune_old_records(conn)
@@ -210,6 +226,55 @@ def find_similar(model: ProblemModel, exclude_id: int | None = None,
 
     ranked = find_similar_shapes(target_shape, candidates, limit=limit, min_similarity=min_similarity)
     return [{**row_by_id[rid], "similarity": score} for rid, score in ranked]
+
+
+def list_concepts(limit: int = 100) -> list[dict]:
+    """Every distinct concept tag across all of history, with how many
+    saved problems carry it, most-common first -- the browsable index
+    a research-journal view starts from ("what has this session/history
+    actually covered"), as opposed to find_similar's one-problem-at-a-
+    time structural lookup. Rows saved before concept_tags existed (NULL
+    or missing, same as equation_shapes) simply don't contribute any
+    tags -- not an error, just no signal to extract."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT concept_tags FROM problems WHERE concept_tags IS NOT NULL"
+        ).fetchall()
+    counts: dict[str, int] = {}
+    for (tags_json,) in rows:
+        try:
+            tags = json.loads(tags_json)
+        except (TypeError, ValueError):
+            continue
+        for tag in tags:
+            counts[tag] = counts.get(tag, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [{"concept": tag, "count": count} for tag, count in ranked[:limit]]
+
+
+def problems_for_concept(concept: str, limit: int = 50) -> list[dict]:
+    """Every saved problem tagged with `concept` (exact match against
+    one of its concept_tags entries), most recent first -- the other
+    half of list_concepts(): having found a concept worth pulling
+    together, this is what actually retrieves its problems for a
+    research journal (see research_journal.py) or just browsing."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, timestamp, problem_text, domain, passed, concept_tags FROM problems "
+            "WHERE concept_tags IS NOT NULL ORDER BY id DESC"
+        ).fetchall()
+    matches = []
+    for rid, ts, text, domain, passed, tags_json in rows:
+        try:
+            tags = json.loads(tags_json)
+        except (TypeError, ValueError):
+            continue
+        if concept in tags:
+            matches.append({"id": rid, "timestamp": ts, "problem_text": text, "domain": domain,
+                              "passed": bool(passed), "concept_tags": tags})
+        if len(matches) >= limit:
+            break
+    return matches
 
 
 # ---------------------------------------------------------------- grading / error-pattern tracking

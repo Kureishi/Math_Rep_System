@@ -311,3 +311,78 @@ def test_grading_records_pruned_to_max(tmp_path, monkeypatch):
         history_module.record_grading("a", "kinematics", "arithmetic", "sign_error", f"detail {i}")
     recent = history_module.list_recent_grading(limit=100)
     assert len(recent) == 5
+
+
+# ---------------------------------------------------------------- concept index
+def _newtons_law_model():
+    raw = {
+        "problem_domain": "mechanics",
+        "variables": [
+            {"symbol": "F", "meaning": "force", "known_value": None, "unit": "N"},
+            {"symbol": "m", "meaning": "mass", "known_value": 2.0, "unit": "kg"},
+            {"symbol": "a", "meaning": "acceleration", "known_value": 3.0, "unit": "m/s^2"},
+        ],
+        "equations": [{"name": "eq1", "expression": "Eq(F, m*a)", "derivation": "Newton 2nd law"}],
+        "solve_for": ["F"], "assumptions": [],
+    }
+    return build_model(raw)
+
+
+def _kinetic_energy_model():
+    raw = {
+        "problem_domain": "mechanics",
+        "variables": [
+            {"symbol": "KE", "meaning": "kinetic energy", "known_value": None, "unit": "J"},
+            {"symbol": "m", "meaning": "mass", "known_value": 2.0, "unit": "kg"},
+            {"symbol": "a", "meaning": "speed", "known_value": 3.0, "unit": "m/s"},
+        ],
+        "equations": [{"name": "eq2", "expression": "Eq(KE, m*a**2/2)", "derivation": "d"}],
+        "solve_for": ["KE"], "assumptions": [],
+    }
+    return build_model(raw)
+
+
+def test_save_stores_concept_tags_and_list_concepts_aggregates(tmp_path, monkeypatch):
+    from modules.verifier import VerificationReport
+
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "test_history_concepts.db")
+    report = VerificationReport(passed=True)
+
+    history_module.save("force problem", _newtons_law_model(), report, {}, [])
+    history_module.save("another force problem", _newtons_law_model(), report, {}, [])
+    history_module.save("energy problem", _kinetic_energy_model(), report, {}, [])
+
+    concepts = history_module.list_concepts()
+    by_name = {c["concept"]: c["count"] for c in concepts}
+    assert by_name["Newton's second law"] == 2
+    assert by_name["Kinetic energy"] == 1
+
+
+def test_problems_for_concept_returns_only_matching_entries(tmp_path, monkeypatch):
+    from modules.verifier import VerificationReport
+
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "test_history_concepts2.db")
+    report = VerificationReport(passed=True)
+
+    force_id = history_module.save("force problem", _newtons_law_model(), report, {}, [])
+    history_module.save("energy problem", _kinetic_energy_model(), report, {}, [])
+
+    matches = history_module.problems_for_concept("Newton's second law")
+    assert len(matches) == 1
+    assert matches[0]["id"] == force_id
+    assert matches[0]["concept_tags"] == ["Newton's second law"]
+
+
+def test_problems_for_concept_no_matches_returns_empty(tmp_path, monkeypatch):
+    from modules.verifier import VerificationReport
+
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "test_history_concepts3.db")
+    report = VerificationReport(passed=True)
+    history_module.save("energy problem", _kinetic_energy_model(), report, {}, [])
+
+    assert history_module.problems_for_concept("Nonexistent concept") == []
+
+
+def test_list_concepts_empty_history_returns_empty_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(history_module, "DB_PATH", tmp_path / "test_history_concepts4.db")
+    assert history_module.list_concepts() == []
