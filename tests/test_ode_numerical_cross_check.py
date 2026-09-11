@@ -80,6 +80,25 @@ def test_correct_coupled_system_confirmed_by_independent_integration():
     assert result.ok
 
 
+def test_defined_function_identifies_correct_function_not_an_arbitrary_atom():
+    """Regression test for a real, intermittent bug: an equation like
+    Eq(Derivative(B(t),t), k1*A(t) - k2*B(t)) mentions BOTH A(t) and
+    B(t) as AppliedUndef atoms (A(t) appears undifferentiated on the
+    right), so picking "the first atom" from that set is ambiguous --
+    Python's set iteration order depends on hash values, which Python
+    randomizes per process by default, so a naive "next(iter(atoms))"
+    approach silently returned the WRONG function in some interpreter
+    runs and the right one in others. _defined_function must instead
+    always identify B(t) specifically (the one actually being
+    differentiated), deterministically, regardless of hash seed."""
+    from modules.ode_utils import _defined_function
+
+    t = sp.Symbol("t")
+    A, B = sp.Function("A"), sp.Function("B")
+    eq = sp.Eq(B(t).diff(t), sp.Symbol("k1") * A(t) - sp.Symbol("k2") * B(t))
+    assert _defined_function(eq) == B(t)
+
+
 def test_deliberately_wrong_solution_is_caught():
     """This is the central claim of this rigor upgrade: a solution that
     satisfies the ODE's algebraic FORM but doesn't match the actual

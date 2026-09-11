@@ -13,6 +13,11 @@ import sympy as sp
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from sympy.parsing.sympy_parser import (
+    parse_expr, standard_transformations, implicit_multiplication_application, convert_xor,
+)
+
+_LIVE_PREVIEW_TRANSFORMS = standard_transformations + (implicit_multiplication_application, convert_xor)
 
 from config import settings
 from modules.llm_client import LMStudioClient, LLMOutputError
@@ -83,6 +88,25 @@ from modules.exporter import build_markdown, build_pdf_bytes, PlotSnapshot, buil
 
 st.set_page_config(page_title="Math Representation System", layout="wide")
 
+
+def _restore_from_query_param(key: str) -> None:
+    """Call BEFORE creating a widget with this key, so a value present
+    in the page's URL (from a shared/bookmarked link) becomes that
+    widget's initial value. A no-op if the widget already has session
+    state (e.g. the person has already interacted with it this
+    session) or nothing relevant is in the URL."""
+    if key not in st.session_state and key in st.query_params:
+        st.session_state[key] = st.query_params[key]
+
+
+def _sync_query_param(key: str) -> None:
+    """Call AFTER creating a widget with this key, to write its current
+    value into the URL -- so the page's URL can be copied, bookmarked,
+    or shared and reopening it restores this exact state (see
+    _restore_from_query_param, its counterpart on load)."""
+    if key in st.session_state:
+        st.query_params[key] = str(st.session_state[key])
+
 # ---------------------------------------------------------------- session
 client = LMStudioClient()
 ws = Workspace(st.session_state)
@@ -93,6 +117,20 @@ for key, default in [("problem_text", ""), ("model", None), ("report", None),
                       ("paranoid_result", None), ("followup_history", []),
                       ("self_consistency_result", None), ("error_pattern_messages", [])]:
     st.session_state.setdefault(key, default)
+
+# ---- apply a pending Quick Start example (mode switch + prefilled
+# inputs), queued by render_quick_start_tab()'s "Try this" buttons.
+# Must happen HERE, before the sidebar's app_mode radio widget (or any
+# of the target mode's own widgets) are instantiated in this run --
+# Streamlit forbids writing to a widget's session_state key once that
+# widget already exists in the current script run, which is exactly
+# what set st.session_state["app_mode"] = ... from inside the Quick
+# Start tab's own button handler (itself running AFTER the radio
+# widget, later in the same script) directly.
+if "_pending_mode" in st.session_state:
+    st.session_state["app_mode"] = st.session_state.pop("_pending_mode")
+    for _k, _v in st.session_state.pop("_pending_prefill", {}).items():
+        st.session_state[_k] = _v
 
 
 MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB -- matches .streamlit/config.toml's
@@ -287,6 +325,7 @@ def render_curve_fitting_tab():
                                  "exponential": "Exponential (y = a·e^(b·x))", "power": "Power (y = a·x^b)",
                                  "logarithmic": "Logarithmic (y = a·ln(x) + b)", "custom": "Custom (linear-in-parameters)",
                                  "best fit (try all)": "Best fit -- try every built-in family"}.get(f, f),
+        key="fit_family",
     )
 
     degree = 2
@@ -408,9 +447,9 @@ def render_equivalence_tab():
 
     c1, c2 = st.columns(2)
     with c1:
-        expr1_str = st.text_input("Expression 1", placeholder="sin(x)**2 + cos(x)**2")
+        expr1_str = st.text_input("Expression 1", placeholder="sin(x)**2 + cos(x)**2", key="equiv_expr1")
     with c2:
-        expr2_str = st.text_input("Expression 2", placeholder="1")
+        expr2_str = st.text_input("Expression 2", placeholder="1", key="equiv_expr2")
     extra_syms_raw = st.text_input("Extra symbol names (comma-separated, optional)", placeholder="a, b")
 
     if not st.button("Check", type="primary"):
@@ -562,11 +601,13 @@ with st.sidebar:
     # sidebar (rather than a horizontal radio competing with the main
     # input box, as it used to be) so switching tools doesn't require
     # scrolling past whatever's currently in the main content area.
+    _restore_from_query_param("app_mode")
     mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
                               "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff",
                               "📐 Dimensional analysis", "🔄 Transforms & series", "🌡️ PDE solver",
-                              "🧮 Tensor calculus", "📔 Research journal"],
+                              "🧮 Tensor calculus", "📔 Research journal", "🚀 Quick start"],
                       key="app_mode")
+    _sync_query_param("app_mode")
 
     # ---- persistent status panels: these matter across MULTIPLE
     # problems in a session (a recurring mistake, a chain in progress),
@@ -1165,6 +1206,66 @@ def render_dimensional_analysis_tab():
                     "or non-half-integer exponents).")
 
 
+def render_quick_start_tab():
+    """A gallery of one-click example problems, one per major mode --
+    discoverability for a project that's grown to 11 modes (several
+    with their own multiple sub-tabs), where it's not always obvious
+    from a mode's label alone what it's scoped to or what a well-formed
+    input looks like. Clicking a card pre-fills the target mode's
+    inputs via session_state (the same mechanism _restore_from_query_param
+    uses for shared links) and switches straight to it."""
+    st.subheader("🚀 Quick start")
+    st.caption("Pick an example to see a mode in action -- each button jumps straight to that "
+                "mode with the inputs already filled in; press its Solve/Analyze/etc. button "
+                "once there.")
+
+    examples = [
+        ("📝 Word problem solver", "Kinematics word problem",
+         "A car accelerates uniformly from 8 m/s to 20 m/s over 6 seconds. What is its "
+         "acceleration, and how far does it travel in that time?",
+         {"problem_text": "A car accelerates uniformly from 8 m/s to 20 m/s over 6 seconds. "
+                            "What is its acceleration, and how far does it travel in that time?"}),
+        ("📈 Curve fitting", "Fit a dataset (best fit, try every family)",
+         "A small x/y dataset that fits an exponential curve well.",
+         {"fit_csv_paste": "x,y\n1,5.4\n2,7.3\n3,9.9\n4,13.4\n5,18.2\n6,24.6\n7,33.4\n8,45.3",
+          "fit_family": "best fit (try all)"}),
+        ("🔁 Check equivalence", "A classic trig identity",
+         "Confirm sin²(x) + cos²(x) really does equal 1, with the proof steps shown.",
+         {"equiv_expr1": "sin(x)**2 + cos(x)**2", "equiv_expr2": "1"}),
+        ("📐 Dimensional analysis", "Find a force-like combination",
+         "Given mass and acceleration, discover which exponent combination reaches Newtons.",
+         {"dim_inputs_text": "m: kg\na: m/s^2", "dim_target_unit": "N"}),
+        ("🔄 Transforms & series", "Laplace transform of a damped oscillation",
+         "Transform exp(-2t)sin(3t) and see it round-tripped back through the inverse transform.",
+         {"laplace_expr": "exp(-2*t)*sin(3*t)"}),
+        ("🌡️ PDE solver", "Heat equation, fixed-zero ends",
+         "A rod pinned at 0° at both ends, initially warmer in the middle -- fills the "
+         "\"Heat (fixed ends)\" sub-tab specifically.",
+         {"heat_ic": "x*(1-x)"}),
+        ("🧮 Tensor calculus", "Curvature of a sphere",
+         "The default metric already IS this example -- just press Analyze to see the Ricci "
+         "scalar come out to 2/R², with a slider to explore how it depends on R.",
+         {}),
+    ]
+
+    for target_mode, title, description, prefill in examples:
+        with st.container(border=True):
+            st.write(f"**{title}**")
+            st.caption(f"{target_mode} · {description}")
+            if st.button("Try this →", key=f"quickstart_{title}"):
+                # can't set st.session_state["app_mode"] directly here --
+                # the app_mode radio widget was already instantiated
+                # earlier in THIS script run (Streamlit forbids writing to
+                # a widget's key after that widget exists in the current
+                # run), so the mode switch + prefill is deferred to a
+                # pending-state flag, applied at the very top of the next
+                # run BEFORE the radio widget is (re)created -- see the
+                # "_pending_mode" handling near the top of this file.
+                st.session_state["_pending_mode"] = target_mode
+                st.session_state["_pending_prefill"] = prefill
+                st.rerun()
+
+
 def render_transforms_series_tab():
     """Integral transforms (Laplace/Fourier) and series/asymptotic
     expansions -- direct symbolic-expression input, same standalone
@@ -1180,12 +1281,17 @@ def render_transforms_series_tab():
                     "transform and compared back to your input as a check.")
         direction = st.radio("Direction", ["Forward (t → s)", "Inverse (s → t)"],
                               key="laplace_direction", horizontal=True)
+        _restore_from_query_param("laplace_expr")
         expr_str = st.text_input("Expression", key="laplace_expr",
                                   placeholder="exp(-2*t)*sin(3*t)" if direction.startswith("Forward")
                                   else "3/((s+2)**2+9)")
-        if st.button("Transform", key="laplace_button") and expr_str.strip():
-            result = laplace_transform_expr(expr_str) if direction.startswith("Forward") \
-                else inverse_laplace_transform_expr(expr_str)
+        _sync_query_param("laplace_expr")
+        _live_parse_preview(expr_str, ["t"] if direction.startswith("Forward") else ["s"])
+        result = _persist_on_click(
+            "Transform", "laplace_button", "laplace_transform_result", bool(expr_str.strip()),
+            lambda: laplace_transform_expr(expr_str) if direction.startswith("Forward")
+            else inverse_laplace_transform_expr(expr_str))
+        if result is not None:
             _render_transform_result(result)
 
     with tab_fourier:
@@ -1195,9 +1301,12 @@ def render_transforms_series_tab():
         expr_str_f = st.text_input("Expression", key="fourier_expr",
                                     placeholder="exp(-x**2)" if direction_f.startswith("Forward")
                                     else "sqrt(pi)*exp(-pi**2*k**2)")
-        if st.button("Transform", key="fourier_button") and expr_str_f.strip():
-            result = fourier_transform_expr(expr_str_f) if direction_f.startswith("Forward") \
-                else inverse_fourier_transform_expr(expr_str_f)
+        _live_parse_preview(expr_str_f, ["x"] if direction_f.startswith("Forward") else ["k"])
+        result = _persist_on_click(
+            "Transform", "fourier_button", "fourier_transform_result", bool(expr_str_f.strip()),
+            lambda: fourier_transform_expr(expr_str_f) if direction_f.startswith("Forward")
+            else inverse_fourier_transform_expr(expr_str_f))
+        if result is not None:
             _render_transform_result(result)
 
     with tab_series:
@@ -1208,14 +1317,18 @@ def render_transforms_series_tab():
                                 key="series_kind", horizontal=True)
         expr_str_s = st.text_input("Expression (function of x)", key="series_expr",
                                     placeholder="sin(x)")
+        _live_parse_preview(expr_str_s, ["x"])
         col1, col2 = st.columns(2)
+        point = 0.0
         with col1:
             if series_kind.startswith("Taylor"):
                 point = st.number_input("Expansion point", value=0.0, key="series_point")
             order = st.slider("Order", 2, 12, 6, key="series_order")
-        if st.button("Expand", key="series_button") and expr_str_s.strip():
-            result = taylor_series(expr_str_s, point=point, order=order) \
-                if series_kind.startswith("Taylor") else asymptotic_expansion(expr_str_s, order=order)
+        result = _persist_on_click(
+            "Expand", "series_button", "series_expand_result", bool(expr_str_s.strip()),
+            lambda: taylor_series(expr_str_s, point=point, order=order) if series_kind.startswith("Taylor")
+            else asymptotic_expansion(expr_str_s, order=order))
+        if result is not None:
             _render_series_result(result)
 
 
@@ -1252,6 +1365,94 @@ def _render_series_result(result):
         st.warning(f"Could not verify: {result.verification_detail}")
 
 
+def _persist_on_click(button_label: str, button_key: str, session_key: str, ready: bool, compute_fn):
+    """Runs compute_fn() and stores the result in st.session_state when
+    the button is clicked, then ALWAYS reads back from session_state
+    (returning None if nothing's been computed yet) rather than only
+    rendering within the same script-run the button was clicked in.
+
+    This fixes a real, previously-shipped bug (found while adding the
+    statistical-inference layer to the curve-fitting tab): st.button()
+    only returns True on the EXACT rerun triggered by clicking it -- any
+    OTHER widget interaction on the page (a slider, a different button,
+    even an unrelated checkbox) sees it as False on that rerun. Gating
+    a whole result display on `if st.button(...):` directly means the
+    result silently disappears the moment the person touches any other
+    interactive element added alongside it (e.g. a time-animation slider
+    on the result itself) -- exactly the kind of thing this round of
+    interactivity upgrades adds throughout the PDE and tensor-calculus
+    tabs, so every "Solve"/"Analyze" button in both was converted to
+    this pattern rather than just the ones visibly breaking today."""
+    if st.button(button_label, key=button_key) and ready:
+        st.session_state[session_key] = compute_fn()
+    return st.session_state.get(session_key)
+
+
+def _live_parse_preview(expr_str: str, extra_symbols: list[str] | None = None) -> None:
+    """Best-effort inline feedback on a symbolic-expression text input,
+    shown immediately below it: the parsed LaTeX if it parses cleanly,
+    or a plain-language parse error if not -- so a typo shows up right
+    where it was made instead of only after clicking Solve/Compute.
+    Deliberately silent (no output at all) for an empty string, so a
+    not-yet-filled-in field doesn't show an error before the person has
+    had a chance to type anything."""
+    if not expr_str or not expr_str.strip():
+        return
+    try:
+        local_dict = {s: sp.Symbol(s) for s in (extra_symbols or [])}
+        parsed = parse_expr(expr_str, local_dict=local_dict,
+                              transformations=_LIVE_PREVIEW_TRANSFORMS)
+        st.caption(f"parsed as: \\({sp.latex(parsed)}\\)")
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"⚠️ doesn't parse yet: {exc}")
+
+
+def _render_pde_time_animation(solution_expr, length: float, t_max: float, key_prefix: str,
+                                 y_label: str = "u", n_frames: int = 30, n_x_points: int = 100) -> None:
+    """An animated Plotly line plot of u(x, t) scrubbing through t in
+    [0, t_max] via a native Plotly play button + slider (frames built
+    once, animated client-side -- no Streamlit rerun needed to step
+    through time), replacing what used to be no time-domain
+    visualization at all for the heat/wave Fourier solutions (only the
+    closed-form LaTeX was shown)."""
+    x = sp.Symbol("x", positive=True)
+    t = sp.Symbol("t", positive=True)
+    try:
+        f = sp.lambdify((x, t), solution_expr, "numpy")
+        xs = np.linspace(0, length, n_x_points)
+        ts = np.linspace(0, t_max, n_frames)
+        all_ys = [np.real(np.array([complex(f(xv, tv)) for xv in xs])) for tv in ts]
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"Could not build an animated view: {exc}")
+        return
+
+    y_min, y_max = float(np.min(all_ys)), float(np.max(all_ys))
+    pad = 0.1 * max(abs(y_max - y_min), 1e-6)
+    frames = [go.Frame(data=[go.Scatter(x=xs, y=all_ys[i], mode="lines", line=dict(width=3))],
+                        name=f"{i}") for i in range(n_frames)]
+    fig = go.Figure(
+        data=[go.Scatter(x=xs, y=all_ys[0], mode="lines", line=dict(width=3))],
+        layout=go.Layout(
+            xaxis=dict(title="x", range=[0, length]),
+            yaxis=dict(title=y_label, range=[y_min - pad, y_max + pad]),
+            updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15,
+                                buttons=[
+                                    dict(label="▶ Play", method="animate",
+                                          args=[None, {"frame": {"duration": 80, "redraw": True},
+                                                          "fromcurrent": True, "transition": {"duration": 0}}]),
+                                    dict(label="⏸ Pause", method="animate",
+                                          args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+                                ])],
+            sliders=[dict(currentvalue={"prefix": "t = "}, x=0.05, len=0.9,
+                           steps=[dict(method="animate", args=[[f"{i}"],
+                                        {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                                        label=f"{ts[i]:.2g}") for i in range(n_frames)])],
+        ),
+        frames=frames,
+    )
+    st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_anim")
+
+
 def render_pde_tab():
     """PDE capabilities, split by what they can actually solve rather
     than one solver that overpromises -- see pde_utils.py's module
@@ -1269,8 +1470,9 @@ def render_pde_tab():
                     "heat or wave equation -- those are second-order; use the other tabs.")
         pde_str = st.text_input("PDE", key="pde_general_expr",
                                   placeholder="Eq(Derivative(u(x,y), x) + Derivative(u(x,y), y), 2*u(x,y))")
-        if st.button("Solve", key="pde_general_button") and pde_str.strip():
-            result = solve_first_order_pde(pde_str)
+        result = _persist_on_click("Solve", "pde_general_button", "pde_general_result",
+                                     bool(pde_str.strip()), lambda: solve_first_order_pde(pde_str))
+        if result is not None:
             if result.error:
                 st.error(result.error)
             else:
@@ -1287,34 +1489,47 @@ def render_pde_tab():
                     "solved by separation of variables / Fourier sine series for any initial "
                     "condition f(x).")
         ic_heat = st.text_input("Initial condition f(x)", key="heat_ic", placeholder="x*(1-x)")
+        _live_parse_preview(ic_heat, ["x"])
         col1, col2 = st.columns(2)
         with col1:
             length_h = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_length")
         with col2:
             alpha_h = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_alpha")
-        if st.button("Solve", key="heat_button") and ic_heat.strip():
-            result = solve_heat_equation_dirichlet(ic_heat, length=length_h, alpha=alpha_h)
+        result = _persist_on_click(
+            "Solve", "heat_button", "heat_result", bool(ic_heat.strip()),
+            lambda: solve_heat_equation_dirichlet(ic_heat, length=length_h, alpha=alpha_h))
+        if result is not None:
             _render_fourier_pde_result(result)
+            if result.error is None:
+                t_max = 3.0 / max(alpha_h * (np.pi / length_h) ** 2, 1e-6)
+                _render_pde_time_animation(result.solution, length_h, t_max, "heat_d", y_label="u(x,t)")
 
     with tab_heat_n:
         st.caption("u_t = α·u_xx on [0, L] with INSULATED ends (u_x(0,t) = u_x(L,t) = 0, no heat "
                     "escapes) -- the rod equilibrates to the average initial temperature instead "
                     "of cooling to zero.")
         ic_heat_n = st.text_input("Initial condition f(x)", key="heat_n_ic", placeholder="x*(1-x)")
+        _live_parse_preview(ic_heat_n, ["x"])
         col1, col2 = st.columns(2)
         with col1:
             length_hn = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_n_length")
         with col2:
             alpha_hn = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_n_alpha")
-        if st.button("Solve", key="heat_n_button") and ic_heat_n.strip():
-            result = solve_heat_equation_neumann(ic_heat_n, length=length_hn, alpha=alpha_hn)
+        result = _persist_on_click(
+            "Solve", "heat_n_button", "heat_n_result", bool(ic_heat_n.strip()),
+            lambda: solve_heat_equation_neumann(ic_heat_n, length=length_hn, alpha=alpha_hn))
+        if result is not None:
             _render_fourier_pde_result(result)
+            if result.error is None:
+                t_max = 3.0 / max(alpha_hn * (np.pi / length_hn) ** 2, 1e-6)
+                _render_pde_time_animation(result.solution, length_hn, t_max, "heat_n", y_label="u(x,t)")
 
     with tab_heat_r:
         st.caption("u_t = α·u_xx on [0, L] with u(0,t) = 0 and a convective (Robin) condition at "
                     "the far end, u_x(L,t) + h·u(L,t) = 0 -- e.g. heat escaping into a surrounding "
                     "medium at zero temperature. Eigenvalues found numerically (no closed form).")
         ic_heat_r = st.text_input("Initial condition f(x)", key="heat_r_ic", placeholder="x*(1-x)")
+        _live_parse_preview(ic_heat_r, ["x"])
         col1, col2, col3 = st.columns(3)
         with col1:
             length_hr = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_r_length")
@@ -1322,39 +1537,58 @@ def render_pde_tab():
             alpha_hr = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_r_alpha")
         with col3:
             robin_h = st.number_input("Convective coefficient h", value=1.0, min_value=0.0001, key="heat_r_h")
-        if st.button("Solve", key="heat_r_button") and ic_heat_r.strip():
-            result = solve_heat_equation_robin(ic_heat_r, length=length_hr, alpha=alpha_hr,
-                                                robin_coefficient=robin_h)
+        result = _persist_on_click(
+            "Solve", "heat_r_button", "heat_r_result", bool(ic_heat_r.strip()),
+            lambda: solve_heat_equation_robin(ic_heat_r, length=length_hr, alpha=alpha_hr,
+                                                robin_coefficient=robin_h))
+        if result is not None:
             _render_fourier_pde_result(result)
+            if result.error is None:
+                t_max = 3.0 / max(alpha_hr * (np.pi / length_hr) ** 2, 1e-6)
+                _render_pde_time_animation(result.solution, length_hr, t_max, "heat_r", y_label="u(x,t)")
 
     with tab_wave_d:
         st.caption("u_tt = c²·u_xx on [0, L] with u(0,t) = u(L,t) = 0, given initial displacement "
                     "f(x) and initial velocity g(x), solved via Fourier sine series.")
         ic_disp = st.text_input("Initial displacement f(x)", key="wave_ic_disp", placeholder="sin(pi*x)")
+        _live_parse_preview(ic_disp, ["x"])
         ic_vel = st.text_input("Initial velocity g(x)", key="wave_ic_vel", value="0")
+        _live_parse_preview(ic_vel, ["x"])
         col1, col2 = st.columns(2)
         with col1:
             length_w = st.number_input("Length L", value=1.0, min_value=0.01, key="wave_length")
         with col2:
             speed_w = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_speed")
-        if st.button("Solve", key="wave_button") and ic_disp.strip():
-            result = solve_wave_equation_dirichlet(ic_disp, ic_vel, length=length_w, wave_speed=speed_w)
+        result = _persist_on_click(
+            "Solve", "wave_button", "wave_result", bool(ic_disp.strip()),
+            lambda: solve_wave_equation_dirichlet(ic_disp, ic_vel, length=length_w, wave_speed=speed_w))
+        if result is not None:
             _render_fourier_pde_result(result)
+            if result.error is None:
+                t_max = 4 * length_w / max(speed_w, 1e-6)
+                _render_pde_time_animation(result.solution, length_w, t_max, "wave_d", y_label="u(x,t)")
 
     with tab_wave_n:
         st.caption("u_tt = c²·u_xx on [0, L] with FREE ends (u_x(0,t) = u_x(L,t) = 0) -- e.g. a "
                     "string or rod not clamped at either end. A nonzero average initial velocity "
                     "produces rigid translation rather than oscillation.")
         ic_disp_n = st.text_input("Initial displacement f(x)", key="wave_n_ic_disp", placeholder="cos(pi*x)")
+        _live_parse_preview(ic_disp_n, ["x"])
         ic_vel_n = st.text_input("Initial velocity g(x)", key="wave_n_ic_vel", value="0")
+        _live_parse_preview(ic_vel_n, ["x"])
         col1, col2 = st.columns(2)
         with col1:
             length_wn = st.number_input("Length L", value=1.0, min_value=0.01, key="wave_n_length")
         with col2:
             speed_wn = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_n_speed")
-        if st.button("Solve", key="wave_n_button") and ic_disp_n.strip():
-            result = solve_wave_equation_neumann(ic_disp_n, ic_vel_n, length=length_wn, wave_speed=speed_wn)
+        result = _persist_on_click(
+            "Solve", "wave_n_button", "wave_n_result", bool(ic_disp_n.strip()),
+            lambda: solve_wave_equation_neumann(ic_disp_n, ic_vel_n, length=length_wn, wave_speed=speed_wn))
+        if result is not None:
             _render_fourier_pde_result(result)
+            if result.error is None:
+                t_max = 4 * length_wn / max(speed_wn, 1e-6)
+                _render_pde_time_animation(result.solution, length_wn, t_max, "wave_n", y_label="u(x,t)")
 
     with tab_laplace:
         st.caption("u_xx + u_yy = 0 on a rectangle [0, width] × [0, height], with independent "
@@ -1363,18 +1597,24 @@ def render_pde_tab():
         col1, col2 = st.columns(2)
         with col1:
             bc_bottom = st.text_input("Bottom (function of x)", key="laplace_bottom", value="0")
+            _live_parse_preview(bc_bottom, ["x"])
             bc_left = st.text_input("Left (function of y)", key="laplace_left", value="0")
+            _live_parse_preview(bc_left, ["y"])
         with col2:
             bc_top = st.text_input("Top (function of x)", key="laplace_top", value="0")
+            _live_parse_preview(bc_top, ["x"])
             bc_right = st.text_input("Right (function of y)", key="laplace_right", value="0")
+            _live_parse_preview(bc_right, ["y"])
         col3, col4 = st.columns(2)
         with col3:
             width_l = st.number_input("Width", value=1.0, min_value=0.01, key="laplace_width")
         with col4:
             height_l = st.number_input("Height", value=1.0, min_value=0.01, key="laplace_height")
-        if st.button("Solve", key="laplace_button"):
-            result = solve_laplace_rectangle(bc_bottom, bc_top, bc_left, bc_right,
-                                              width=width_l, height=height_l)
+        result = _persist_on_click(
+            "Solve", "laplace_button", "laplace_result", True,
+            lambda: solve_laplace_rectangle(bc_bottom, bc_top, bc_left, bc_right,
+                                              width=width_l, height=height_l))
+        if result is not None:
             if result.error:
                 st.error(result.error)
             else:
@@ -1389,6 +1629,22 @@ def render_pde_tab():
                 else:
                     st.warning(result.verification_detail)
 
+                # 2D heatmap of the steady-state solution -- previously
+                # only the closed-form LaTeX was shown, with no visual
+                # of what the temperature/potential distribution actually
+                # looks like across the rectangle
+                try:
+                    x_s, y_s = sp.Symbol("x", positive=True), sp.Symbol("y", positive=True)
+                    f_uv = sp.lambdify((x_s, y_s), result.solution, "numpy")
+                    xs_grid = np.linspace(0, width_l, 60)
+                    ys_grid = np.linspace(0, height_l, 60)
+                    Z = np.array([[np.real(complex(f_uv(xv, yv))) for xv in xs_grid] for yv in ys_grid])
+                    heat_fig = go.Figure(data=go.Heatmap(z=Z, x=xs_grid, y=ys_grid, colorscale="Viridis"))
+                    heat_fig.update_layout(title="u(x, y)", xaxis_title="x", yaxis_title="y")
+                    st.plotly_chart(heat_fig, width="stretch", key="laplace_heatmap")
+                except Exception as exc:  # noqa: BLE001
+                    st.caption(f"Could not render a heatmap: {exc}")
+
     with tab_fd:
         st.caption("Numeric fallback for u_xx + u_yy = source(x,y) on ANY region (not just a "
                     "rectangle) -- describe the domain with a true/false condition on x and y, "
@@ -1397,9 +1653,12 @@ def render_pde_tab():
         col1, col2 = st.columns(2)
         with col1:
             source_fd = st.text_input("Source term (0 for Laplace's equation)", key="fd_source", value="0")
+            _live_parse_preview(source_fd, ["x", "y"])
             domain_fd = st.text_input("Domain (x, y) → True/False", key="fd_domain", value="x**2+y**2<=1")
+            _live_parse_preview(domain_fd, ["x", "y"])
         with col2:
             boundary_fd = st.text_input("Boundary value (function of x, y)", key="fd_boundary", value="0")
+            _live_parse_preview(boundary_fd, ["x", "y"])
         col3, col4, col5, col6 = st.columns(4)
         with col3:
             x_min = st.number_input("x min", value=-1.2, key="fd_xmin")
@@ -1410,16 +1669,18 @@ def render_pde_tab():
         with col6:
             y_max = st.number_input("y max", value=1.2, key="fd_ymax")
         grid_n = st.slider("Grid resolution", 21, 101, 41, step=10, key="fd_resolution")
-        if st.button("Solve", key="fd_button"):
-            result = solve_pde_finite_difference_2d(
-                source_fd, boundary_fd, domain_fd, (x_min, x_max), (y_min, y_max), grid_n, grid_n)
+        result = _persist_on_click(
+            "Solve", "fd_button", "fd_result", True,
+            lambda: solve_pde_finite_difference_2d(
+                source_fd, boundary_fd, domain_fd, (x_min, x_max), (y_min, y_max), grid_n, grid_n))
+        if result is not None:
             if result.error:
                 st.error(result.error)
             else:
                 fig = go.Figure(data=go.Heatmap(z=result.solution_grid.T, x=result.grid_x,
                                                  y=result.grid_y, colorscale="Viridis"))
                 fig.update_layout(title="Solution u(x, y)", xaxis_title="x", yaxis_title="y")
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, width='stretch', key="fd_heatmap")
                 if result.converged:
                     st.success(f"{result.note} (max discrepancy vs. doubled resolution: "
                                 f"{result.convergence_error:.3g})")
@@ -1454,23 +1715,39 @@ def render_tensor_calculus_tab():
             with cols[j]:
                 val = st.text_input(f"g[{i}][{j}]", value=default_val, key=f"metric_{i}_{j}",
                                       label_visibility="collapsed")
+                _live_parse_preview(val, coord_names)
             row.append(val)
         metric_rows.append(row)
 
-    if st.button("Analyze", key="tensor_analyze_button"):
-        result = analyze_metric(metric_rows, coord_names)
-        if result.error:
-            st.error(result.error)
-        else:
-            st.session_state["_tensor_result"] = result
-
-    result = st.session_state.get("_tensor_result")
-    if result is not None and result.error is None:
+    result = _persist_on_click("Analyze", "tensor_analyze_button", "_tensor_result", True,
+                                 lambda: analyze_metric(metric_rows, coord_names))
+    if result is not None and result.error:
+        st.error(result.error)
+    elif result is not None:
         st.write(f"**Ricci scalar (overall curvature):** ")
         st.latex(sp.latex(result.ricci_scalar))
         if result.is_flat:
             st.info("This metric is flat (zero Riemann tensor everywhere) -- geometrically "
                     "indistinguishable from ordinary Euclidean space, just in these coordinates.")
+
+        # live parameter exploration: if the Ricci scalar still contains
+        # a free symbol beyond the coordinates themselves (e.g. a sphere
+        # radius R), let it be scrubbed with a slider and show the
+        # curvature update immediately -- no need to retype the metric
+        # or re-click Analyze to see how curvature depends on it
+        extra_params = sorted(result.ricci_scalar.free_symbols - set(result.coords), key=str)
+        if extra_params:
+            st.write("**Explore how curvature depends on a parameter:**")
+            subs = {}
+            for p in extra_params:
+                val = st.slider(f"{p}", 0.1, 10.0, 1.0, key=f"tensor_param_{p}")
+                subs[p] = val
+            try:
+                numeric_ricci = complex(result.ricci_scalar.subs(subs))
+                display_val = numeric_ricci.real if abs(numeric_ricci.imag) < 1e-9 else numeric_ricci
+                st.metric("Ricci scalar at these values", f"{display_val:.5g}")
+            except (TypeError, ValueError) as exc:
+                st.caption(f"Could not evaluate numerically: {exc}")
 
         st.write("**Nonzero Christoffel symbols Γᵏ_ᵢⱼ:**")
         symbols = nonzero_christoffel_symbols(result)
@@ -1495,13 +1772,13 @@ def render_tensor_calculus_tab():
         for i in range(n_coords):
             with vec_cols[i]:
                 v = st.text_input(f"V^{i}", value="1" if i == 0 else "0", key=f"tensor_vec_{i}")
+                _live_parse_preview(v, coord_names)
             vec_components.append(v)
-        if st.button("Compute covariant derivative", key="tensor_cov_button"):
-            nabla = covariant_derivative_of_vector(result, vec_components)
-            if nabla is None:
-                st.error("Could not compute -- check the metric analysis above succeeded.")
-            else:
-                st.latex(r"\nabla_j V^i = " + sp.latex(nabla))
+        nabla = _persist_on_click(
+            "Compute covariant derivative", "tensor_cov_button", "_tensor_cov_result", True,
+            lambda: covariant_derivative_of_vector(result, vec_components))
+        if nabla is not None:
+            st.latex(r"\nabla_j V^i = " + sp.latex(nabla))
 
 
 def render_research_journal_tab():
@@ -1523,7 +1800,13 @@ def render_research_journal_tab():
         if not concepts:
             st.caption("No concept-tagged problems yet -- solve and verify a problem first.")
         else:
-            for c in concepts:
+            search = st.text_input("🔎 Filter concepts", key="concept_search",
+                                     placeholder="e.g. energy, Newton, domain: mechanics")
+            filtered = [c for c in concepts if search.strip().lower() in c["concept"].lower()] \
+                if search.strip() else concepts
+            if search.strip() and not filtered:
+                st.caption(f"No concepts match \"{search}\".")
+            for c in filtered:
                 with st.expander(f"{c['concept']} ({c['count']})"):
                     matches = history.problems_for_concept(c["concept"])
                     for m in matches:
@@ -1620,6 +1903,9 @@ elif mode == "🧮 Tensor calculus":
     st.stop()
 elif mode == "📔 Research journal":
     render_research_journal_tab()
+    st.stop()
+elif mode == "🚀 Quick start":
+    render_quick_start_tab()
     st.stop()
 
 # ---------------------------------------------------------------- input

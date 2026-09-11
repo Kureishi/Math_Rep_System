@@ -176,6 +176,32 @@ class NumericalCrossCheckResult:
 _CROSS_CHECK_RELATIVE_TOLERANCE = 1e-4
 
 
+def _defined_function(eq_sympy: sp.Eq):
+    """The function this equation actually DEFINES the derivative of --
+    i.e. whatever's inside the Derivative(...) it contains -- NOT just
+    any AppliedUndef atom the equation happens to mention.
+
+    This distinction is a real, previously-shipped bug: a coupled
+    equation like Eq(Derivative(B(t), t), k1*A(t) - k2*B(t)) contains
+    BOTH A(t) and B(t) as AppliedUndef atoms (A(t) appears
+    undifferentiated on the right), so `next(iter(eq.atoms(AppliedUndef)))`
+    picks an ARBITRARY one of the two -- Python set iteration order
+    depends on hash values, and Python randomizes string hashing (and
+    therefore, transitively, sympy Symbol/Function hashing) per process
+    by default, so this silently grabbed the wrong function in SOME
+    process runs and the right one in others, corrupting the derived
+    ODE order and numeric right-hand side intermittently. That's what
+    test_correct_coupled_system_confirmed_by_independent_integration
+    caught: the same test, unchanged, failed in one interpreter
+    invocation and passed in the next, purely from hash-seed
+    randomization -- the actual signature of this exact bug class."""
+    derivatives = eq_sympy.atoms(sp.Derivative)
+    funcs = {d.expr for d in derivatives if isinstance(d.expr, AppliedUndef)}
+    if len(funcs) != 1:
+        return None
+    return next(iter(funcs))
+
+
 def numerical_cross_check(model: ProblemModel, group: list[Equation],
                             solutions: dict[str, sp.Eq]) -> NumericalCrossCheckResult:
     """A SECOND, INDEPENDENT solve path for an initial-value ODE problem,
@@ -214,7 +240,7 @@ def numerical_cross_check(model: ProblemModel, group: list[Equation],
     """
     orders = []
     for eq in group:
-        func = next(iter(eq.sympy_eq.atoms(AppliedUndef)), None)
+        func = _defined_function(eq.sympy_eq)
         if func is None:
             return NumericalCrossCheckResult(applicable=False,
                                                reason="Could not identify the function in this equation.")
@@ -267,7 +293,10 @@ def numerical_cross_check(model: ProblemModel, group: list[Equation],
 
     rhs_exprs = []
     for eq in group:
-        func = next(iter(eq.sympy_eq.atoms(AppliedUndef)))
+        func = _defined_function(eq.sympy_eq)
+        if func is None:
+            return NumericalCrossCheckResult(applicable=False,
+                                               reason=f"Could not identify the function in {eq.name}.")
         deriv = func.diff(t)
         try:
             solved = sp.solve(eq.sympy_eq, deriv)
