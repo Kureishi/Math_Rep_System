@@ -60,6 +60,7 @@ def build_dependency_graph(model: ProblemModel) -> tuple[list[GraphNode], list[G
     seen_edges: set[tuple[str, str]] = set()
 
     for e in eqs:
+        assert e.sympy_eq is not None  # guaranteed by eqs's filter above
         eq_id = f"eq:{e.name}"
         all_syms = sorted(s.name for s in e.sympy_eq.free_symbols)
 

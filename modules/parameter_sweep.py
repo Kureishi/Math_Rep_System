@@ -107,12 +107,16 @@ def sweep_parameters(model: ProblemModel, target: str, sweep_values: dict) -> Sw
         real_vals = raw.real
         result_grid = np.where(is_real & np.isfinite(real_vals), real_vals, np.nan)
 
-    rows = []
+    rows: list[dict[str, float | None]] = []
     it = np.nditer(result_grid, flags=["multi_index"])
     for val in it:
+        val_scalar = val.item()  # type: ignore[attr-defined]  # numpy's nditer stub mistypes
+        # the per-element loop variable as a tuple-of-arrays; at runtime, with just the
+        # multi_index flag (no per-operand flags), each `val` is genuinely a 0-d array
+        # element and .item() works exactly as expected -- a stub inaccuracy, not a real issue
         idx = it.multi_index
-        row = {s: float(sweep_values[s][idx[i]]) for i, s in enumerate(swept_symbols)}
-        row[target] = None if np.isnan(val) else float(val)
+        row: dict[str, float | None] = {s: float(sweep_values[s][idx[i]]) for i, s in enumerate(swept_symbols)}
+        row[target] = None if np.isnan(val_scalar) else float(val_scalar)
         rows.append(row)
 
     return SweepResult(target=target, swept_symbols=swept_symbols, rows=rows)

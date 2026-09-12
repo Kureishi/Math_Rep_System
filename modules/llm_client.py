@@ -86,7 +86,11 @@ class LMStudioClient:
                     {"role": "user", "content": user},
                 ],
             )
-            return resp.choices[0].message.content
+            content = resp.choices[0].message.content
+            if content is None:
+                raise LLMOutputError("The model returned an empty response (no text content) -- "
+                                      "try again or check LM Studio's loaded model.")
+            return content
         except Exception as e:  # noqa: BLE001
             # Logged HERE, at the one gateway every LLM call in the app
             # goes through, rather than in each of the many try/except
@@ -130,7 +134,11 @@ class LMStudioClient:
                 },
             ],
         )
-        return resp.choices[0].message.content
+        content = resp.choices[0].message.content
+        if content is None:
+            raise LLMOutputError("The model returned an empty response (no text content) -- "
+                                  "try again or check LM Studio's loaded model.")
+        return content
 
     def vision_extract_work(self, image_bytes: bytes, mime_type: str = "image/png",
                               model: str | None = None) -> str:
@@ -177,7 +185,11 @@ class LMStudioClient:
                 },
             ],
         )
-        return resp.choices[0].message.content
+        content = resp.choices[0].message.content
+        if content is None:
+            raise LLMOutputError("The model returned an empty response (no text content) -- "
+                                  "try again or check LM Studio's loaded model.")
+        return content
 
 
 class LLMOutputError(Exception):

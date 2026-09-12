@@ -113,8 +113,8 @@ def check_sig_figs(known_value_texts: dict[str, str], answer_value: float,
     docstring for why). Returns None when there's nothing to compare (no
     known values with countable precision) rather than a note claiming
     false confidence."""
-    input_figures = [count_significant_figures(text) for text in known_value_texts.values()]
-    input_figures = [f for f in input_figures if f is not None]
+    input_figures_raw = [count_significant_figures(text) for text in known_value_texts.values()]
+    input_figures = [f for f in input_figures_raw if f is not None]
     if not input_figures:
         return None
 

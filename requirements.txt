@@ -21,3 +21,4 @@ pytesseract==0.3.13
 matplotlib==3.10.8
 fpdf2==2.8.8
 pypdf==5.9.0
+pydantic==2.13.5

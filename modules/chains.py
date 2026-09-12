@@ -113,7 +113,9 @@ def create_chain(name: str) -> int:
             "INSERT INTO chains (name, created_at) VALUES (?, ?)",
             (name, datetime.now().isoformat(timespec="seconds")),
         )
-        return cur.lastrowid
+        new_id = cur.lastrowid
+        assert new_id is not None, "INSERT did not produce a rowid -- should be unreachable"
+        return new_id
 
 
 def list_chains() -> list[dict]:
@@ -386,6 +388,7 @@ def sweep_step_binding(chain_id: int, position: int, symbol: str,
             ]
             set_step_bindings(chain_id, position, swept_bindings)
             resolved = load_chain(chain_id)
+            assert resolved is not None, "chain_id must exist -- it was just loaded/modified above"
             outputs = {s.position: s.output_value for s in resolved.steps}
             rows.append({"value": value, "outputs": outputs})
     finally:

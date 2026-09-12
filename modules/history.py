@@ -19,6 +19,7 @@ from modules.verifier import VerificationReport, CheckResult
 from modules.solver import SolutionStep
 from modules.similarity import problem_shape, find_similar_shapes
 from modules.concept_index import concept_tags_for_model
+from modules.db_migrations import apply_migrations
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "history.db"
 
@@ -29,22 +30,7 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "history.db"
 MAX_HISTORY_RECORDS = 100
 
 
-def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    # WAL (write-ahead log) instead of the default rollback-journal mode:
-    # a crash or kill mid-write is much less likely to leave the file in
-    # a bad state, and it tolerates a second reader/writer (e.g. two
-    # browser tabs open on the same session) without immediately hitting
-    # "database is locked". synchronous=NORMAL is the safe pairing with
-    # WAL (still durable against an OS crash, just not against a full
-    # power loss mid-write, an acceptable tradeoff for a local personal
-    # tool). busy_timeout makes SQLite retry for a few seconds instead of
-    # raising "database is locked" immediately if a brief write overlaps
-    # from another connection, rather than surfacing a raw error to the UI.
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+def _migration_001_initial_schema(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS problems (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,24 +41,6 @@ def _connect() -> sqlite3.Connection:
             payload TEXT NOT NULL
         )
     """)
-    # equation_shapes was added after the table above already existed in
-    # the wild (K's own local history.db predates it) -- ALTER TABLE ADD
-    # COLUMN is the safe migration path; SQLite has no "ADD COLUMN IF NOT
-    # EXISTS", so the duplicate-column error on an already-migrated DB is
-    # simply swallowed rather than checked for up front.
-    try:
-        conn.execute("ALTER TABLE problems ADD COLUMN equation_shapes TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    # concept_tags: same migration pattern as equation_shapes above, for
-    # concept_index.py's named-formula/domain tags -- see history.save()
-    # and list_concepts()/problems_for_concept() below.
-    try:
-        conn.execute("ALTER TABLE problems ADD COLUMN concept_tags TEXT")
-    except sqlite3.OperationalError:
-        pass
-
     # personalized error-pattern tracking: persists grading.py's own
     # formula/arithmetic classification per "grade my work" submission,
     # separate from the `problems` table above (a submission may or may
@@ -91,6 +59,69 @@ def _connect() -> sqlite3.Connection:
             equation_shapes TEXT
         )
     """)
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
+    """Used only by the two migrations below that replicate schema
+    changes which, for anyone with a history.db from before this
+    migration framework existed, may ALREADY have been applied via the
+    old ad-hoc `ALTER TABLE ... except OperationalError: pass` pattern
+    -- so schema_version starting fresh at 0 on such a database must
+    not choke re-adding a column that's already there. Every migration
+    added AFTER this framework's introduction can use a plain
+    `conn.execute("ALTER TABLE ...")` directly instead, since
+    schema_version now genuinely tracks what has and hasn't run."""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migration_002_add_equation_shapes(conn: sqlite3.Connection) -> None:
+    _add_column_if_missing(conn, "problems", "equation_shapes", "TEXT")
+
+
+def _migration_003_add_concept_tags(conn: sqlite3.Connection) -> None:
+    _add_column_if_missing(conn, "problems", "concept_tags", "TEXT")
+
+
+# Ordered, append-only: migrations[i] takes the schema from version i to
+# i+1. To change the schema going forward, ADD a new migration function
+# to the end of this list -- never edit an already-shipped one (a
+# database that already applied it would silently skip the new
+# behavior, since apply_migrations only runs what schema_version says
+# hasn't happened yet).
+_MIGRATIONS = [_migration_001_initial_schema, _migration_002_add_equation_shapes,
+               _migration_003_add_concept_tags]
+
+
+def _connect() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    # WAL (write-ahead log) instead of the default rollback-journal mode:
+    # a crash or kill mid-write is much less likely to leave the file in
+    # a bad state, and it tolerates a second reader/writer (e.g. two
+    # browser tabs open on the same session) without immediately hitting
+    # "database is locked". synchronous=NORMAL is the safe pairing with
+    # WAL (still durable against an OS crash, just not against a full
+    # power loss mid-write, an acceptable tradeoff for a local personal
+    # tool). busy_timeout makes SQLite retry for a few seconds instead of
+    # raising "database is locked" immediately if a brief write overlaps
+    # from another connection, rather than surfacing a raw error to the UI.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    apply_migrations(conn, _MIGRATIONS)
+    # explicit commit here, not left to the caller: schema_version's own
+    # bookkeeping (INSERT/UPDATE, both DML) opens an implicit transaction
+    # under sqlite3's default isolation_level, and that transaction then
+    # covers every migration's DDL statements too -- a caller that uses
+    # `with _connect() as conn:` gets a commit for free on clean exit,
+    # but one that calls `_connect().close()` directly does NOT, and
+    # would silently roll back the schema setup on close(). Committing
+    # here makes schema setup durable unconditionally, regardless of how
+    # the connection is used afterward.
+    conn.commit()
     return conn
 
 
@@ -137,6 +168,7 @@ def save(problem_text: str, model: ProblemModel, report: VerificationReport,
              int(report.passed), json.dumps(payload), shapes_json, concepts_json),
         )
         new_id = cur.lastrowid
+        assert new_id is not None, "INSERT did not produce a rowid -- should be unreachable"
         _prune_old_records(conn)
         return new_id
 
@@ -304,6 +336,7 @@ def record_grading(target: str, domain: str | None, category: str, subtype: str 
              json.dumps(sorted(equation_shapes)) if equation_shapes else None),
         )
         new_id = cur.lastrowid
+        assert new_id is not None, "INSERT did not produce a rowid -- should be unreachable"
         _prune_old_grading_records(conn)
         return new_id
 
@@ -336,7 +369,7 @@ def _pattern_message(category: str, subtype: str | None, count: int, days: int) 
         "multiplication": "a multiplication-step error",
         "division": "a division-step error",
         "addition": "an addition-step error",
-    }.get(subtype, "an arithmetic error")
+    }.get(subtype or "", "an arithmetic error")
     return f"You've made {subtype_phrase} {count} times {window}."
 
 
@@ -364,7 +397,7 @@ def summarize_error_patterns(days: int = 7, min_count: int = _PATTERN_THRESHOLD)
     patterns = [
         {"category": category, "subtype": subtype, "count": count,
          "message": _pattern_message(category, subtype, count, days)}
-        for (category, subtype), count in counts.items() if count >= min_count
+        for (category, subtype), count in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+        if count >= min_count
     ]
-    patterns.sort(key=lambda p: p["count"], reverse=True)
     return patterns

@@ -115,8 +115,8 @@ def _render_entry(entry: JournalEntry) -> list[str]:
     if entry.report.sympy_numeric_answers:
         lines.append("**Results:**")
         lines.append("")
-        for name, value in entry.report.sympy_numeric_answers.items():
-            lines.append(f"- {name} = {value:g}")
+        for name, answer_value in entry.report.sympy_numeric_answers.items():
+            lines.append(f"- {name} = {answer_value:g}")
         lines.append("")
 
     failed_checks = [c for c in entry.report.checks if not c.passed]

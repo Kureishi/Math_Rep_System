@@ -90,7 +90,7 @@ def propagate_uncertainty(expr: sp.Expr, values: dict[sp.Symbol, float],
         return None
     total = variance ** 0.5
     relative = (total / abs(nominal)) if nominal != 0 else None
-    dominant = max(contributions, key=contributions.get)
+    dominant = max(contributions, key=lambda k: contributions[k])
     return UncertaintyResult(nominal=nominal, uncertainty=total, relative_uncertainty=relative,
                                contributions=contributions, dominant_source=dominant)
 

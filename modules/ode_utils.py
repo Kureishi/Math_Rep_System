@@ -87,7 +87,9 @@ def solve_ode(model: ProblemModel) -> dict[str, sp.Eq]:
     result: dict[str, sp.Eq] = {}
 
     for group in group_coupled_odes(ode_equations):
-        sympy_eqs = [e.sympy_eq for e in group]
+        sympy_eqs = [e.sympy_eq for e in group if e.sympy_eq is not None]  # redundant filter,
+        # narrows the type for mypy -- ode_equations (and therefore every group drawn from it)
+        # was already filtered on this above
         func_names = set()
         for e in sympy_eqs:
             func_names |= _funcs_used(e)
@@ -135,6 +137,8 @@ def verify_coupled_solution(group: list[Equation], solutions: dict[str, sp.Eq]) 
     understand cross-coupling between equations."""
     sol_map = {}
     for eq in group:
+        assert eq.sympy_eq is not None  # callers only ever pass groups drawn from a
+        # kind == "ode" and sympy_eq is not None filtered list -- see solve_ode/group_coupled_odes
         for f in eq.sympy_eq.atoms(AppliedUndef):
             name = str(f.func)
             if name in solutions:
@@ -142,6 +146,7 @@ def verify_coupled_solution(group: list[Equation], solutions: dict[str, sp.Eq]) 
 
     worst_residual = sp.Integer(0)
     for eq in group:
+        assert eq.sympy_eq is not None
         lhs = eq.sympy_eq.lhs.subs(sol_map).doit()
         rhs = eq.sympy_eq.rhs.subs(sol_map)
         try:
@@ -286,7 +291,9 @@ def numerical_cross_check(model: ProblemModel, group: list[Equation],
                                            reason="Not every function in this group has a plain "
                                                   "y(t0)=value initial condition to integrate from.")
 
-    t = next(iter(group[0].sympy_eq.atoms(AppliedUndef))).args[0]
+    first_eq = group[0].sympy_eq
+    assert first_eq is not None  # guaranteed: group drawn from an already-filtered equation list
+    t = next(iter(first_eq.atoms(AppliedUndef))).args[0]
     known_values = {sp.Symbol(v.symbol): v.known_value for v in model.variables
                     if v.known_value is not None}
     applied_by_name = {name: sp.Function(name)(t) for name in func_order}
@@ -328,8 +335,8 @@ def numerical_cross_check(model: ProblemModel, group: list[Equation],
         return [f(_t, *y) for f in rhs_funcs]
 
     try:
-        rate0 = np.linalg.norm(rhs(t0, y0))
-        scale0 = max(np.linalg.norm(y0), 1e-9)
+        rate0 = float(np.linalg.norm(rhs(t0, y0)))
+        scale0 = max(float(np.linalg.norm(y0)), 1e-9)
         window = 3.0 / (rate0 / scale0) if rate0 / scale0 > 1e-9 else 5.0
         window = min(max(window, 1e-6), 1e6)  # guard against a pathological/degenerate estimate
     except Exception:  # noqa: BLE001

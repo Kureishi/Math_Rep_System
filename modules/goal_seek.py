@@ -154,7 +154,7 @@ def goal_seek(model: ProblemModel, target: str, target_value: float, seek_symbol
     # for the caller to flag, so keep the unfiltered set if filtering
     # would empty it
     domain = var_by_symbol[seek_symbol].domain
-    predicate = _DOMAIN_PREDICATES.get(domain)
+    predicate = _DOMAIN_PREDICATES.get(domain or "")
     if predicate is not None:
         filtered = [v for v in real_solutions if predicate(v)]
         if filtered:

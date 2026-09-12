@@ -81,6 +81,9 @@ def regression_inference(xs: list[float], ys: list[float], family: str, degree: 
     if rd.error:
         return RegressionInferenceResult(error=rd.error)
 
+    assert rd.design is not None and rd.target is not None  # guaranteed by the error check
+    # above -- regression_design_matrix() only returns error=None alongside a populated
+    # design/target pair
     design, target = rd.design, rd.target
     n, p = design.shape
     dof = n - p
@@ -169,6 +172,9 @@ def residual_diagnostics(xs: list[float], ys: list[float], family: str, degree: 
     if rd.error:
         return ResidualDiagnosticsResult(error=rd.error)
 
+    assert rd.design is not None and rd.target is not None  # guaranteed by the error check
+    # above -- regression_design_matrix() only returns error=None alongside a populated
+    # design/target pair
     design, target = rd.design, rd.target
     n, p = design.shape
     if n < 4:
@@ -270,6 +276,9 @@ def bayesian_linear_regression(xs: list[float], ys: list[float], family: str, de
     if rd.error:
         return BayesianRegressionResult(error=rd.error)
 
+    assert rd.design is not None and rd.target is not None  # guaranteed by the error check
+    # above -- regression_design_matrix() only returns error=None alongside a populated
+    # design/target pair
     design, target = rd.design, rd.target
     n, p = design.shape
     if n <= p:

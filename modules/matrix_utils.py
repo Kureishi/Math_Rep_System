@@ -45,7 +45,7 @@ class MatrixSystemResult:
     unique: bool
     solution: dict[str, sp.Expr] | None
     classification: str                   # human-readable summary
-    computation_notes: list[str] = None   # e.g. "Eigenvalue computation timed out..." --
+    computation_notes: list[str] | None = None   # e.g. "Eigenvalue computation timed out..." --
                                             # non-None fields above are trustworthy even when
                                             # this is populated; it only flags what got skipped
 
@@ -123,7 +123,9 @@ def build_linear_system(equations: list[Equation], unknown_symbols: list[str],
     if len(eqs) < 2:
         return None
 
-    exprs = [sp.expand((e.sympy_eq.lhs - e.sympy_eq.rhs).subs(knowns)) for e in eqs]
+    exprs = [sp.expand((e.sympy_eq.lhs - e.sympy_eq.rhs).subs(knowns)) for e in eqs
+             if e.sympy_eq is not None]  # redundant filter, narrows the type for mypy -- eqs
+    # was already filtered on this above
 
     present = set()
     for ex in exprs:

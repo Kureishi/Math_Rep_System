@@ -22,8 +22,10 @@ import io
 import numpy as np
 import sympy as sp
 import matplotlib
+from typing import cast
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 -- registers 3d projection
 
 from modules.equation_engine import Equation
@@ -49,6 +51,8 @@ def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, floa
                          x_range: tuple[float, float], y_target: str | None = None,
                          x_log: bool = False, y_log: bool = False,
                        fmt: str = "png") -> bytes:
+    if eq.sympy_eq is None:
+        raise ValueError(f"Equation {eq.name!r} has no parsed sympy expression to plot.")
     x = sp.Symbol(x_symbol)
     if x_log:
         lo = max(x_range[0], 1e-6)
@@ -94,6 +98,8 @@ def snapshot_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
                             x_range: tuple[float, float], y_range: tuple[float, float],
                             z_target: str | None = None, resolution: int = 50,
                        fmt: str = "png") -> bytes:
+    if eq.sympy_eq is None:
+        raise ValueError(f"Equation {eq.name!r} has no parsed sympy expression to plot.")
     x, y = sp.Symbol(x_symbol), sp.Symbol(y_symbol)
     xs = np.linspace(x_range[0], x_range[1], resolution)
     ys = np.linspace(y_range[0], y_range[1], resolution)
@@ -213,7 +219,7 @@ def snapshot_vector_plot(vectors: list[tuple[str, list[float]]],
         fig, ax = plt.subplots(figsize=(5.5, 5.5))
         xs = [c[0] for _, c in vectors]
         ys = [c[1] for _, c in vectors]
-        colors = plt.cm.tab10.colors
+        colors = cast(list, cast(ListedColormap, plt.get_cmap("tab10")).colors)
         for i, (name, comps) in enumerate(vectors):
             x, y = comps
             ax.quiver(0, 0, x, y, angles="xy", scale_units="xy", scale=1,
@@ -231,7 +237,7 @@ def snapshot_vector_plot(vectors: list[tuple[str, list[float]]],
     if dim == 3:
         fig = plt.figure(figsize=(6, 6))
         ax = fig.add_subplot(111, projection="3d")
-        colors = plt.cm.tab10.colors
+        colors = cast(list, cast(ListedColormap, plt.get_cmap("tab10")).colors)
         all_vals = [c for _, comps in vectors for c in comps]
         span = max(1.0, max(abs(v) for v in all_vals) * 1.3)
         for i, (name, comps) in enumerate(vectors):
@@ -341,6 +347,8 @@ def snapshot_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
                             z_target: str | None = None, resolution: int = 60,
                             fmt: str = "png") -> bytes:
     """Static counterpart to plotter.build_contour_plot()."""
+    if eq.sympy_eq is None:
+        raise ValueError(f"Equation {eq.name!r} has no parsed sympy expression to plot.")
     x, y = sp.Symbol(x_symbol), sp.Symbol(y_symbol)
     xs = np.linspace(x_range[0], x_range[1], resolution)
     ys = np.linspace(y_range[0], y_range[1], resolution)
@@ -459,7 +467,7 @@ def snapshot_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: st
     """Static counterpart to plotter.build_sweep_heatmap()."""
     fig, ax = plt.subplots(figsize=(7, 5.5))
     im = ax.imshow(z_matrix, aspect="auto", origin="lower", cmap="viridis",
-                     extent=[min(x_values), max(x_values), min(y_values), max(y_values)])
+                     extent=(min(x_values), max(x_values), min(y_values), max(y_values)))
     fig.colorbar(im, ax=ax, label=target_symbol)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)

@@ -47,7 +47,9 @@ class SolutionStep:
 def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dict) -> list[SolutionStep]:
     target = sp.Symbol(target_name)
     eq_objs = [e for e in model.equations if e.kind == "equation" and e.sympy_eq is not None]
-    orig_eqs = [e.sympy_eq for e in eq_objs]
+    orig_eqs = [e.sympy_eq for e in eq_objs if e.sympy_eq is not None]  # redundant filter,
+    # but mypy can't narrow eq_objs's element type from the filter above across this separate
+    # comprehension -- repeating it here is what actually narrows orig_eqs's inferred type
     steps: list[SolutionStep] = []
     if not orig_eqs:
         return steps
@@ -210,7 +212,9 @@ def _inequality_steps_for_target(model: ProblemModel, target_name: str, subs: di
         steps.append(SolutionStep(description=f"Start from constraint: {e.name}",
                                     expression=sp.latex(e.sympy_eq)))
 
-    substituted = [e.sympy_eq.subs(subs) for e in relevant]
+    substituted = [e.sympy_eq.subs(subs) for e in relevant if e.sympy_eq is not None]  # redundant
+    # filter (relevant was already filtered on this) -- repeating it here is what narrows the
+    # comprehension's inferred type; see solver.py's other "redundant filter" comments for why
     if subs:
         readable = ", ".join(f"{k} = {v}" for k, v in subs.items())
         for orig, sub in zip(relevant, substituted):
@@ -241,6 +245,7 @@ def _ode_steps_for_target(model: ProblemModel, target_name: str,
     steps: list[SolutionStep] = []
     if ode_eq is None:
         return steps
+    assert ode_eq.sympy_eq is not None  # guaranteed by ode_eqs's filter above
 
     group = next((g for g in group_coupled_odes(ode_eqs) if ode_eq in g), [ode_eq])
     is_coupled = len(group) > 1
@@ -260,6 +265,7 @@ def _ode_steps_for_target(model: ProblemModel, target_name: str,
         applied_funcs = []
         seen = set()
         for e in group:
+            assert e.sympy_eq is not None  # guaranteed: group's equations all came from ode_eqs
             for f in e.sympy_eq.atoms(AppliedUndef):
                 if str(f.func) not in seen:
                     seen.add(str(f.func))

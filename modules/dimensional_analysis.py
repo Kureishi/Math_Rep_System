@@ -69,7 +69,7 @@ class CandidateFormula:
 class DimensionalAnalysisResult:
     feasible: bool
     degrees_of_freedom: int = 0
-    particular_solution: dict = None
+    particular_solution: dict | None = None
     candidates: list = field(default_factory=list)
     message: str = ""
 

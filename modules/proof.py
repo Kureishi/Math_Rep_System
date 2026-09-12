@@ -23,11 +23,12 @@ not proof) or that isn't equivalent at all.
 """
 import sympy as sp
 from dataclasses import dataclass, field
+from typing import Callable
 
 from modules.equivalence import EquivalenceResult
 from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 
-_STEPS: list[tuple[str, callable]] = [
+_STEPS: list[tuple[str, Callable]] = [
     ("Expand", sp.expand),
     ("Combine into a single fraction", sp.together),
     ("Apply trigonometric identities", sp.trigsimp),
@@ -55,7 +56,7 @@ def build_proof(equivalence_result: EquivalenceResult) -> list[tuple[str, str]] 
     current = diff
     for name, transform in _STEPS:
         try:
-            new_expr = run_with_timeout(transform, current, label=f"proof step: {name}")
+            new_expr: sp.Expr = run_with_timeout(transform, current, label=f"proof step: {name}")
         except ComputationTimeoutError:
             # a single pass in the chain ran long -- skip just this
             # technique and try the next one, rather than losing every

@@ -26,7 +26,7 @@ from sympy.core.function import AppliedUndef
 
 from config import settings
 from modules.llm_client import LMStudioClient
-from modules.equation_engine import ProblemModel, target_kind, symbols_and_functions_used
+from modules.equation_engine import ProblemModel, Equation, target_kind, symbols_and_functions_used
 from modules.units_checker import parse_unit, dimension_of, dims_equivalent, UnitParseError, make_dimension_placeholder
 from modules.matrix_utils import linear_system_view
 from modules.domain_utils import domain_restrictions_for_equation, evaluate_restriction
@@ -429,6 +429,7 @@ def _ode_dimensional_checks(model: ProblemModel, report: VerificationReport, uni
                   if v.is_function and v.symbol in units_map}
 
     for eq in ode_eqs:
+        assert eq.sympy_eq is not None  # guaranteed by ode_eqs's filter above
         deriv_atoms = eq.sympy_eq.atoms(sp.Derivative)
         applied_funcs = eq.sympy_eq.atoms(AppliedUndef)
         func_names_used = {str(f.func) for f in applied_funcs}
@@ -491,6 +492,18 @@ def _inequality_checks(model: ProblemModel, report: VerificationReport):
         )
 
 
+def _applied_func_name(eq: Equation) -> str:
+    """The name of the function an ODE equation defines, e.g. "N" for
+    Derivative(N(t), t) = ... -- pulled out as a helper specifically so
+    the sympy_eq-is-not-None narrowing (guaranteed by every caller
+    filtering on it first) only needs asserting in ONE place instead of
+    at every inline `next(iter(e.sympy_eq.atoms(AppliedUndef)))` call
+    site, several of which are inside comprehensions where a bare
+    assert statement isn't syntactically available."""
+    assert eq.sympy_eq is not None
+    return str(next(iter(eq.sympy_eq.atoms(AppliedUndef))).func)
+
+
 def _ode_checks(model: ProblemModel, report: VerificationReport):
     """ODE-specific verification: rather than a numeric residual, this
     substitutes the solved solution back into the ORIGINAL differential
@@ -518,13 +531,10 @@ def _ode_checks(model: ProblemModel, report: VerificationReport):
     groups = group_coupled_odes(ode_eqs)
 
     for group in groups:
-        names_in_group = ", ".join(sorted({
-            str(next(iter(e.sympy_eq.atoms(AppliedUndef))).func) for e in group
-        }))
+        names_in_group = ", ".join(sorted({_applied_func_name(e) for e in group}))
 
         # if any equation in the group has no solution at all, nothing to verify
-        missing = [e for e in group
-                   if str(next(iter(e.sympy_eq.atoms(AppliedUndef))).func) not in solutions]
+        missing = [e for e in group if _applied_func_name(e) not in solutions]
         if missing:
             for e in missing:
                 report.add(f"ODE solved: {e.name}", False,
@@ -534,7 +544,7 @@ def _ode_checks(model: ProblemModel, report: VerificationReport):
 
         if len(group) == 1:
             eq = group[0]
-            func_name = str(next(iter(eq.sympy_eq.atoms(AppliedUndef))).func)
+            func_name = _applied_func_name(eq)
             solution = solutions[func_name]
             try:
                 ok, remainder = sp.checkodesol(eq.sympy_eq, solution)
@@ -599,6 +609,7 @@ def _recurrence_checks(model: ProblemModel, report: VerificationReport):
     solutions = solve_recurrence(model)
 
     for eq in recurrence_eqs:
+        assert eq.sympy_eq is not None  # guaranteed by recurrence_eqs's filter above
         funcs = eq.sympy_eq.atoms(AppliedUndef)
         if not funcs:
             continue
@@ -650,6 +661,8 @@ def _optimization_checks(model: ProblemModel, report: VerificationReport):
         return
     if not result.critical_points:
         return
+    assert model.objective.sympy_expr is not None  # guaranteed: solve_optimization succeeded above,
+    # which requires a valid parsed objective expression
 
     knowns = _known_substitutions(model)
     obj_expr = model.objective.sympy_expr.subs(knowns)

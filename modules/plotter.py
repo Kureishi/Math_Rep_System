@@ -37,6 +37,8 @@ def build_plot(model: ProblemModel, eq: Equation, x_symbol: str,
               just above zero, since log of a non-positive number is
               undefined.
     """
+    if eq.sympy_eq is None:
+        raise ValueError(f"Equation {eq.name!r} has no parsed sympy expression to plot.")
     x = sp.Symbol(x_symbol)
     if x_log:
         lo = max(x_range[0], 1e-6)
@@ -86,6 +88,8 @@ def build_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
     (x, y) meshgrid; falls back to plotting the equation's residual surface
     (zero-crossing = where the equation is satisfied) otherwise.
     """
+    if eq.sympy_eq is None:
+        raise ValueError(f"Equation {eq.name!r} has no parsed sympy expression to plot.")
     x, y = sp.Symbol(x_symbol), sp.Symbol(y_symbol)
     xs = np.linspace(x_range[0], x_range[1], resolution)
     ys = np.linspace(y_range[0], y_range[1], resolution)
@@ -319,6 +323,8 @@ def build_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
     the standard way to show where a two-variable relationship is
     constant, e.g. reading off exactly which (x, y) combinations give a
     particular z value."""
+    if eq.sympy_eq is None:
+        raise ValueError(f"Equation {eq.name!r} has no parsed sympy expression to plot.")
     x, y = sp.Symbol(x_symbol), sp.Symbol(y_symbol)
     xs = np.linspace(x_range[0], x_range[1], resolution)
     ys = np.linspace(y_range[0], y_range[1], resolution)

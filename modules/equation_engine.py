@@ -38,7 +38,8 @@ from sympy.parsing.sympy_parser import (
     convert_xor,
 )
 
-from modules.llm_client import LMStudioClient, extract_json
+from modules.llm_client import LMStudioClient, extract_json, LLMOutputError
+from typing import Any
 from modules.vector_utils import vector_local_dict, make_vector
 
 TRANSFORMS = standard_transformations + (implicit_multiplication_application, convert_xor)
@@ -425,4 +426,26 @@ def extract_model(client: LMStudioClient, problem_text: str, retry_reason: str |
     raw = client.chat(system=system, user=user,
                        temperature=settings.temperature_extraction, json_mode=True, model=model)
     payload = extract_json(raw)
+    payload = _validate_llm_payload(payload, raw)
     return build_model(payload)
+
+
+def _validate_llm_payload(payload: Any, raw: str) -> dict:
+    """The LLM-JSON validation gate -- see llm_schema.py's module
+    docstring for the full rationale. Isolated into its own function so
+    extract_model() (and paranoid.py's independent second-model
+    extraction, which reuses this same path) both get it automatically,
+    with one consistent error message shape."""
+    from modules.llm_schema import validate_extraction_payload
+    from pydantic import ValidationError
+
+    try:
+        return validate_extraction_payload(payload)
+    except ValidationError as exc:
+        # reformat pydantic's (accurate but verbose/nested) error list
+        # into one line per problem field, e.g.
+        # "equations.0.expression: Field required" -- concise enough to
+        # show directly in the UI's retry/error path
+        problems = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
+        raise LLMOutputError(f"The model's JSON output doesn't match the expected structure: "
+                               f"{problems}", raw_output=raw) from exc

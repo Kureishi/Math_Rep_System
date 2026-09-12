@@ -1,3 +1,45 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.mypy]
+# Pragmatic, not maximal, strictness: this codebase is symbolic-math-
+# heavy (SymPy, SciPy, NumPy), and SymPy in particular ships with no
+# meaningful type stubs, so most of its return types are effectively
+# Any regardless of config -- chasing full strict mode would mean
+# fighting the library, not the code. What IS enforced: no untyped
+# function bodies going unchecked (check_untyped_defs), and no
+# unnoticed reliance on an Optional value without a narrowing check
+# (the union-attr / assignment errors this caught -- see the assert-
+# based narrowing added throughout modules/ specifically because of
+# this config, not decorative).
+#
+# CI (see .github/workflows/tests.yml) only runs this against modules/
+# -- the actual math/verification engine, now fully clean (0 errors
+# across 62 files) -- not app.py. app.py's ~3500 lines lean heavily on
+# st.session_state, a genuinely dynamically-typed dict-like object
+# whose value type depends on which string key you used; type-checking
+# it meaningfully would need extensive per-key annotation for very
+# little payoff, since a session_state type mistake fails loudly and
+# immediately at runtime (Streamlit raises on the spot) rather than
+# silently, unlike the sympy union-attr bugs this config caught in the
+# engine. That's a scoping decision, not an oversight.
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[tool.coverage.run]
+source = ["modules"]
+
+[tool.coverage.report]
+# 84%, just under the ~87% baseline measured when this was set up --
+# enough headroom that routine test additions/removals don't cause
+# flaky CI failures, while still catching the case this exists for: a
+# meaningful chunk of new code shipping with no test coverage at all.
+fail_under = 84
+show_missing = true
+
+

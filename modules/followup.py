@@ -128,6 +128,7 @@ def answer_followup(client: LMStudioClient, model: ProblemModel, report: Verific
         known_var = next((v for v in model.variables
                            if v.symbol == symbol_name and v.known_value is not None), None)
         if known_var is not None and operation in ("multiply", "add", "set") and isinstance(operand, (int, float)):
+            assert known_var.known_value is not None  # guaranteed by the generator filter above
             new_value = _apply_operation(known_var.known_value, operation, operand)
             expr = solve_symbolic_for_target(model, target_name)
             if expr is not None and new_value is not None:

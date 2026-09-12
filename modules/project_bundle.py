@@ -47,8 +47,8 @@ class ImportSummary:
     errors: list = field(default_factory=list)
 
 
-def export_bundle(history_ids: list = None, chain_ids: list = None,
-                   workspace_entries: dict = None) -> str:
+def export_bundle(history_ids: list | None = None, chain_ids: list | None = None,
+                   workspace_entries: dict | None = None) -> str:
     """Returns a JSON string bundling history records, chains, and
     workspace entries. Defaults to EVERY currently-stored history
     record and chain when `history_ids`/`chain_ids` aren't given;

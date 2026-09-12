@@ -193,6 +193,8 @@ def solve_optimization(model: ProblemModel) -> OptimizationResult | None:
     from modules.verifier import _known_substitutions  # local import: see module docstring
 
     obj = model.objective
+    assert obj.sympy_expr is not None  # guaranteed by the guard clause above (same object, obj is
+    # just a local alias for model.objective)
     optimize_vars = [sp.Symbol(name) for name in obj.optimize_over]
     if not optimize_vars:
         return OptimizationResult(error="No optimize_over variable(s) specified.")
@@ -295,6 +297,7 @@ def solve_optimization(model: ProblemModel) -> OptimizationResult | None:
             full_point = {sp.Symbol(k): v for k, v in point.items()}
             full_point.update(knowns)
             for ineq in inequality_constraints:
+                assert ineq.sympy_eq is not None  # guaranteed by inequality_constraints's filter above
                 try:
                     truth = bool(ineq.sympy_eq.subs(full_point))
                 except Exception:  # noqa: BLE001

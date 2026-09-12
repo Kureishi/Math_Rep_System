@@ -65,7 +65,7 @@ def _sample_agreement(e1: sp.Expr, e2: sp.Expr, symbols: list[sp.Symbol]) -> tup
     diff_func = sp.lambdify(symbols, e1 - e2, modules=["math"])
     agree, tried, example_disagreement = 0, 0, None
     rng = random.Random(0)  # deterministic across runs, for reproducible reports
-    combos = []
+    combos: list[tuple[int | float, ...]] = []
     if len(symbols) == 1:
         combos = [(p,) for p in _SAMPLE_POINTS]
     else:

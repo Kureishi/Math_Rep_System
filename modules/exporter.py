@@ -143,9 +143,9 @@ def build_markdown(problem_text: str, model: ProblemModel, report: VerificationR
     L.append(f"**Overall score: {cr.score:.0%}** ({cr.label}) -- {cr.passed_count}/{cr.total_count} "
               f"checks passed.")
     L.append("")
-    for cat, summary in cr.categories.items():
-        mark = "✅" if summary.all_passed else "❌"
-        L.append(f"- {mark} **{cat}:** {summary.passed}/{summary.total}")
+    for cat, cat_summary in cr.categories.items():
+        mark = "✅" if cat_summary.all_passed else "❌"
+        L.append(f"- {mark} **{cat}:** {cat_summary.passed}/{cat_summary.total}")
     L.append("")
     if cr.critical_failures:
         L.append("**Critical failures:**")
@@ -199,11 +199,11 @@ def build_markdown(problem_text: str, model: ProblemModel, report: VerificationR
             L.append(f"_{snap.caption}_")
             L.append("")
 
-    if scenarios and not any("error" in s for s in scenarios):
+    if scenarios and not any("error" in scenario for scenario in scenarios):
         L.append("## Where else this applies")
         L.append("")
-        for s in scenarios:
-            L.append(f"- **{s.get('scenario', '')}** -- {s.get('mapping', '')}")
+        for scenario in scenarios:
+            L.append(f"- **{scenario.get('scenario', '')}** -- {scenario.get('mapping', '')}")
         L.append("")
 
     return "\n".join(L)
@@ -377,9 +377,9 @@ def build_pdf_bytes(problem_text: str, model: ProblemModel, report: Verification
     pdf.multi_cell(0, 5, _safe(f"Overall score: {cr.score:.0%} ({cr.label}) -- "
                                 f"{cr.passed_count}/{cr.total_count} checks passed."),
                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    for cat, summary in cr.categories.items():
-        mark = "[OK]" if summary.all_passed else "[!!]"
-        pdf.multi_cell(0, 5, _safe(f"{mark} {cat}: {summary.passed}/{summary.total}"),
+    for cat, cat_summary in cr.categories.items():
+        mark = "[OK]" if cat_summary.all_passed else "[!!]"
+        pdf.multi_cell(0, 5, _safe(f"{mark} {cat}: {cat_summary.passed}/{cat_summary.total}"),
                         new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     if cr.critical_failures:
         pdf.set_font("Helvetica", "B", 10)
@@ -444,15 +444,15 @@ def build_pdf_bytes(problem_text: str, model: ProblemModel, report: Verification
             pdf.multi_cell(0, 5, _safe(snap.caption), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(2)
 
-    if scenarios and not any("error" in s for s in scenarios):
+    if scenarios and not any("error" in scenario for scenario in scenarios):
         pdf.set_font("Helvetica", "B", 13)
         pdf.multi_cell(0, 8, "Where else this applies", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        for s in scenarios:
+        for scenario in scenarios:
             pdf.set_font("Helvetica", "", 10)
-            pdf.multi_cell(0, 6, _safe(f"- {s.get('scenario', '')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            if s.get("mapping"):
+            pdf.multi_cell(0, 6, _safe(f"- {scenario.get('scenario', '')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            if scenario.get("mapping"):
                 pdf.set_font("Helvetica", "I", 9)
-                pdf.multi_cell(0, 5, _safe(f"  {s['mapping']}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.multi_cell(0, 5, _safe(f"  {scenario['mapping']}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     return bytes(pdf.output())
 

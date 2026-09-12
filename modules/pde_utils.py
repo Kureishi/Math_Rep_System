@@ -222,6 +222,8 @@ def _sine_coefficient_formula(f_expr: sp.Expr, x: sp.Symbol, n: sp.Symbol,
 def _coefficient_at(formula: sp.Expr | None, n: sp.Symbol, method: str, f_expr: sp.Expr,
                      x: sp.Symbol, L: sp.Expr, scale: sp.Expr, k: int) -> sp.Expr:
     if method == "symbolic integration":
+        assert formula is not None  # guaranteed: _sine_coefficient_formula only returns this
+        # method label alongside a non-None formula
         return formula.subs(n, k)
     integrand = scale * f_expr * sp.sin(k * sp.pi * x / L)
     return sp.Integral(integrand, (x, 0, L)).evalf()
@@ -255,7 +257,10 @@ def solve_heat_equation_dirichlet(initial_condition_str: str, length: float = 1.
 
     formula, method = _sine_coefficient_formula(f, x, n, L, sp.Integer(2) / L)
 
-    u_trunc, modes, fit_error, n_used = None, [], None, 0
+    u_trunc: sp.Expr | None = None
+    modes: list[FourierMode] = []
+    fit_error: float | None = None
+    n_used = 0
     for N in _MODE_SCHEDULE:
         terms = []
         modes = []
@@ -322,7 +327,10 @@ def solve_wave_equation_dirichlet(initial_displacement_str: str, initial_velocit
     c_scale = sp.Integer(2) / (n * sp.pi * c / L) / L
     c_formula, c_method = _sine_coefficient_formula(g, x, n, L, c_scale)
 
-    u_trunc, modes, fit_error, n_used = None, [], None, 0
+    u_trunc: sp.Expr | None = None
+    modes: list[FourierMode] = []
+    fit_error: float | None = None
+    n_used = 0
     for N in _MODE_SCHEDULE:
         terms = []
         modes = []
@@ -409,7 +417,10 @@ def solve_heat_equation_neumann(initial_condition_str: str, length: float = 1.0,
         return FourierPDEResult(equation_kind="heat", initial_condition=f,
                                  error="Could not compute Fourier cosine coefficients.")
 
-    u_trunc, modes, fit_error, n_used = None, [], None, 0
+    u_trunc: sp.Expr | None = None
+    modes: list[FourierMode] = []
+    fit_error: float | None = None
+    n_used = 0
     for N in _MODE_SCHEDULE:
         a0 = formula.subs(n, 0) / 2  # the n=0 cosine-series halving, applied once
         terms = [a0]
@@ -479,7 +490,10 @@ def solve_wave_equation_neumann(initial_displacement_str: str, initial_velocity_
         return FourierPDEResult(equation_kind="wave", initial_condition=f,
                                  error="Could not compute Fourier cosine coefficients.")
 
-    u_trunc, modes, fit_error, n_used = None, [], None, 0
+    u_trunc: sp.Expr | None = None
+    modes: list[FourierMode] = []
+    fit_error: float | None = None
+    n_used = 0
     for N in _MODE_SCHEDULE:
         a0 = b_formula.subs(n, 0) / 2
         # n=0 velocity mode: the average initial velocity gives rigid
@@ -590,7 +604,9 @@ def solve_heat_equation_robin(initial_condition_str: str, length: float = 1.0, a
         return FourierPDEResult(equation_kind="heat", initial_condition=f,
                                  error="No eigenvalues found for these Robin boundary conditions.")
 
-    coefficients, terms, modes = [], [], []
+    coefficients: list[float] = []
+    terms: list[sp.Expr] = []
+    modes: list[FourierMode] = []
     for lam in eigenvalues:
         numerator, _ = quad(lambda xv: f_numeric(xv) * np.sin(lam * xv), 0, L)
         denominator, _ = quad(lambda xv: np.sin(lam * xv) ** 2, 0, L)

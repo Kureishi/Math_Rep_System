@@ -29,6 +29,19 @@ jobs:
         # naive implementation (signal.alarm) would silently do nothing
         # on Windows. Testing only on Linux would never have caught
         # that class of bug for real -- it would have just looked green.
+        hash-seed: ["0", "1917"]
+        # PYTHONHASHSEED is randomized per-process by default, which
+        # means set/dict iteration order (and therefore anything that
+        # picks "the first" element out of one without an explicit sort)
+        # can silently differ between runs. A real bug shipped BECAUSE
+        # of this: a function that picked an arbitrary AppliedUndef atom
+        # out of a set passed its test suite in whichever process
+        # happened to hash favorably and failed in others -- entirely
+        # invisible in a CI that always uses Python's default (random,
+        # but often stable within one runner image) seed. Running twice
+        # with two FIXED, different seeds doesn't guarantee catching
+        # every such bug, but it turns "silently hope the seed is
+        # favorable" into "verified across at least two orderings."
 
     steps:
       - name: Check out the repository
@@ -61,5 +74,15 @@ jobs:
         # identically on both.
         run: python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in ['app.py', 'config.py'] + glob.glob('modules/*.py')]"
 
+      - name: Type-check the engine (mypy)
+        # Scoped to modules/ -- see pyproject.toml's [tool.mypy] comment
+        # for why app.py is excluded (Streamlit's dynamically-typed
+        # session_state, not an oversight). Only needs to run once, not
+        # once per hash-seed value -- it doesn't execute anything.
+        if: matrix.hash-seed == '0'
+        run: mypy modules/
+
       - name: Run the test suite
-        run: pytest -q
+        env:
+          PYTHONHASHSEED: ${{ matrix.hash-seed }}
+        run: pytest -q --cov --cov-report=term-missing

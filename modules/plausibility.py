@@ -179,7 +179,8 @@ def check_plausibility(model: ProblemModel, values: dict[str, float]) -> list[Pl
                     notes.append(PlausibilityNote(
                         symbol=symbol, meaning=meaning, value=value, unit=var.unit if var else None,
                         category=category,
-                        message=(f"{meaning} ({symbol}) = {value:.6g} {var.unit or ''} is outside the "
+                        message=(f"{meaning} ({symbol}) = {value:.6g} {(var.unit if var else None) or ''} "
+                                  f"is outside the "
                                   f"typical range for {mr.label} in a {category} problem "
                                   f"({mr.typical_min:g} to {mr.typical_max:g}) -- worth checking against "
                                   "real-world expectations."),

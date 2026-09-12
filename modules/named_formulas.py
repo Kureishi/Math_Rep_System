@@ -105,6 +105,9 @@ def _true_canonical_shape(eq: sp.Eq) -> str:
         rep = sp.srepr(eq.xreplace(mapping))
         if best is None or rep < best:
             best = rep
+    assert best is not None  # itertools.permutations always yields at least one permutation
+    # (even of an empty sequence, it yields exactly one empty tuple), so the loop above always
+    # runs at least once
     return best
 
 
