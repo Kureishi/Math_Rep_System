@@ -72,7 +72,7 @@ jobs:
         # is PowerShell, which doesn't understand it. A pure-Python
         # one-liner needs no shell-specific syntax at all, so it runs
         # identically on both.
-        run: python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in ['app.py', 'config.py'] + glob.glob('modules/*.py')]"
+        run: python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in ['app.py', 'config.py', 'api_server.py'] + glob.glob('modules/*.py')]"
 
       - name: Type-check the engine (mypy)
         # Scoped to modules/ -- see pyproject.toml's [tool.mypy] comment
@@ -80,7 +80,7 @@ jobs:
         # session_state, not an oversight). Only needs to run once, not
         # once per hash-seed value -- it doesn't execute anything.
         if: matrix.hash-seed == '0'
-        run: mypy modules/
+        run: mypy modules/ api_server.py
 
       - name: Run the test suite
         env:

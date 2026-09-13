@@ -96,3 +96,41 @@ def sweep_conversions(value: float, unit: str | None) -> list[tuple[str, float]]
                     results.append((alt, converted))
             return results
     return []
+
+
+# --------------------------------------------------------- preferred unit system
+# Which "system" each alternate unit in _ALTERNATE_PROFILES belongs to,
+# for preferred_conversion() below. A unit not listed in EITHER set
+# (e.g. time units like "s"/"min"/"hr", identical in both systems) is
+# treated as system-neutral -- never suggested as a "conversion" since
+# there's nothing to convert TO within the same system, but also never
+# flagged as needing one.
+_SI_UNITS = {"m", "km", "cm", "mm", "kg", "g", "m/s", "km/hr", "N", "kg*m/s^2", "J", "N*m", "W*s",
+             "W", "J/s", "Pa", "N/m^2", "L", "mL"}
+_IMPERIAL_UNITS = {"ft", "in", "mi", "lb", "mph", "ft/s"}
+
+
+def preferred_conversion(value: float, unit: str | None, system: str) -> tuple[str, float] | None:
+    """Given an answer already expressed in `unit`, returns (alt_unit,
+    converted_value) for the best-matching alternate unit in the
+    requested `system` ("SI" or "imperial") -- built on sweep_conversions
+    (so it only ever offers a unit that module already knows how to
+    convert to/from), just filtered and reduced to the single most
+    relevant suggestion for a person who's said "always show me SI" (or
+    imperial) rather than the full sweep of every alternate.
+
+    Returns None when there's nothing useful to suggest: `system` isn't
+    one of the two recognized values, `unit` is already in the
+    requested system, `unit` is system-neutral (time units, e.g. -- see
+    _SI_UNITS/_IMPERIAL_UNITS above), or the dimension has no
+    alternate tagged for that system in _ALTERNATE_PROFILES at all
+    (Watts, e.g., has no imperial alternate listed)."""
+    if system not in ("SI", "imperial"):
+        return None
+    target_set = _SI_UNITS if system == "SI" else _IMPERIAL_UNITS
+    if unit in target_set:
+        return None
+    for alt_unit, alt_value in sweep_conversions(value, unit):
+        if alt_unit in target_set:
+            return alt_unit, alt_value
+    return None

@@ -63,12 +63,14 @@ from modules.statistical_inference import (
     regression_inference, residual_diagnostics, bayesian_linear_regression, compare_polynomial_degrees,
 )
 from modules.research_journal import build_journal_entry, generate_journal_markdown
+from modules.templates import save_template, list_templates, load_template
+from modules.tutor_mode import check_final_answer_guess
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
 from modules.notebook_export import build_notebook
 from modules.followup import answer_followup
-from modules.unit_conversion import sweep_conversions
+from modules.unit_conversion import sweep_conversions, preferred_conversion
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
 from modules.grading import grade_work, classify_mistake
 from modules.worksheet import generate_worksheet_problems, generate_targeted_worksheet_problems
@@ -333,9 +335,14 @@ def render_curve_fitting_tab():
     if family == "polynomial":
         degree = st.number_input("Degree", min_value=2, max_value=10, value=2, step=1)
     elif family == "custom":
+        _render_template_bar("curve_fit_model", lambda: {
+            "fit_custom_expr": st.session_state.get("fit_custom_expr", ""),
+            "fit_custom_params": st.session_state.get("fit_custom_params", ""),
+        })
         expr_str = st.text_input("Model expression in x and named parameters",
-                                   placeholder="a*sin(x) + b*x + c")
-        params_raw = st.text_input("Parameter names (comma-separated)", placeholder="a, b, c")
+                                   placeholder="a*sin(x) + b*x + c", key="fit_custom_expr")
+        params_raw = st.text_input("Parameter names (comma-separated)", placeholder="a, b, c",
+                                     key="fit_custom_params")
         param_names = [p.strip() for p in params_raw.split(",") if p.strip()]
 
     if st.button("Fit", type="primary"):
@@ -608,6 +615,18 @@ with st.sidebar:
                               "🧮 Tensor calculus", "📔 Research journal", "🚀 Quick start"],
                       key="app_mode")
     _sync_query_param("app_mode")
+
+    # ---- global unit-system preference: applied wherever a numeric
+    # answer's unit is already known (currently the word-problem-solver
+    # results and dimensional analysis) via unit_conversion.preferred_conversion,
+    # so switching this once doesn't mean re-choosing "show me in feet"
+    # every single time -- see unit_conversion.py's module additions.
+    st.session_state.setdefault("preferred_unit_system", "None")
+    st.selectbox("Preferred unit system", ["None", "SI", "imperial"],
+                  key="preferred_unit_system",
+                  help="When an answer's unit is known, also highlight it converted to this "
+                       "system -- leave as None to just see the answer in whatever unit the "
+                       "problem itself used.")
 
     # ---- persistent status panels: these matter across MULTIPLE
     # problems in a session (a recurring mistake, a chain in progress),
@@ -1688,6 +1707,53 @@ def render_pde_tab():
                     st.warning(result.note)
 
 
+def _render_template_bar(category: str, collect_fn):
+    """A compact 'save current inputs as template' / 'load a saved
+    template' bar, reusable across modes. `collect_fn()` returns
+    {session_state_key: value} for whatever this mode's own widgets are
+    keyed by -- loading a template just writes its payload straight
+    back into those same keys, before this mode's own widgets are
+    (re)created further down the SAME function -- the same "write
+    session_state before the widget exists this run" approach
+    render_quick_start_tab() established, just simpler here: a template
+    bar only needs to beat its OWN mode's widgets (created later in the
+    same function), not cross into a different mode's (Quick Start's
+    case, which needed the pending-state+rerun indirection because the
+    sidebar's mode radio is created earlier in the script than ANY
+    mode's own body)."""
+    with st.expander("📋 Templates"):
+        col1, col2 = st.columns(2)
+        with col1:
+            existing = list_templates(category)
+            options = {f"{t.name} ({t.created_at[:10]})": t.id for t in existing}
+            if options:
+                choice = st.selectbox("Load a saved template", list(options.keys()),
+                                        key=f"{category}_template_choice")
+                if st.button("Load", key=f"{category}_template_load"):
+                    tpl = load_template(options[choice])
+                    if tpl is not None:
+                        for k, v in tpl.payload.items():
+                            st.session_state[k] = v
+                        st.rerun()
+            else:
+                st.caption("No saved templates yet.")
+        with col2:
+            new_name = st.text_input("Save current inputs as...", key=f"{category}_template_name")
+            if st.button("Save", key=f"{category}_template_save") and new_name.strip():
+                save_template(new_name, category, collect_fn())
+                st.success(f"Saved '{new_name}'.")
+
+
+def _current_tensor_template_payload() -> dict:
+    coord_str = st.session_state.get("tensor_coords", "theta, phi")
+    n = len([c for c in coord_str.split(",") if c.strip()]) or 2
+    payload = {"tensor_coords": coord_str}
+    for i in range(n):
+        for j in range(n):
+            payload[f"metric_{i}_{j}"] = st.session_state.get(f"metric_{i}_{j}", "0")
+    return payload
+
+
 def render_tensor_calculus_tab():
     """Metric-based tensor calculus -- direct symbolic input, same
     standalone pattern as render_dimensional_analysis_tab. See
@@ -1698,8 +1764,10 @@ def render_tensor_calculus_tab():
                 "Example (2-sphere of radius R, coordinates θ, φ): rows [[R**2, 0], [0, "
                 "R**2*sin(theta)**2]].")
 
-    coord_str = st.text_input("Coordinate names (comma-separated)", key="tensor_coords",
-                                value="theta, phi")
+    _render_template_bar("tensor_metric", _current_tensor_template_payload)
+
+    st.session_state.setdefault("tensor_coords", "theta, phi")
+    coord_str = st.text_input("Coordinate names (comma-separated)", key="tensor_coords")
     coord_names = [c.strip() for c in coord_str.split(",") if c.strip()]
     n_coords = len(coord_names) if coord_names else 2
 
@@ -1713,7 +1781,8 @@ def render_tensor_calculus_tab():
             default_val = default_metric[i][j] if i < 2 and j < 2 and n_coords == 2 else \
                 ("1" if i == j else "0")
             with cols[j]:
-                val = st.text_input(f"g[{i}][{j}]", value=default_val, key=f"metric_{i}_{j}",
+                st.session_state.setdefault(f"metric_{i}_{j}", default_val)
+                val = st.text_input(f"g[{i}][{j}]", key=f"metric_{i}_{j}",
                                       label_visibility="collapsed")
                 _live_parse_preview(val, coord_names)
             row.append(val)
@@ -2619,7 +2688,42 @@ if model:
 
         for target_name, steps in steps_by_target.items():
             st.markdown(f"#### Solving for `{target_name}`")
+
+            # ---- guided/tutor mode: predict-then-reveal instead of a
+            # full wall of steps immediately, plus a graded final-
+            # answer guess (checked against the already-VERIFIED numeric
+            # answer, not a free-form symbolic comparison against
+            # individual steps -- see tutor_mode.py's module docstring
+            # for why intermediate-step grading isn't attempted).
+            tutor_on = st.checkbox("🎓 Tutor mode (reveal one step at a time)",
+                                     key=f"tutor_on_{target_name}")
+            reveal_key = f"tutor_reveal_{target_name}"
+            if tutor_on:
+                st.session_state.setdefault(reveal_key, 0)
+                if target_name in report.sympy_numeric_answers:
+                    guess_col1, guess_col2 = st.columns([3, 1])
+                    with guess_col1:
+                        guess_str = st.text_input(f"What do you think {target_name} equals?",
+                                                    key=f"tutor_guess_{target_name}")
+                    with guess_col2:
+                        st.write("")  # vertical alignment spacer
+                        check_clicked = st.button("Check", key=f"tutor_check_{target_name}")
+                    if check_clicked and guess_str.strip():
+                        result = check_final_answer_guess(guess_str, target_name, report)
+                        st.session_state[f"tutor_feedback_{target_name}"] = result
+                    feedback = st.session_state.get(f"tutor_feedback_{target_name}")
+                    if feedback is not None:
+                        if feedback.error:
+                            st.warning(feedback.error)
+                        else:
+                            (st.success if feedback.correct else st.error)(feedback.detail)
+                reveal_count = st.session_state[reveal_key]
+            else:
+                reveal_count = len(steps)  # tutor mode off -- show everything, as before
+
             for i, step in enumerate(steps, start=1):
+                if i > reveal_count:
+                    break
                 st.markdown(f"**Step {i}: {step.description}**")
                 st.latex(step.expression)
                 if step.explanation:
@@ -2647,6 +2751,12 @@ if model:
                         else:
                             st.info(explain_result.text)
 
+            if tutor_on and reveal_count < len(steps):
+                if st.button(f"👉 Reveal step {reveal_count + 1} of {len(steps)}",
+                              key=f"tutor_reveal_btn_{target_name}"):
+                    st.session_state[reveal_key] += 1
+                    st.rerun()
+
             sympy_val = report.sympy_numeric_answers.get(target_name)
             if sympy_val is not None:
                 if st.button(f"➕ Extract {target_name} to workspace", key=f"extract_{target_name}"):
@@ -2670,6 +2780,14 @@ if model:
                 # declared unit is known -- purely a display convenience,
                 # doesn't touch the verified value itself
                 target_unit = next((v.unit for v in model.variables if v.symbol == target_name), None)
+
+                preferred_system = st.session_state.get("preferred_unit_system", "None")
+                if preferred_system != "None":
+                    preferred = preferred_conversion(sympy_val, target_unit, preferred_system)
+                    if preferred is not None:
+                        alt_unit, alt_val = preferred
+                        st.caption(f"({preferred_system} preference: {alt_val:.6g} {alt_unit})")
+
                 conversions = sweep_conversions(sympy_val, target_unit)
                 if conversions:
                     with st.expander(f"Also equals... ({target_name} in other units)"):
