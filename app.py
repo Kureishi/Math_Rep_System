@@ -65,6 +65,7 @@ from modules.statistical_inference import (
 from modules.research_journal import build_journal_entry, generate_journal_markdown
 from modules.templates import save_template, list_templates, load_template
 from modules.tutor_mode import check_final_answer_guess
+from modules.command_palette import search as palette_search
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
@@ -262,9 +263,21 @@ def _render_statistical_layer(xs, ys, family, degree, expr_str, param_names):
                             "actually trustworthy -- they assume normal, independent, "
                             "constant-variance residuals, and this is where that gets checked "
                             "rather than assumed.")
+                _tooltip_header("Normality", "Shapiro-Wilk test: checks whether the residuals look "
+                                  "like they came from a normal distribution -- the p-values and "
+                                  "confidence intervals above assume this.", level="")
                 (st.success if diag.normality_p_value is None or diag.normality_p_value > 0.05
                  else st.warning)(diag.normality_note)
+                _tooltip_header("Autocorrelation", "Durbin-Watson statistic: checks whether "
+                                  "consecutive residuals are related to each other (e.g. a run of "
+                                  "positive residuals followed by a run of negative ones) rather than "
+                                  "independent -- a value near 2 indicates no autocorrelation.", level="")
                 (st.success if 1.5 <= diag.durbin_watson <= 2.5 else st.warning)(diag.durbin_watson_note)
+                _tooltip_header("Heteroscedasticity", "Breusch-Pagan test: checks whether the "
+                                  "residuals' spread stays roughly constant across the data, or "
+                                  "instead grows/shrinks systematically (e.g. bigger errors at larger "
+                                  "x values) -- the latter would undermine the standard errors above.",
+                                  level="")
                 (st.success if diag.heteroscedasticity_p_value is None or diag.heteroscedasticity_p_value > 0.05
                  else st.warning)(diag.heteroscedasticity_note)
 
@@ -273,7 +286,12 @@ def _render_statistical_layer(xs, ys, family, degree, expr_str, param_names):
                 "Prior strength (how strongly parameters are pulled toward zero)",
                 options=[1e-6, 1e-3, 1e-1, 1.0, 10.0, 100.0], value=1e-6,
                 format_func=lambda v: "diffuse (≈ no prior)" if v <= 1e-3 else f"precision={v:g}",
-                key="bayes_prior_precision")
+                key="bayes_prior_precision",
+                help="A Bayesian 'prior' is a belief about the parameters BEFORE seeing this data -- "
+                      "here, a belief that they're probably close to zero. 'Diffuse' means barely any "
+                      "such belief (the result should closely match an ordinary regression fit); a "
+                      "higher precision means a stronger pull toward zero, useful if you have real "
+                      "reason to expect small parameter values.")
             bayes = bayesian_linear_regression(xs, ys, family, degree=degree, expr_str=expr_str,
                                                  param_names=param_names, prior_precision=prior_precision)
             if bayes.error:
@@ -604,8 +622,96 @@ def render_batch_solver_tab():
 
 
 with st.sidebar:
-    # ---- navigation: which tool is active. Kept at the very top of the
-    # sidebar (rather than a horizontal radio competing with the main
+    # ---- command palette: fuzzy-searchable quick jump across modes.
+    # Placed BEFORE the mode radio deliberately: a "jump" click can then
+    # set st.session_state["app_mode"] directly, in the SAME run, since
+    # no widget with that key has been instantiated yet this run --
+    # unlike Quick Start's cross-mode jumps (triggered from deep inside
+    # a DIFFERENT mode's own body, rendered well after the radio
+    # already exists), which need the pending-state+rerun indirection
+    # near the top of this file. See command_palette.py for the fuzzy-
+    # matching logic and why this is scoped to mode-level jumps only
+    # (Streamlit's st.tabs() has no "jump to sub-tab" API to hook into).
+    st.text_input("🔍 Jump to... (Ctrl/Cmd+K)", key="palette_query",
+                   placeholder="e.g. heat equation, bayesian, curvature")
+    palette_query = st.session_state.get("palette_query", "")
+    if palette_query.strip():
+        palette_matches = palette_search(palette_query, limit=4)
+        if palette_matches:
+            for mode_option in palette_matches:
+                if st.button(mode_option, key=f"palette_jump_{mode_option}", width="stretch"):
+                    st.session_state["app_mode"] = mode_option
+                    st.rerun()
+        else:
+            st.caption("No matching mode.")
+    # best-effort Ctrl/Cmd+K focus shortcut: reaches out of the
+    # component's sandboxed iframe into the parent page (a standard, if
+    # slightly fragile, trick for this in Streamlit -- there's no
+    # supported API for a custom global keyboard shortcut) to focus the
+    # search box above. If a future Streamlit DOM structure change
+    # breaks the selector, this silently just doesn't focus anything --
+    # it can't throw a visible error into the app either way.
+    st.iframe(src="""
+        <script>
+        (function() {
+            const doc = window.parent.document;
+            doc.addEventListener('keydown', function(e) {
+                const isK = e.key === 'k' || e.key === 'K';
+                if ((e.metaKey || e.ctrlKey) && isK) {
+                    e.preventDefault();
+                    const inputs = doc.querySelectorAll('input[type="text"]');
+                    for (const el of inputs) {
+                        if (el.placeholder && el.placeholder.includes('heat equation')) {
+                            el.focus();
+                            break;
+                        }
+                    }
+                }
+            });
+        })();
+        </script>
+    """, height=1)
+
+    # ---- best-effort in-app dark mode: Streamlit's OWN theme setting
+    # (hamburger menu -> Settings -> Choose app theme) already supports
+    # light/dark/system, but it's not very discoverable and can't be
+    # toggled from Python code -- this is a separate, explicit,
+    # visible switch that injects CSS overrides at runtime instead.
+    # Targets stable data-testid selectors (Streamlit's own recommended
+    # hook for custom CSS across versions) rather than CSS custom
+    # properties, since there's no way to verify from here which
+    # variable names a given Streamlit version actually exposes for
+    # override -- data-testid attributes are the more reliably stable
+    # target. Like the Ctrl+K shortcut above, this can't raise a
+    # visible error even if a future Streamlit DOM change breaks a
+    # selector -- it would just silently stop visually applying.
+    st.session_state.setdefault("dark_mode", False)
+    st.checkbox("🌙 Dark mode", key="dark_mode")
+    if st.session_state["dark_mode"]:
+        st.markdown("""
+            <style>
+            [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+                background-color: #0E1117;
+                color: #E8E8E8;
+            }
+            [data-testid="stSidebar"] {
+                background-color: #1C1F26;
+                color: #E8E8E8;
+            }
+            [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
+            [data-testid="stCaptionContainer"], label, .stMarkdown, h1, h2, h3, h4, h5, h6 {
+                color: #E8E8E8 !important;
+            }
+            [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
+            [data-testid="stTextArea"] textarea, [data-baseweb="select"] {
+                background-color: #262B36 !important;
+                color: #E8E8E8 !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+    # ---- navigation: which tool is active. Kept near the very top of
+    # the sidebar (rather than a horizontal radio competing with the main
     # input box, as it used to be) so switching tools doesn't require
     # scrolling past whatever's currently in the main content area.
     _restore_from_query_param("app_mode")
@@ -782,6 +888,7 @@ with st.sidebar:
         with save_cols[1]:
             if st.button("💾 Save as...", key="settings_profile_save") and new_profile_name.strip():
                 save_profile(new_profile_name, settings)
+                st.toast(f"Saved settings profile '{new_profile_name}'", icon="⚙️")
                 st.rerun()
 
         if existing_profiles:
@@ -849,6 +956,7 @@ with st.sidebar:
             st.success(f"Imported {import_summary.history_imported} problem(s), "
                         f"{import_summary.chains_imported} chain(s), and "
                         f"{import_summary.workspace_imported} workspace value(s).")
+            st.toast("Project bundle imported", icon="📦")
             for err in import_summary.errors:
                 st.warning(err)
             if (import_summary.history_imported or import_summary.chains_imported
@@ -1210,7 +1318,12 @@ def render_dimensional_analysis_tab():
     st.success(result.message)
     if result.particular_solution:
         exps = ", ".join(f"{name}^{exp}" for name, exp in result.particular_solution.items())
-        st.write(f"**A particular solution:** {exps}")
+        _tooltip_header("A particular solution:", "One valid exponent combination out of "
+                          "potentially many (see 'degrees of freedom' in the message above) -- "
+                          "'particular' just means this is ONE answer, not necessarily the only one, "
+                          "the way a differential equation's 'particular solution' is one specific "
+                          "solution rather than the whole family.", level="**")
+        st.write(exps)
 
     if result.candidates:
         st.write("### Candidate formulas")
@@ -1299,7 +1412,11 @@ def render_transforms_series_tab():
                     "inverse-transform. Every result is round-tripped through the opposite "
                     "transform and compared back to your input as a check.")
         direction = st.radio("Direction", ["Forward (t → s)", "Inverse (s → t)"],
-                              key="laplace_direction", horizontal=True)
+                              key="laplace_direction", horizontal=True,
+                              help="The Laplace transform turns a function of time t into a function "
+                                    "of a complex frequency-like variable s, often making differential "
+                                    "equations solvable as ordinary algebra -- 'Inverse' undoes that, "
+                                    "turning an s-domain expression back into a function of t.")
         _restore_from_query_param("laplace_expr")
         expr_str = st.text_input("Expression", key="laplace_expr",
                                   placeholder="exp(-2*t)*sin(3*t)" if direction.startswith("Forward")
@@ -1333,7 +1450,12 @@ def render_transforms_series_tab():
                     "x → ∞ -- each numerically checked against the original function to confirm "
                     "the approximation actually improves toward the expansion point.")
         series_kind = st.radio("Kind", ["Taylor / Laurent (finite point)", "Asymptotic (x → ∞)"],
-                                key="series_kind", horizontal=True)
+                                key="series_kind", horizontal=True,
+                                help="Taylor/Laurent: a polynomial-like approximation valid NEAR a "
+                                      "specific point (Laurent allows negative powers too, needed at a "
+                                      "pole). Asymptotic: how the function behaves as x grows without "
+                                      "bound -- a different kind of approximation, valid far away "
+                                      "rather than close up.")
         expr_str_s = st.text_input("Expression (function of x)", key="series_expr",
                                     placeholder="sin(x)")
         _live_parse_preview(expr_str_s, ["x"])
@@ -1342,7 +1464,10 @@ def render_transforms_series_tab():
         with col1:
             if series_kind.startswith("Taylor"):
                 point = st.number_input("Expansion point", value=0.0, key="series_point")
-            order = st.slider("Order", 2, 12, 6, key="series_order")
+            order = st.slider("Order", 2, 12, 6, key="series_order",
+                                help="How many terms to include -- higher order means a more accurate "
+                                      "approximation near the expansion point, at the cost of a longer "
+                                      "expression.")
         result = _persist_on_click(
             "Expand", "series_button", "series_expand_result", bool(expr_str_s.strip()),
             lambda: taylor_series(expr_str_s, point=point, order=order) if series_kind.startswith("Taylor")
@@ -1405,6 +1530,22 @@ def _persist_on_click(button_label: str, button_key: str, session_key: str, read
     if st.button(button_label, key=button_key) and ready:
         st.session_state[session_key] = compute_fn()
     return st.session_state.get(session_key)
+
+
+def _tooltip_header(text: str, explanation: str, level: str = "**") -> None:
+    """A hover-tooltip label for a STATIC piece of text (a results
+    header, a jargon term) -- distinct from the existing st.caption()
+    pattern used throughout this app, which is always-visible inline
+    text rather than something a person hovers to reveal. Streamlit's
+    `help=` parameter (used elsewhere in this file) only exists on
+    interactive widgets, not on st.write/st.markdown output, so a
+    static header needs a different mechanism: the browser's own
+    native title-attribute tooltip via a plain HTML span, which needs
+    no JS and degrades harmlessly (just shows no tooltip) anywhere
+    that doesn't render it."""
+    import html
+    st.markdown(f'<span title="{html.escape(explanation)}" style="border-bottom: 1px dotted; cursor: help;">'
+                f'{level}{html.escape(text)}{level}</span>', unsafe_allow_html=True)
 
 
 def _live_parse_preview(expr_str: str, extra_symbols: list[str] | None = None) -> None:
@@ -1513,7 +1654,9 @@ def render_pde_tab():
         with col1:
             length_h = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_length")
         with col2:
-            alpha_h = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_alpha")
+            alpha_h = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_alpha",
+                                help="How quickly heat spreads through the material -- larger α means "
+                                      "faster diffusion. Units: length²/time.")
         result = _persist_on_click(
             "Solve", "heat_button", "heat_result", bool(ic_heat.strip()),
             lambda: solve_heat_equation_dirichlet(ic_heat, length=length_h, alpha=alpha_h))
@@ -1533,7 +1676,9 @@ def render_pde_tab():
         with col1:
             length_hn = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_n_length")
         with col2:
-            alpha_hn = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_n_alpha")
+            alpha_hn = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_n_alpha",
+                                 help="How quickly heat spreads through the material -- larger α means "
+                                       "faster diffusion. Units: length²/time.")
         result = _persist_on_click(
             "Solve", "heat_n_button", "heat_n_result", bool(ic_heat_n.strip()),
             lambda: solve_heat_equation_neumann(ic_heat_n, length=length_hn, alpha=alpha_hn))
@@ -1553,9 +1698,16 @@ def render_pde_tab():
         with col1:
             length_hr = st.number_input("Length L", value=1.0, min_value=0.01, key="heat_r_length")
         with col2:
-            alpha_hr = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_r_alpha")
+            alpha_hr = st.number_input("Thermal diffusivity α", value=1.0, min_value=0.0001, key="heat_r_alpha",
+                                 help="How quickly heat spreads through the material -- larger α means "
+                                       "faster diffusion. Units: length²/time.")
         with col3:
-            robin_h = st.number_input("Convective coefficient h", value=1.0, min_value=0.0001, key="heat_r_h")
+            robin_h = st.number_input("Convective coefficient h", value=1.0, min_value=0.0001, key="heat_r_h",
+                                help="How strongly this end exchanges heat with its surroundings "
+                                      "(Newton's law of cooling) -- larger h means faster heat loss "
+                                      "there. A Robin (or 'mixed'/'convective') boundary condition "
+                                      "blends the value AND its derivative, unlike Dirichlet (fixes "
+                                      "the value) or Neumann (fixes the derivative).")
         result = _persist_on_click(
             "Solve", "heat_r_button", "heat_r_result", bool(ic_heat_r.strip()),
             lambda: solve_heat_equation_robin(ic_heat_r, length=length_hr, alpha=alpha_hr,
@@ -1577,7 +1729,9 @@ def render_pde_tab():
         with col1:
             length_w = st.number_input("Length L", value=1.0, min_value=0.01, key="wave_length")
         with col2:
-            speed_w = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_speed")
+            speed_w = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_speed",
+                                help="How fast a disturbance travels along the medium -- e.g. "
+                                      "√(tension/density) for a string.")
         result = _persist_on_click(
             "Solve", "wave_button", "wave_result", bool(ic_disp.strip()),
             lambda: solve_wave_equation_dirichlet(ic_disp, ic_vel, length=length_w, wave_speed=speed_w))
@@ -1599,7 +1753,9 @@ def render_pde_tab():
         with col1:
             length_wn = st.number_input("Length L", value=1.0, min_value=0.01, key="wave_n_length")
         with col2:
-            speed_wn = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_n_speed")
+            speed_wn = st.number_input("Wave speed c", value=1.0, min_value=0.0001, key="wave_n_speed",
+                                 help="How fast a disturbance travels along the medium -- e.g. "
+                                       "√(tension/density) for a string.")
         result = _persist_on_click(
             "Solve", "wave_n_button", "wave_n_result", bool(ic_disp_n.strip()),
             lambda: solve_wave_equation_neumann(ic_disp_n, ic_vel_n, length=length_wn, wave_speed=speed_wn))
@@ -1671,9 +1827,17 @@ def render_pde_tab():
                     "verified by comparing against a doubled-resolution solve.")
         col1, col2 = st.columns(2)
         with col1:
-            source_fd = st.text_input("Source term (0 for Laplace's equation)", key="fd_source", value="0")
+            source_fd = st.text_input("Source term (0 for Laplace's equation)", key="fd_source", value="0",
+                                help="A nonzero source turns this into Poisson's equation "
+                                      "(u_xx + u_yy = source) instead of Laplace's equation "
+                                      "(source = 0) -- e.g. a charge density in electrostatics, "
+                                      "or a heat source in steady-state diffusion.")
             _live_parse_preview(source_fd, ["x", "y"])
-            domain_fd = st.text_input("Domain (x, y) → True/False", key="fd_domain", value="x**2+y**2<=1")
+            domain_fd = st.text_input("Domain (x, y) → True/False", key="fd_domain", value="x**2+y**2<=1",
+                                help="Any expression that evaluates to true/false for a given "
+                                      "(x,y) -- points where it's true are solved; points where "
+                                      "it's false use the boundary value. The default is a disk of "
+                                      "radius 1 centered at the origin.")
             _live_parse_preview(domain_fd, ["x", "y"])
         with col2:
             boundary_fd = st.text_input("Boundary value (function of x, y)", key="fd_boundary", value="0")
@@ -1742,6 +1906,7 @@ def _render_template_bar(category: str, collect_fn):
             if st.button("Save", key=f"{category}_template_save") and new_name.strip():
                 save_template(new_name, category, collect_fn())
                 st.success(f"Saved '{new_name}'.")
+                st.toast(f"Template '{new_name}' saved", icon="📋")
 
 
 def _current_tensor_template_payload() -> dict:
@@ -1767,7 +1932,10 @@ def render_tensor_calculus_tab():
     _render_template_bar("tensor_metric", _current_tensor_template_payload)
 
     st.session_state.setdefault("tensor_coords", "theta, phi")
-    coord_str = st.text_input("Coordinate names (comma-separated)", key="tensor_coords")
+    coord_str = st.text_input("Coordinate names (comma-separated)", key="tensor_coords",
+                                help="The names of the independent variables the metric is written "
+                                      "in terms of -- e.g. (θ, φ) for a sphere's usual latitude/"
+                                      "longitude-style angles, or (x, y) for an ordinary flat plane.")
     coord_names = [c.strip() for c in coord_str.split(",") if c.strip()]
     n_coords = len(coord_names) if coord_names else 2
 
@@ -1793,7 +1961,10 @@ def render_tensor_calculus_tab():
     if result is not None and result.error:
         st.error(result.error)
     elif result is not None:
-        st.write(f"**Ricci scalar (overall curvature):** ")
+        _tooltip_header("Ricci scalar (overall curvature):", "A single number summarizing how curved "
+                          "this space is at a point -- zero means flat (locally indistinguishable from "
+                          "ordinary Euclidean space), positive is like a sphere's surface, negative is "
+                          "like a saddle. In 2D it equals 2× the Gaussian curvature.")
         st.latex(sp.latex(result.ricci_scalar))
         if result.is_flat:
             st.info("This metric is flat (zero Riemann tensor everywhere) -- geometrically "
@@ -1818,7 +1989,11 @@ def render_tensor_calculus_tab():
             except (TypeError, ValueError) as exc:
                 st.caption(f"Could not evaluate numerically: {exc}")
 
-        st.write("**Nonzero Christoffel symbols Γᵏ_ᵢⱼ:**")
+        _tooltip_header("Nonzero Christoffel symbols Γᵏ_ᵢⱼ:", "The correction terms that account for "
+                          "how the coordinate basis itself twists and stretches from point to point -- "
+                          "they're what makes a 'straight line' (a geodesic) look curved when written "
+                          "in these coordinates, and what a covariant derivative below adds to an "
+                          "ordinary derivative to compensate for.")
         symbols = nonzero_christoffel_symbols(result)
         if symbols:
             for k, i, j, val in symbols:
@@ -1835,7 +2010,13 @@ def render_tensor_calculus_tab():
                         "computation error.")
 
         st.write("---")
-        st.write("**Covariant derivative of a vector field** (components as functions of the coordinates):")
+        _tooltip_header("Covariant derivative of a vector field (components as functions of the "
+                          "coordinates):",
+                          "The generalization of an ordinary derivative that accounts for the "
+                          "coordinate basis changing from point to point (via the Christoffel symbols "
+                          "above) -- it's what correctly measures how a vector field actually changes "
+                          "along this curved space, rather than picking up spurious 'change' that's "
+                          "really just an artifact of the coordinate system.")
         vec_cols = st.columns(n_coords)
         vec_components = []
         for i in range(n_coords):
@@ -1907,6 +2088,7 @@ def render_research_journal_tab():
                 timestamp = row_by_id.get(eid, {}).get("timestamp", "")
                 entries.append(build_journal_entry(eid, loaded, timestamp=timestamp))
             st.session_state["_journal_markdown"] = generate_journal_markdown(entries, title=title)
+            st.toast(f"Journal '{title}' generated", icon="📔")
 
         journal_md = st.session_state.get("_journal_markdown")
         if journal_md:
@@ -2060,6 +2242,7 @@ if solve_clicked and problem_text.strip():
                                  pdf_bytes=None, plot_snapshots={})
         saved_id = history.save(problem_text, model, report, steps, scenarios)
         st.session_state["last_saved_history_id"] = saved_id
+        st.toast("Saved to history", icon="💾")
 
     except LLMOutputError as e:
         pipeline_failed = True
@@ -2156,6 +2339,7 @@ if model:
                         st.session_state["active_chain_id"] = target_chain_id
                         st.success(f"Added as a step exposing `{send_target}` -- see the sidebar, "
                                     "or switch to Problem chains to wire it up further.")
+                        st.toast(f"Added to chain, exposing `{send_target}`", icon="🔗")
 
     st.caption("Secondary panels are grouped into tabs below -- verification checks, "
                 "exploratory plots, and practice tools -- so the main solution flow "

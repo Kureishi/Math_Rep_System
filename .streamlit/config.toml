@@ -10,3 +10,17 @@
 # uploader, which gives a clearer, upload-specific error message than
 # Streamlit's own generic rejection.
 maxUploadSize = 500
+
+[theme]
+# A deliberately chosen default (not Streamlit's bare defaults) for a
+# more finished, "someone designed this" first impression -- this is
+# the LIGHT theme; the in-app "🌙 Dark mode" sidebar toggle (see app.py)
+# overrides these via CSS custom properties at runtime, since Streamlit
+# itself only supports switching themes at server startup, not from
+# Python code while running.
+base = "light"
+primaryColor = "#2E5EAA"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F4F9"
+textColor = "#1A1A2E"
+font = "sans-serif"
