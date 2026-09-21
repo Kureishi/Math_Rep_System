@@ -97,3 +97,19 @@ def test_validated_payload_still_builds_a_working_model():
     assert len(model.equations) == 1
     assert model.equations[0].sympy_eq is not None
     assert [v.symbol for v in model.variables] == ["F", "m", "a"]
+
+
+def test_geometry_field_validates_and_coerces_numeric_strings():
+    payload = {
+        "equations": [{"expression": "Eq(x, 1)"}],
+        "geometry": {"shape": "triangle", "knowns": {"a": "12", "b": "18", "C": "50"}},
+    }
+    result = validate_extraction_payload(payload)
+    assert result["geometry"]["shape"] == "triangle"
+    assert result["geometry"]["knowns"]["a"] == "12" or float(result["geometry"]["knowns"]["a"]) == 12.0
+
+
+def test_geometry_field_absent_defaults_to_none():
+    payload = {"equations": [{"expression": "Eq(x, 1)"}]}
+    result = validate_extraction_payload(payload)
+    assert result["geometry"] is None

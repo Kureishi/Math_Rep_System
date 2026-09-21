@@ -255,3 +255,75 @@ def test_finite_difference_parse_error():
     from modules.pde_utils import solve_pde_finite_difference_2d
     result = solve_pde_finite_difference_2d(source_str="not @@ valid")
     assert result.error is not None
+
+
+# ---------------------------------------------------------------- time-dependent 2D heat
+def test_2d_heat_matches_known_analytic_solution():
+    """u_xx+u_yy separates exactly for a sin(pi*x)*sin(pi*y) initial
+    condition on the unit square with zero boundary -- a real,
+    independent check of the time-stepping scheme against a known
+    closed form, not just an internal residual."""
+    import numpy as np
+    from modules.pde_utils import solve_heat_equation_2d_dirichlet
+
+    result = solve_heat_equation_2d_dirichlet(
+        "sin(pi*x)*sin(pi*y)", "0", x_range=(0, 1), y_range=(0, 1),
+        alpha=0.5, t_max=0.1, nx=41, ny=41)
+    assert result.error is None
+    assert result.stable
+
+    X, Y = np.meshgrid(result.grid_x, result.grid_y, indexing="ij")
+    final_t = result.times[-1]
+    exact = np.sin(np.pi * X) * np.sin(np.pi * Y) * np.exp(-0.5 * np.pi ** 2 * 2 * final_t)
+    assert np.max(np.abs(result.frames[-1] - exact)) < 1e-3
+
+
+def test_2d_heat_accuracy_improves_with_resolution():
+    """A real convergence check: finer grids should track the known
+    analytic solution more closely, confirming the scheme is genuinely
+    converging rather than coincidentally close at one resolution."""
+    import numpy as np
+    from modules.pde_utils import solve_heat_equation_2d_dirichlet
+
+    errors = []
+    for n in (21, 61):
+        result = solve_heat_equation_2d_dirichlet(
+            "sin(pi*x)*sin(pi*y)", "0", x_range=(0, 1), y_range=(0, 1),
+            alpha=0.5, t_max=0.05, nx=n, ny=n)
+        X, Y = np.meshgrid(result.grid_x, result.grid_y, indexing="ij")
+        final_t = result.times[-1]
+        exact = np.sin(np.pi * X) * np.sin(np.pi * Y) * np.exp(-0.5 * np.pi ** 2 * 2 * final_t)
+        errors.append(np.max(np.abs(result.frames[-1] - exact)))
+    assert errors[1] < errors[0]
+
+
+def test_2d_heat_relaxes_toward_fixed_boundary_value():
+    """A physically meaningful sanity check distinct from the analytic
+    comparison above: starting uniformly at zero with the boundary
+    fixed at a nonzero value, the interior must warm toward that value
+    over time, not stay at zero or diverge."""
+    from modules.pde_utils import solve_heat_equation_2d_dirichlet
+
+    result = solve_heat_equation_2d_dirichlet(
+        "0", "5", x_range=(0, 1), y_range=(0, 1), alpha=1.0, t_max=2.0, nx=21, ny=21)
+    assert result.error is None
+    center_start = result.frames[0][10, 10]
+    center_end = result.frames[-1][10, 10]
+    assert center_start == 0
+    assert center_end > center_start
+    assert abs(center_end - 5.0) < 0.1  # should have nearly reached the boundary value by t=2
+
+
+def test_2d_heat_parse_error_reported_honestly():
+    from modules.pde_utils import solve_heat_equation_2d_dirichlet
+    result = solve_heat_equation_2d_dirichlet("not @@ valid", "0")
+    assert result.error is not None
+
+
+def test_2d_heat_frames_and_times_have_matching_length():
+    from modules.pde_utils import solve_heat_equation_2d_dirichlet
+    result = solve_heat_equation_2d_dirichlet("x*(1-x)*y*(1-y)", "0", t_max=0.05, nx=21, ny=21)
+    assert result.error is None
+    assert len(result.frames) == len(result.times)
+    assert result.times[0] == 0.0
+    assert all(result.times[i] < result.times[i + 1] for i in range(len(result.times) - 1))

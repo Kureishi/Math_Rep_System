@@ -53,7 +53,7 @@ from modules.series_asymptotics import taylor_series, asymptotic_expansion
 from modules.pde_utils import (
     solve_first_order_pde, solve_heat_equation_dirichlet, solve_wave_equation_dirichlet,
     solve_heat_equation_neumann, solve_wave_equation_neumann, solve_heat_equation_robin,
-    solve_laplace_rectangle, solve_pde_finite_difference_2d,
+    solve_laplace_rectangle, solve_pde_finite_difference_2d, solve_heat_equation_2d_dirichlet,
 )
 from modules.tensor_calculus import (
     analyze_metric, nonzero_christoffel_symbols, covariant_derivative_of_vector,
@@ -66,6 +66,7 @@ from modules.research_journal import build_journal_entry, generate_journal_markd
 from modules.templates import save_template, list_templates, load_template
 from modules.tutor_mode import check_final_answer_guess
 from modules.command_palette import search as palette_search
+from modules.geometry_solver import solve_triangle, render_triangle
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
@@ -718,7 +719,8 @@ with st.sidebar:
     mode = st.radio("Mode", ["📝 Word problem solver", "📈 Curve fitting", "🔁 Check equivalence",
                               "📚 Batch solver", "🔗 Problem chains", "🔬 Extraction diff",
                               "📐 Dimensional analysis", "🔄 Transforms & series", "🌡️ PDE solver",
-                              "🧮 Tensor calculus", "📔 Research journal", "🚀 Quick start"],
+                              "🧮 Tensor calculus", "📔 Research journal", "🚀 Quick start",
+                              "📐 Geometry"],
                       key="app_mode")
     _sync_query_param("app_mode")
 
@@ -1338,6 +1340,81 @@ def render_dimensional_analysis_tab():
                     "or non-half-integer exponents).")
 
 
+def render_geometry_tab():
+    """Triangle solving (SSS, SAS, ASA, AAS, and the genuinely ambiguous
+    SSA case) with a labeled schematic -- direct numeric input, same
+    standalone pattern as render_dimensional_analysis_tab. See
+    geometry_solver.py's module docstring for the solving math and why
+    it's careful never to use asin() for an angle that could be obtuse."""
+    st.subheader("📐 Geometry")
+    st.caption("Enter exactly 3 known values (at least one side) to solve a triangle -- the rest "
+                "are found via the law of sines/cosines, with a labeled schematic of the result. "
+                "Leave unknown fields blank.")
+
+    _render_template_bar("triangle", lambda: {
+        f"tri_{k}": st.session_state.get(f"tri_{k}", "") for k in ("a", "b", "c", "A", "B", "C")
+    })
+
+    col_sides, col_angles = st.columns(2)
+    with col_sides:
+        st.write("**Sides**")
+        a_str = st.text_input("a (opposite A)", key="tri_a", placeholder="unknown")
+        b_str = st.text_input("b (opposite B)", key="tri_b", placeholder="unknown")
+        c_str = st.text_input("c (opposite C)", key="tri_c", placeholder="unknown")
+    with col_angles:
+        st.write("**Angles (degrees)**")
+        A_str = st.text_input("A (opposite a)", key="tri_A", placeholder="unknown")
+        B_str = st.text_input("B (opposite b)", key="tri_B", placeholder="unknown")
+        C_str = st.text_input("C (opposite c)", key="tri_C", placeholder="unknown")
+
+    def _collect_knowns() -> dict:
+        raw = {"a": a_str, "b": b_str, "c": c_str, "A": A_str, "B": B_str, "C": C_str}
+        knowns = {}
+        for key, val in raw.items():
+            if val.strip():
+                try:
+                    knowns[key] = float(val)
+                except ValueError:
+                    knowns[key] = None  # surfaced as a parse error below, not silently dropped
+        return knowns
+
+    knowns_preview = _collect_knowns()
+    if any(v is None for v in knowns_preview.values()):
+        bad = [k for k, v in knowns_preview.items() if v is None]
+        st.warning(f"Could not read {', '.join(bad)} as a number.")
+
+    result = _persist_on_click(
+        "Solve", "triangle_solve_button", "triangle_result",
+        len(knowns_preview) == 3 and all(v is not None for v in knowns_preview.values()),
+        lambda: solve_triangle(knowns_preview))
+
+    if result is not None:
+        if result.error:
+            st.error(result.error)
+        else:
+            st.caption(f"Case: {result.case}")
+            if len(result.solutions) > 1:
+                st.info(f"This is the ambiguous SSA case -- {len(result.solutions)} valid triangles "
+                        "match these measurements. Both are shown below.")
+            for i, sol in enumerate(result.solutions):
+                if len(result.solutions) > 1:
+                    st.markdown(f"#### Solution {i + 1}")
+                cols = st.columns(6)
+                for col, (label, val) in zip(cols, [("a", sol.a), ("b", sol.b), ("c", sol.c),
+                                                       ("A", sol.A), ("B", sol.B), ("C", sol.C)]):
+                    with col:
+                        st.metric(label, f"{val:.4g}")
+                if sol.verified:
+                    st.success(f"Verified: angles sum to {sol.angle_sum_check:.6g}° and the law of "
+                                "cosines holds exactly for all three sides.")
+                else:
+                    st.warning(f"Could not fully verify (angle sum {sol.angle_sum_check:.4g}°, "
+                                f"residual {sol.law_of_cosines_residual:.3g}).")
+                fig = render_triangle(sol, title=f"Solution {i + 1}" if len(result.solutions) > 1
+                                       else "Triangle")
+                st.plotly_chart(fig, width="stretch", key=f"triangle_fig_{i}")
+
+
 def render_quick_start_tab():
     """A gallery of one-click example problems, one per major mode --
     discoverability for a project that's grown to 11 modes (several
@@ -1620,9 +1697,10 @@ def render_pde_tab():
     render_dimensional_analysis_tab."""
     st.subheader("🌡️ PDE solver")
     (tab_general, tab_heat_d, tab_heat_n, tab_heat_r, tab_wave_d, tab_wave_n,
-     tab_laplace, tab_fd) = st.tabs([
+     tab_laplace, tab_fd, tab_heat_2d) = st.tabs([
         "First-order PDE", "Heat (fixed ends)", "Heat (insulated)", "Heat (convective)",
-        "Wave (fixed ends)", "Wave (free ends)", "Laplace's equation", "General (finite-difference)"])
+        "Wave (fixed ends)", "Wave (free ends)", "Laplace's equation", "General (finite-difference)",
+        "Heat (2D animated)"])
 
     with tab_general:
         st.caption("First-order (or quasilinear first-order) PDEs in two variables, via SymPy's "
@@ -1869,6 +1947,81 @@ def render_pde_tab():
                                 f"{result.convergence_error:.3g})")
                 else:
                     st.warning(result.note)
+
+    with tab_heat_2d:
+        st.caption("The genuinely TIME-DEPENDENT counterpart to the general finite-difference tab "
+                    "above, which only solves the steady state (one final heatmap, no sense of "
+                    "'watching heat spread over time'). Rectangular domain, Dirichlet boundary -- "
+                    "see solve_heat_equation_2d_dirichlet's docstring for why non-rectangular "
+                    "domains aren't attempted here.")
+        col1, col2 = st.columns(2)
+        with col1:
+            ic_2d = st.text_input("Initial condition (function of x, y)", key="heat2d_ic",
+                                    value="sin(pi*x)*sin(pi*y)")
+            _live_parse_preview(ic_2d, ["x", "y"])
+        with col2:
+            bc_2d = st.text_input("Boundary value (function of x, y)", key="heat2d_bc", value="0")
+            _live_parse_preview(bc_2d, ["x", "y"])
+        col3, col4, col5 = st.columns(3)
+        with col3:
+            width_2d = st.number_input("Width", value=1.0, min_value=0.01, key="heat2d_width")
+        with col4:
+            height_2d = st.number_input("Height", value=1.0, min_value=0.01, key="heat2d_height")
+        with col5:
+            alpha_2d = st.number_input("Thermal diffusivity α", value=0.5, min_value=0.0001,
+                                         key="heat2d_alpha",
+                                         help="How quickly heat spreads through the material -- "
+                                               "larger α means faster diffusion.")
+        grid_n_2d = st.slider("Grid resolution", 21, 61, 31, step=10, key="heat2d_resolution",
+                                help="Higher resolution is more accurate but slower to compute -- "
+                                      "the time-stepping scheme's stable step size shrinks faster "
+                                      "than the grid gets finer.")
+        result = _persist_on_click(
+            "Solve & animate", "heat2d_button", "heat2d_result", True,
+            lambda: solve_heat_equation_2d_dirichlet(
+                ic_2d, bc_2d, (0.0, width_2d), (0.0, height_2d), alpha=alpha_2d,
+                nx=grid_n_2d, ny=grid_n_2d))
+        if result is not None:
+            if result.error:
+                st.error(result.error)
+            else:
+                _render_2d_heat_animation(result)
+                st.success(f"{len(result.frames)} frames, stable time step dt={result.dt_used:.3g} "
+                            f"(computed from the 2D explicit-scheme CFL stability bound).")
+
+
+def _render_2d_heat_animation(result) -> None:
+    """An animated Plotly heatmap scrubbing through the solved time
+    frames via a native play button + slider -- the 2D counterpart to
+    _render_pde_time_animation's 1D line-plot animation."""
+    frames = result.frames
+    vmin, vmax = float(frames.min()), float(frames.max())
+    plotly_frames = [
+        go.Frame(data=[go.Heatmap(z=frames[i].T, x=result.grid_x, y=result.grid_y,
+                                    colorscale="Inferno", zmin=vmin, zmax=vmax)], name=f"{i}")
+        for i in range(len(frames))
+    ]
+    fig = go.Figure(
+        data=[go.Heatmap(z=frames[0].T, x=result.grid_x, y=result.grid_y,
+                           colorscale="Inferno", zmin=vmin, zmax=vmax)],
+        layout=go.Layout(
+            xaxis=dict(title="x"), yaxis=dict(title="y"),
+            updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15,
+                                buttons=[
+                                    dict(label="▶ Play", method="animate",
+                                          args=[None, {"frame": {"duration": 150, "redraw": True},
+                                                          "fromcurrent": True, "transition": {"duration": 0}}]),
+                                    dict(label="⏸ Pause", method="animate",
+                                          args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+                                ])],
+            sliders=[dict(currentvalue={"prefix": "t = "}, x=0.05, len=0.9,
+                           steps=[dict(method="animate", args=[[f"{i}"],
+                                        {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                                        label=f"{result.times[i]:.2g}") for i in range(len(frames))])],
+        ),
+        frames=plotly_frames,
+    )
+    st.plotly_chart(fig, width="stretch", key="heat2d_anim")
 
 
 def _render_template_bar(category: str, collect_fn):
@@ -2158,6 +2311,9 @@ elif mode == "📔 Research journal":
 elif mode == "🚀 Quick start":
     render_quick_start_tab()
     st.stop()
+elif mode == "📐 Geometry":
+    render_geometry_tab()
+    st.stop()
 
 # ---------------------------------------------------------------- input
 tab_text, tab_image = st.tabs(["Text input", "Image input"])
@@ -2299,6 +2455,36 @@ if model:
     if cr.critical_failures:
         st.error("**Critical checks that failed:** " +
                   "; ".join(f"{c.label} -- {c.detail}" for c in cr.critical_failures))
+
+    # ---- geometry schematic: independently solved and verified by the
+    # SAME geometry_solver.py machinery the standalone Geometry mode
+    # uses directly (see equation_engine._parse_geometry's docstring for
+    # why this is a parallel channel rather than folded into the normal
+    # equation-based verification above). Only rendered when the LLM
+    # extraction actually recognized this as a triangle-solving problem
+    # -- most problems have model.geometry is None here, same as if
+    # this whole block didn't exist.
+    if model.geometry is not None and model.geometry.shape == "triangle":
+        geom_result = solve_triangle(model.geometry.knowns)
+        with st.expander("📐 Geometric schematic", expanded=True):
+            if geom_result.error:
+                st.warning(f"Recognized this as a triangle-solving problem, but couldn't solve it: "
+                            f"{geom_result.error}")
+            else:
+                if len(geom_result.solutions) > 1:
+                    st.info(f"This is the ambiguous SSA case -- {len(geom_result.solutions)} valid "
+                            "triangles match these measurements.")
+                for i, sol in enumerate(geom_result.solutions):
+                    if len(geom_result.solutions) > 1:
+                        st.markdown(f"**Solution {i + 1}**")
+                    cols = st.columns(6)
+                    for col, (label, val) in zip(cols, [("a", sol.a), ("b", sol.b), ("c", sol.c),
+                                                           ("A", sol.A), ("B", sol.B), ("C", sol.C)]):
+                        with col:
+                            st.metric(label, f"{val:.4g}")
+                    fig = render_triangle(sol, title=f"Solution {i + 1}" if len(geom_result.solutions) > 1
+                                           else "Triangle")
+                    st.plotly_chart(fig, width="stretch", key=f"word_problem_triangle_fig_{i}")
 
     # ---- send to chain: a one-click shortcut so getting a just-solved
     # problem into a chain doesn't mean re-pasting its text into the

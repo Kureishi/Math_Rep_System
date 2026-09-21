@@ -149,3 +149,86 @@ def test_extract_model_defaults_to_no_override():
 
     extract_model(CapturingClient(), "a problem")
     assert captured["model"] is None
+
+
+# ---------------------------------------------------------------- geometry extraction
+def test_geometry_field_parsed_when_valid():
+    raw = {
+        "problem_domain": "geometry", "variables": [], "equations": [], "solve_for": [], "assumptions": [],
+        "geometry": {"shape": "triangle", "knowns": {"a": "12", "b": "18", "C": "50"}},
+    }
+    model = build_model(raw)
+    assert model.geometry is not None
+    assert model.geometry.shape == "triangle"
+    assert model.geometry.knowns == {"a": 12.0, "b": 18.0, "C": 50.0}
+
+
+def test_geometry_field_absent_when_not_given():
+    raw = {"problem_domain": "mechanics", "variables": [], "equations": [], "solve_for": [], "assumptions": []}
+    model = build_model(raw)
+    assert model.geometry is None
+
+
+def test_geometry_field_degrades_gracefully_with_wrong_number_of_knowns():
+    """Only 2 knowns given (a valid triangle needs exactly 3) -- must
+    degrade to None rather than crash the whole extraction over this
+    OPTIONAL field."""
+    raw = {
+        "problem_domain": "geometry", "variables": [], "equations": [], "solve_for": [], "assumptions": [],
+        "geometry": {"shape": "triangle", "knowns": {"a": "12", "b": "18"}},
+    }
+    model = build_model(raw)
+    assert model.geometry is None
+
+
+def test_geometry_field_ignores_unrecognized_shape():
+    raw = {
+        "problem_domain": "geometry", "variables": [], "equations": [], "solve_for": [], "assumptions": [],
+        "geometry": {"shape": "circle", "knowns": {"a": "12", "b": "18", "C": "50"}},
+    }
+    model = build_model(raw)
+    assert model.geometry is None
+
+
+def test_geometry_field_drops_unrecognized_keys_but_keeps_valid_ones():
+    raw = {
+        "problem_domain": "geometry", "variables": [], "equations": [], "solve_for": [], "assumptions": [],
+        "geometry": {"shape": "triangle",
+                      "knowns": {"a": "12", "b": "18", "C": "50", "not_a_real_key": "99"}},
+    }
+    model = build_model(raw)
+    # the bad key drops out, leaving only 3 valid ones -- still solvable
+    assert model.geometry is not None
+    assert model.geometry.knowns == {"a": 12.0, "b": 18.0, "C": 50.0}
+
+
+def test_geometry_field_does_not_affect_normal_equation_extraction():
+    """The central compatibility guarantee: adding a geometry field
+    alongside normal equations must not change how those equations are
+    parsed at all."""
+    raw = {
+        "problem_domain": "mechanics",
+        "variables": [{"symbol": "F", "meaning": "force"}, {"symbol": "m", "meaning": "mass", "known_value": 2.0},
+                       {"symbol": "a", "meaning": "acceleration", "known_value": 3.0}],
+        "equations": [{"name": "eq1", "expression": "Eq(F, m*a)"}],
+        "solve_for": ["F"], "assumptions": [],
+    }
+    model = build_model(raw)
+    assert model.geometry is None
+    assert len(model.equations) == 1
+    assert model.equations[0].sympy_eq is not None
+
+
+def test_geometry_field_via_validated_llm_schema_payload():
+    """End-to-end through the SAME pydantic validation gate the LLM
+    boundary actually uses (see llm_schema.py), not just build_model()
+    called directly with a hand-built dict."""
+    from modules.llm_schema import validate_extraction_payload
+    raw = {
+        "problem_domain": "geometry", "equations": [],
+        "geometry": {"shape": "triangle", "knowns": {"a": 12, "b": 18, "C": 50}},
+    }
+    validated = validate_extraction_payload(raw)
+    model = build_model(validated)
+    assert model.geometry is not None
+    assert model.geometry.knowns == {"a": 12.0, "b": 18.0, "C": 50.0}

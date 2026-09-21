@@ -78,6 +78,13 @@ class ObjectivePayload(BaseModel):
     optimize_over: Any = None
 
 
+class GeometryPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    shape: str = "triangle"
+    knowns: dict[str, float | str] = Field(default_factory=dict)
+
+
 class ExtractionPayload(BaseModel):
     """The top-level shape build_model() expects. Every field has a
     default matching what build_model() itself falls back to via
@@ -96,6 +103,7 @@ class ExtractionPayload(BaseModel):
     independent_variable: str | None = None
     initial_conditions: list[InitialConditionPayload] = Field(default_factory=list)
     objective: ObjectivePayload | None = None
+    geometry: GeometryPayload | None = None
 
 
 def validate_extraction_payload(payload: Any) -> dict:

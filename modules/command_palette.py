@@ -46,6 +46,8 @@ _ENTRIES = [
     PaletteEntry("🧮 Tensor calculus", ("metric", "christoffel", "ricci", "curvature", "riemann", "geodesic")),
     PaletteEntry("📔 Research journal", ("history", "concepts", "journal", "past problems")),
     PaletteEntry("🚀 Quick start", ("examples", "tutorial", "gallery", "getting started")),
+    PaletteEntry("📐 Geometry", ("triangle", "circle", "angle", "law of sines", "law of cosines",
+                                  "schematic", "sss", "sas", "asa")),
 ]
 
 

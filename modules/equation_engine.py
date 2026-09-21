@@ -77,7 +77,12 @@ matching this exact schema:
     "note": "ONLY include this field if the problem genuinely asks to minimize/maximize/optimize something. null/omit otherwise."
   },
   "solve_for": ["symbols/functions the problem actually asks for, e.g. [\\"a\\", \\"d\\"], [\\"y\\"] for an ODE, or the optimize_over variable(s) for an optimization problem"],
-  "assumptions": ["list any assumptions you had to make"]
+  "assumptions": ["list any assumptions you had to make"],
+  "geometry": {
+    "shape": "triangle",
+    "knowns": {"a": "5", "b": "6", "C": "40"},
+    "note": "ONLY include this field when the problem is FUNDAMENTALLY about solving a triangle's sides/angles from other given sides/angles (e.g. 'a triangular plot has sides 12m and 18m with a 50-degree angle between them, find the third side'). Do NOT include it just because the problem mentions a shape in passing, uses a right-triangle relationship as ONE step in a larger physics problem (e.g. resolving a force into components), or is about area/perimeter/volume rather than solving for unknown sides/angles. 'knowns' must have EXACTLY 3 entries chosen from a, b, c (side lengths, using the standard convention that side a is opposite angle A, etc.) and A, B, C (angles in DEGREES), with at least one side -- three angles alone don't determine a unique triangle's size."
+  }
 }
 
 Rules by equation kind:
@@ -138,6 +143,20 @@ Objective/optimization rules:
   when minimizing surface area in terms of radius alone).
 - Constraints for an optimization problem are just ordinary "equation"/"inequality" entries in
   "equations" -- don't duplicate them inside "objective".
+
+Geometry problems (triangles):
+- Include the top-level "geometry" field (see the schema above) ONLY when the problem is
+  fundamentally "given some sides/angles of a triangle, find the rest" -- not for any problem
+  that merely mentions a triangle, uses one right-triangle relationship as a single step in a
+  larger physics problem, or asks about area/perimeter rather than unknown sides/angles.
+- When "geometry" IS included, you may leave "equations" and "solve_for" empty (or include
+  ordinary equations too, e.g. if the problem ALSO asks for the triangle's area once the sides
+  and angles are known -- area = 0.5*a*b*sin(C) is a perfectly normal "equation" entry that can
+  reference the same a/b/C values) -- the triangle itself is solved separately, by dedicated
+  triangle-solving code, not via these equations.
+- The "knowns" dict uses plain side/angle letters (a, b, c, A, B, C) regardless of what the
+  problem itself calls the triangle's vertices or sides -- map the problem's own labels onto
+  this standard convention yourself (side a opposite angle A, etc.).
 
 General rules:
 - known_value should be a plain number string if given in the problem, else null.
@@ -200,6 +219,25 @@ class Objective:
 
 
 @dataclass
+class GeometrySpec:
+    """A geometric shape recognized in the problem, parallel to (not a
+    replacement for) the normal equation-based extraction above --
+    solved and verified independently by geometry_solver.py's own
+    law-of-sines/cosines machinery (with its own angle-sum and
+    law-of-cosines self-consistency checks), not folded into the
+    sympy-equation verification pipeline the way an ordinary equation
+    would be. See geometry_solver.py's module docstring for why: a
+    dedicated triangle solver is more reliable and directly verifiable
+    than asking the LLM to encode law-of-cosines/sines as sympy
+    equations would be, and it's ALSO exactly the same solver the
+    standalone Geometry mode (see app.py) already uses directly, so
+    there's only one triangle-solving implementation in this codebase
+    to trust, not two that could quietly disagree."""
+    shape: str  # "triangle" is the only currently-supported value
+    knowns: dict[str, float]  # exactly 3 of {a,b,c,A,B,C}; angles in degrees
+
+
+@dataclass
 class ProblemModel:
     problem_domain: str
     variables: list[Variable]
@@ -210,6 +248,7 @@ class ProblemModel:
     independent_variable: str | None = None
     initial_conditions: list[InitialCondition] = field(default_factory=list)
     objective: Objective | None = None
+    geometry: GeometrySpec | None = None
     raw_json: dict = field(default_factory=dict)
 
 
@@ -298,6 +337,38 @@ def _parse_objective(raw_obj: dict | None, local_dict: dict) -> Objective | None
                           optimize_over=optimize_over, parse_error=str(e))
 
 
+def _parse_geometry(raw_geom: dict | None) -> GeometrySpec | None:
+    """Defensive by design, matching _parse_objective just above: a
+    malformed or unsupported 'geometry' field degrades to None (the
+    normal equation-based extraction proceeds exactly as if the field
+    were absent) rather than failing the whole extraction over an
+    OPTIONAL enhancement to it. Actual solving/verification of a valid
+    GeometrySpec happens entirely in geometry_solver.py, not here --
+    this only validates the shape is recognized and 'knowns' has
+    exactly 3 numeric entries from the right letters; whether those 3
+    values combine into an actually-solvable triangle (a valid SSS/SAS/
+    ASA/AAS/SSA case, not e.g. three angles with no side) is
+    geometry_solver.solve_triangle()'s job, reported to the person same
+    as if they'd typed the same values into the standalone Geometry
+    mode directly."""
+    if not raw_geom or raw_geom.get("shape") != "triangle":
+        return None
+    raw_knowns = raw_geom.get("knowns") or {}
+    if not isinstance(raw_knowns, dict):
+        return None
+    knowns = {}
+    for key, val in raw_knowns.items():
+        if key not in ("a", "b", "c", "A", "B", "C"):
+            continue
+        try:
+            knowns[key] = float(val)
+        except (TypeError, ValueError):
+            continue  # drop the one bad entry rather than the whole geometry field
+    if len(knowns) != 3:
+        return None
+    return GeometrySpec(shape="triangle", knowns=knowns)
+
+
 def symbols_and_functions_used(eq: Equation) -> set[str]:
     """Names of both plain symbols AND applied-function names (e.g. 'y' for
     y(t)) referenced in an equation -- needed because solve_for may name
@@ -381,6 +452,7 @@ def build_model(json_payload: dict) -> ProblemModel:
         problem_type = "algebraic"
 
     objective = _parse_objective(json_payload.get("objective"), local_dict)
+    geometry = _parse_geometry(json_payload.get("geometry"))
 
     return ProblemModel(
         problem_domain=json_payload.get("problem_domain", "unspecified"),
@@ -392,6 +464,7 @@ def build_model(json_payload: dict) -> ProblemModel:
         independent_variable=json_payload.get("independent_variable"),
         initial_conditions=initial_conditions,
         objective=objective,
+        geometry=geometry,
         raw_json=json_payload,
     )
 
