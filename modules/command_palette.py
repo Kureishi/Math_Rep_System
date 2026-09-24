@@ -3,7 +3,7 @@ Command-palette-style fuzzy search over the app's navigable targets --
 see app.py's sidebar for where this gets wired to an actual search box
 plus a Ctrl/Cmd+K keyboard shortcut that focuses it.
 
-Scoped to MODE-level jumps (the 12 items in the sidebar radio), not
+Scoped to MODE-level jumps (every item in the sidebar radio), not
 sub-tabs within a mode: Streamlit's st.tabs() has no programmatic
 "jump to tab index" API -- each tab's content is shown/hidden entirely
 client-side, with no server-side concept of "which tab is active" to
@@ -14,7 +14,7 @@ sub-tab specifically -- Streamlit genuinely cannot do that without a
 custom-built JS component, which is a much heavier undertaking than a
 search box justifies here. Landing on the right MODE and letting the
 person pick the sub-tab themselves is still a real improvement over
-scanning a 12-item list by eye, especially once a query's keywords
+scanning the mode list by eye, especially once a query's keywords
 (below) cover terms that don't appear in the sidebar label at all --
 "heat equation" finding the PDE solver, e.g.
 """
@@ -49,6 +49,16 @@ _ENTRIES = [
     PaletteEntry("📐 Geometry", ("triangle", "circle", "angle", "law of sines", "law of cosines",
                                   "schematic", "sss", "sas", "asa")),
 ]
+
+
+# The single source of truth for the sidebar's mode list, in display order.
+# app.py's mode radio is built from this (not from its own copy of the
+# labels), and ui/__init__.py's dispatch table is checked against it in
+# tests/test_app_modes.py -- so adding a mode means adding one
+# PaletteEntry here plus one dispatch entry, and forgetting either fails
+# a test instead of silently shipping a mode the palette can't find (or a
+# palette entry that jumps to a mode with no page behind it).
+MODE_LABELS: list[str] = [e.mode for e in _ENTRIES]
 
 
 def search(query: str, limit: int = 5) -> list[str]:

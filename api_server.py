@@ -18,7 +18,7 @@ Run with:
     uvicorn api_server:app --reload
 Then see the auto-generated interactive docs at http://localhost:8000/docs
 
-Deliberately NOT covering all 12 of the Streamlit app's modes -- these
+Deliberately NOT covering every one of the Streamlit app's modes -- these
 four (structured problem solving, curve fitting, equivalence checking,
 dimensional analysis) are the ones with the clearest "send me JSON, get
 back JSON" shape and the least UI-specific state (no session_state,

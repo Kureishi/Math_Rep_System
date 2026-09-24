@@ -16,14 +16,15 @@ testpaths = ["tests"]
 #
 # CI (see .github/workflows/tests.yml) only runs this against modules/
 # -- the actual math/verification engine, now fully clean (0 errors
-# across 62 files) -- not app.py. app.py's ~3500 lines lean heavily on
-# st.session_state, a genuinely dynamically-typed dict-like object
-# whose value type depends on which string key you used; type-checking
-# it meaningfully would need extensive per-key annotation for very
-# little payoff, since a session_state type mistake fails loudly and
-# immediately at runtime (Streamlit raises on the spot) rather than
-# silently, unlike the sympy union-attr bugs this config caught in the
-# engine. That's a scoping decision, not an oversight.
+# across every file in modules/, pipeline.py included) -- not app.py or
+# ui/. Those lean heavily on st.session_state, a genuinely
+# dynamically-typed dict-like object whose value type depends on which
+# string key you used; type-checking it meaningfully would need
+# extensive per-key annotation for very little payoff, since a
+# session_state type mistake fails loudly and immediately at runtime
+# (Streamlit raises on the spot) rather than silently, unlike the sympy
+# union-attr bugs this config caught in the engine. That's a scoping
+# decision, not an oversight.
 python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = true

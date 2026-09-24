@@ -18,7 +18,8 @@ against the first.
 Input (text | image)
    │
    ▼
-[extraction: LM Studio reasoning model, temp=0.1, JSON-schema constrained]
+[extraction: LM Studio reasoning model, temp=0.1, JSON-schema constrained,
+   response validated against llm_schema.py's pydantic model before use]
    │  -> {domain, variables[], equations[], solve_for, assumptions[]}
    ▼
 [equation_engine.build_model]  -- parses each equation string into a
@@ -57,6 +58,14 @@ Streamlit UI
        numpy for fast redraw on every slider move
 ```
 
+Everything from extraction through scenario generation is one function,
+`modules/pipeline.run_pipeline()` -- both the interactive app (ui/word_problem.py)
+and batch mode (modules/batch_solver.py) call it, so there is exactly one
+implementation of "extract, verify, retry with the failure fed back, compute
+steps" rather than two copies that could drift. See that module's own
+docstring for what's deliberately NOT routed through it (cli.py and the
+problem-chains tab, which both want a single un-retried attempt).
+
 ## Why these specific tool choices
 
 - **Streamlit over Flask/Django+JS, or PyQt/Tkinter**: one Python file runs
@@ -79,11 +88,23 @@ Streamlit UI
 ## File map
 
 ```
-eqsolver/
-├── app.py                    # Streamlit UI, orchestrates the pipeline
+math-rep-system/
+├── app.py                    # Streamlit entrypoint -- thin: page config, session
+│                              #   defaults, sidebar, mode dispatch. The pipeline and
+│                              #   every page's actual UI now live in ui/ (below);
+│                              #   this file is deliberately small enough to read in
+│                              #   one sitting.
+├── cli.py                     # non-interactive: `python cli.py solve "..."` -- a single
+│                              #   extract -> verify attempt with NO retry loop (reports
+│                              #   the first attempt honestly rather than re-prompting)
+├── api_server.py               # FastAPI REST surface: /solve, /fit, /equivalence,
+│                              #   /dimensional-analysis -- deliberately NOT covering
+│                              #   every one of the Streamlit app's modes, see its
+│                              #   own module docstring for which and why
 ├── config.py                 # LM Studio endpoint/model settings, tunables
 ├── requirements.txt
 ├── requirements-dev.txt      # + pytest, pre-commit (dev/test only)
+├── requirements-api.txt      # + fastapi/uvicorn, for api_server.py only
 ├── .github/workflows/tests.yml  # CI -- runs the suite on every push/PR,
 │                              #   ubuntu-latest AND windows-latest x Python 3.11/3.12
 ├── .pre-commit-config.yaml   # optional local hook: runs the suite before each commit
@@ -92,8 +113,42 @@ eqsolver/
 │                              #   carves this one file out; secrets.toml etc. stay ignored)
 ├── README.md                 # setup + run instructions
 ├── ARCHITECTURE.md           # this file
-└── modules/
+│
+├── ui/                        # Streamlit front end -- pages and rendering only, no
+│   │                          #   math/LLM logic of its own. See ui/__init__.py's own
+│   │                          #   docstring for the full package map.
+│   ├── __init__.py             # PAGES: mode label -> page function (the dispatch table
+│   │                          #   app.py falls through to); command_palette.MODE_LABELS
+│   │                          #   is the actual source of truth for the mode list itself,
+│   │                          #   with tests/test_app_modes.py enforcing the two can't drift
+│   ├── common.py                # helpers shared by several pages (upload-size guard,
+│   │                          #   snapshot/download buttons, query-param syncing, ...)
+│   ├── sidebar.py                # the whole left sidebar as one function
+│   ├── word_problem.py            # the default page: input, Solve button, calls
+│   │                          #   modules/pipeline.py, then ui/results/
+│   ├── batch.py, chains.py, curve_fitting.py, dimensional.py, equivalence.py,
+│   │   extraction_diff.py, geometry.py, journal.py, pde.py, quick_start.py,
+│   │   tensor.py, transforms_series.py    # one module per standalone mode
+│   └── results/                  # the results view for a solved problem, one function
+│       ├── __init__.py             #   per section, called in display order by render_results()
+│       ├── summary.py              # confidence banner, derived equations, variables,
+│       │                          #   vector summary, follow-up Q&A, scenarios, export, ...
+│       ├── steps.py                # the step-by-step section: step list, per-target answer
+│       │                          #   extras, and the uncertainty/bounds/goal-seek/
+│       │                          #   sensitivity expanders (split per feature)
+│       ├── verify_tab.py, explore_tab.py, practice_tab.py, solutions.py
+│
+└── modules/                   # math/LLM logic -- zero Streamlit imports, so it's
+    │                          #   reusable as-is from cli.py, api_server.py, or a future
+    │                          #   non-Streamlit shell (PyQt, pywebview, ...)
+    ├── pipeline.py              # THE shared extract -> verify -> retry -> steps ->
+    │                          #   narrate -> scenarios sequence -- ui/word_problem.py
+    │                          #   and batch_solver.py both call this; see its own
+    │                          #   docstring for what's deliberately NOT routed through it
     ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper
+    ├── llm_schema.py           # pydantic validation of the LLM's extraction JSON, at
+    │                          #   the exact boundary before equation_engine.build_model
+    │                          #   ever sees it
     ├── ocr.py                 # pytesseract fallback for non-vision models
     ├── equation_engine.py     # LLM extraction prompt + JSON -> SymPy parsing
     │                          #   (equations / inequalities / ODEs / recurrences,
@@ -104,6 +159,27 @@ eqsolver/
     │                            #   verifier.py both need it; lives here to avoid a
     │                            #   circular import)
     ├── recurrence_utils.py       # shared rsolve() helper, same circular-import reason
+    ├── pde_utils.py                # partial differential equations: first-order PDEs,
+    │                              #   heat/wave with Dirichlet/Neumann/Robin boundary
+    │                              #   conditions, Laplace on a rectangle, and numerical
+    │                              #   (finite-difference) fallbacks for both 1D and 2D
+    │                              #   heat when no closed form exists
+    ├── geometry_solver.py          # triangle solving (SSS/SAS/ASA/AAS/SSA -- including
+    │                              #   the genuinely ambiguous SSA case, which returns
+    │                              #   both valid triangles rather than picking one) --
+    │                              #   also reachable from word-problem extraction via
+    │                              #   ProblemModel.geometry, not just the standalone mode
+    ├── tensor_calculus.py          # classical (index-based) tensor calculus on a
+    │                              #   Riemannian manifold given a metric: Christoffel
+    │                              #   symbols, curvature, covariant derivatives, and
+    │                              #   index raising/lowering
+    ├── transforms.py               # integral transforms (Laplace and Fourier, and
+    │                              #   their inverses), each independently verified
+    ├── series_asymptotics.py       # Taylor/Maclaurin/Laurent series expansions and
+    │                              #   asymptotic expansions
+    ├── statistical_inference.py    # the statistics layer on top of curve_fitting.py:
+    │                              #   parameter confidence intervals, hypothesis tests,
+    │                              #   and related inference on a fitted model
     ├── matrix_utils.py            # A x = b representation + rank-based classification
     │                              #   (unique/infinite/inconsistent) + eigenvalues for
     │                              #   genuine linear systems (>=2 equations, >=2 shared
@@ -138,15 +214,20 @@ eqsolver/
     ├── grading.py                    # "grade my work" -- formula/arithmetic/final-answer checks
     │                              #   on a student's own attempted steps, reusing
     │                              #   equivalence.py's tested logic rather than diffing steps
+    ├── tutor_mode.py                  # guided/tutor mode: turns a solved problem's step-by-step
+    │                              #   derivation into a Socratic, one-question-at-a-time walkthrough
     ├── worksheet.py                  # reverse generation -- new problem TEXT (not answers)
     │                              #   sharing a solved problem's verified equation structure,
     │                              #   meant to be re-solved through the normal pipeline
-    ├── batch_solver.py               # worksheet/batch mode -- solves a whole pasted problem
-    │                              #   set in one pass, mirroring app.py's extract/verify/retry
-    │                              #   pipeline, one failure per problem rather than all-or-nothing
+    ├── batch_solver.py               # batch mode -- solves a whole pasted problem set in
+    │                              #   one pass via modules/pipeline.py, one failure per
+    │                              #   problem rather than all-or-nothing
     ├── similarity.py                 # structural "find similar past problems" -- canonicalizes
     │                              #   equations (symbol names anonymized, structure/coefficients
     │                              #   kept) and compares by Jaccard similarity of equation shapes
+    ├── concept_index.py              # tags a solved problem by the named CONCEPTS it touches
+    │                              #   (e.g. "conservation of energy"), for browsing history by
+    │                              #   concept rather than only by domain/keyword
     ├── sensitivity.py                # what-if / tornado analysis -- sweeps one known input at a
     │                              #   time (others fixed) to see which one moves the answer most
     ├── algebra_rules.py              # structurally classifies WHICH technique (linear/quadratic/
@@ -194,6 +275,17 @@ eqsolver/
     ├── plotter.py                   # 2D line / 3D surface / feasible-region Plotly figures
     ├── plot_snapshot.py              # matplotlib static re-renders of the above, for
     │                                 #   the "include this plot in the report" export feature
+    ├── templates.py                   # named, savable/loadable presets of a mode's INPUT
+    │                                 #   fields (SQLite-backed, like history.py)
+    ├── command_palette.py             # fuzzy search over the app's navigable targets;
+    │                                 #   MODE_LABELS here is the single source of truth for
+    │                                 #   the sidebar's mode list (see ui/__init__.py)
+    ├── db_migrations.py               # lightweight, dependency-free schema-migration
+    │                                 #   framework: a numbered, idempotent migration list
+    │                                 #   applied to every SQLite-backed module (history,
+    │                                 #   templates, settings_profiles, chains) at startup
+    ├── research_journal.py            # stitches a chosen set of history entries into ONE
+    │                                 #   running Markdown document
     ├── workspace.py                  # cross-problem variable memory (session_state)
     ├── history.py                     # SQLite-backed solved-problem history
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export

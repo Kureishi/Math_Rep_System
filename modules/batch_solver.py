@@ -6,11 +6,11 @@ through the app individually and reassemble the results by hand. This
 is a natural fit for a local tool with file access; it's the kind of
 thing that's awkward for a per-query web calculator to offer at all.
 
-Mirrors (rather than imports) the same extract -> verify -> retry ->
-compute_steps pipeline app.py's single-problem flow uses, since that
-flow lives as inline Streamlit script code, not an importable function
--- mirroring it here keeps batch mode from risking any change to the
-already-working single-problem flow. Narration and scenario generation
+Runs each problem through modules/pipeline.py's run_pipeline() -- the
+same single implementation of extract -> verify -> retry -> compute_steps
+the interactive app uses (this module used to carry a hand-mirrored copy
+of that loop, back when the app's version was inline Streamlit script
+code that couldn't be imported). Narration and scenario generation
 are skipped by default (each is its own LLM round trip per problem;
 across a whole batch that adds up, and neither changes whether a
 problem's math is right), but can be turned on for a smaller batch
@@ -20,11 +20,11 @@ from dataclasses import dataclass, field
 import io
 import re
 
-from config import settings
-from modules.equation_engine import extract_model, ProblemModel
+from modules.equation_engine import ProblemModel
 from modules.llm_client import LMStudioClient, LLMOutputError
-from modules.verifier import VerificationReport, verify
-from modules.solver import SolutionStep, compute_steps, narrate_steps
+from modules.pipeline import run_pipeline
+from modules.verifier import VerificationReport
+from modules.solver import SolutionStep
 
 _NUMBERED_ITEM = re.compile(r"^\s*(?:\d+[.)]|Problem\s+\d+[:.]?)\s+", re.IGNORECASE | re.MULTILINE)
 
@@ -91,24 +91,13 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
 def solve_one(client: LMStudioClient, index: int, problem_text: str,
               narrate: bool = False) -> BatchItemResult:
-    """Runs one problem through the same extract/verify/retry pipeline
-    the main app uses, catching everything so one bad problem in a batch
-    of 20 doesn't take the other 19 down with it."""
+    """Runs one problem through modules/pipeline.py's run_pipeline() (the
+    same one the main app uses), catching everything so one bad problem
+    in a batch of 20 doesn't take the other 19 down with it."""
     try:
-        model = extract_model(client, problem_text)
-        report = verify(model, client, problem_text)
-        retries = 0
-        while not report.passed and retries < settings.max_verification_retries:
-            retries += 1
-            model = extract_model(client, problem_text, retry_reason=report.failure_reason)
-            report = verify(model, client, problem_text)
-
-        steps = compute_steps(model)
-        if narrate:
-            steps = narrate_steps(client, model, steps)
-
-        return BatchItemResult(index=index, problem_text=problem_text, model=model,
-                                 report=report, steps=steps, retries=retries)
+        result = run_pipeline(client, problem_text, narrate=narrate, with_scenarios=False)
+        return BatchItemResult(index=index, problem_text=problem_text, model=result.model,
+                                 report=result.report, steps=result.steps, retries=result.retries)
     except LLMOutputError as e:
         return BatchItemResult(index=index, problem_text=problem_text, error=str(e))
     except Exception as e:  # noqa: BLE001

@@ -63,16 +63,16 @@ jobs:
 
       - name: Byte-compile the whole project
         # Cheap, fast check that catches plain syntax errors -- including
-        # in app.py itself, which the pytest suite never imports directly
-        # (it's a Streamlit script, not a module the tests exercise) and
-        # so wouldn't otherwise be covered by this workflow at all.
-        # Written as a single `python -c` invocation rather than shell
-        # globbing/command substitution ($(...)) -- that's bash syntax,
-        # and the windows-latest runner's default shell for `run:` steps
-        # is PowerShell, which doesn't understand it. A pure-Python
+        # in app.py and ui/ itself, which the pytest suite never imports
+        # directly (they're Streamlit script/pages, not modules the tests
+        # exercise) and so wouldn't otherwise be covered by this workflow
+        # at all. Written as a single `python -c` invocation rather than
+        # shell globbing/command substitution ($(...)) -- that's bash
+        # syntax, and the windows-latest runner's default shell for `run:`
+        # steps is PowerShell, which doesn't understand it. A pure-Python
         # one-liner needs no shell-specific syntax at all, so it runs
         # identically on both.
-        run: python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in ['app.py', 'config.py', 'api_server.py'] + glob.glob('modules/*.py')]"
+        run: python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in ['app.py', 'config.py', 'api_server.py'] + glob.glob('modules/*.py') + glob.glob('ui/*.py') + glob.glob('ui/results/*.py')]"
 
       - name: Type-check the engine (mypy)
         # Scoped to modules/ -- see pyproject.toml's [tool.mypy] comment

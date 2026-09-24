@@ -563,7 +563,7 @@ See `ARCHITECTURE.md` for the full design. In short:
     at 500 MB, enforced twice: `.streamlit/config.toml` sets
     `server.maxUploadSize = 500` so Streamlit rejects an over-limit
     upload server-side before it's even fully received, and
-    `check_upload_size()` in `app.py` re-checks the file's own
+    `check_upload_size()` in `ui/common.py` re-checks the file's own
     `.size` as a second, defense-in-depth layer with a clearer,
     upload-specific error message than Streamlit's generic rejection.
     `.streamlit/` is otherwise gitignored (it can hold a local
@@ -775,6 +775,75 @@ See `ARCHITECTURE.md` for the full design. In short:
     numeric answers as a box-and-strip spread, making that kind of
     disagreement directly visible rather than only inferable from a
     similarity percentage.
+
+## Recently added
+
+51. **Geometry mode** (`modules/geometry_solver.py`, "📐 Geometry") --
+    triangle solving (SSS, SAS, ASA, AAS, and the genuinely ambiguous
+    SSA case, which returns both valid triangles rather than silently
+    picking one) with a labeled schematic. Also reachable directly from
+    a word problem: if extraction detects a triangle
+    (`ProblemModel.geometry`), the same schematic renders inline in the
+    result alongside the algebraic derivation, not just in the
+    standalone mode.
+52. **PDE solver mode** (`modules/pde_utils.py`, "🌡️ PDE solver") --
+    first-order PDEs solved directly; heat and wave equations with
+    Dirichlet, Neumann, or Robin boundary conditions; Laplace's equation
+    on a rectangle; and, when no closed form exists, numerical
+    finite-difference fallbacks for both the 1D and 2D heat equation --
+    explicitly labeled as numerical rather than blended in with exact
+    solutions, the same convention `numerical_fallback.py` uses.
+53. **Tensor calculus mode** (`modules/tensor_calculus.py`, "🧮 Tensor
+    calculus") -- classical (index-based) tensor calculus on a
+    Riemannian manifold given a metric: Christoffel symbols, curvature,
+    covariant derivatives, and index raising/lowering.
+54. **Transforms & series mode** (`modules/transforms.py`,
+    `modules/series_asymptotics.py`, "🔄 Transforms & series") -- Laplace
+    and Fourier transforms (and their inverses), plus Taylor/Maclaurin,
+    Laurent, and asymptotic series expansions, each independently
+    verified rather than trusted as raw LLM/SymPy output.
+55. **Statistical inference on fitted models** (`modules/statistical_inference.py`)
+    -- the statistics layer on top of curve fitting: parameter
+    confidence intervals, hypothesis tests, and related inference for a
+    fitted model, surfaced alongside curve fitting's existing R²/RMSE.
+56. **Tutor mode** (`modules/tutor_mode.py`) -- turns a solved problem's
+    already-verified step-by-step derivation into a Socratic,
+    one-question-at-a-time walkthrough, toggled per target in the
+    step-by-step section rather than being a separate mode of its own.
+57. **Templates** (`modules/templates.py`) -- named, savable/loadable
+    presets of a mode's INPUT fields (SQLite-backed, the same pattern
+    `history.py` uses), so a recurring problem shape doesn't need
+    retyping every time.
+58. **Command palette** (`modules/command_palette.py`) -- fuzzy search
+    over the app's navigable targets (modes, recent history, templates),
+    for jumping around without scanning the sidebar by eye. Also the
+    single source of truth for the sidebar's mode list itself
+    (`MODE_LABELS`) -- see [Extending it](#extending-it).
+59. **Schema-validated extraction** (`modules/llm_schema.py`) --
+    pydantic validation of the LLM's extraction JSON at the exact
+    boundary before `equation_engine.build_model()` ever sees it, so a
+    malformed response is caught with a specific field-level error
+    rather than failing confusingly deeper in the pipeline.
+60. **Concept index** (`modules/concept_index.py`) -- tags a solved
+    problem by the named CONCEPTS it touches (e.g. "conservation of
+    energy"), for browsing history by concept rather than only by
+    domain or keyword.
+61. **Research journal mode** (`modules/research_journal.py`, "📔
+    Research journal") -- stitches a chosen set of history entries into
+    ONE running Markdown document, for building up a worked-examples
+    write-up across multiple sessions instead of exporting each problem
+    separately.
+62. **REST API** (`api_server.py`) -- a FastAPI surface over `/solve`,
+    `/fit`, `/equivalence`, and `/dimensional-analysis`, for scripted or
+    external access to the same verification-first pipeline without the
+    Streamlit UI. Deliberately doesn't cover every one of the app's
+    modes -- see the module's own docstring for which and why.
+63. **Schema migrations framework** (`modules/db_migrations.py`) -- a
+    lightweight, dependency-free, numbered/idempotent migration list,
+    applied at startup to every SQLite-backed module (`history.py`,
+    `templates.py`, `settings_profiles.py`, `chains.py`) so a schema
+    change ships safely against an existing `data/*.db` file from a
+    previous version rather than requiring a manual reset.
 
 ## Rigor & analysis
 
@@ -1091,7 +1160,8 @@ this outside a browser at all:
   filename includes it -- so a number worth citing always comes with
   the seed needed to regenerate it exactly.
 - **`cli.py`: a command-line entry point with no Streamlit dependency
-  at all.** app.py is really just one consumer of `modules/` --
+  at all.** The UI (`app.py` + `ui/`) is really just one consumer of
+  `modules/` --
   `equation_engine`, `verifier`, `monte_carlo`, and the rest are plain
   Python with no UI framework baked in. `cli.py` is a second, scriptable
   front end onto that same pipeline, for the workflows point-and-click
@@ -1203,6 +1273,16 @@ solving/verification logic:
 
 ## Extending it
 
+- **Adding a new sidebar mode**: add one `PaletteEntry` to
+  `modules/command_palette.py`'s `_ENTRIES` (its `mode` field is what
+  `MODE_LABELS` -- and therefore the sidebar radio -- is built from),
+  write the page itself as a new `ui/<name>.py` module (see
+  `ui/__init__.py`'s own docstring for the package layout), and add one
+  entry to `ui/__init__.py`'s `PAGES` dict mapping the label to that
+  page function. `tests/test_app_modes.py` fails if either half is
+  added without the other, so a typo'd label can't silently ship a mode
+  the palette can't find, or a palette entry that jumps to a mode with
+  no page behind it.
 - Swap Streamlit for a desktop shell (e.g. `pywebview` wrapping the same
   Streamlit app, or a PyQt front end calling the same `modules/`) if you want
   a native window instead of a browser tab -- the `modules/` package has no
@@ -1299,8 +1379,9 @@ sample payloads and fixtures if you want to add more.
   implementation (`signal.alarm`) would silently do nothing there;
   testing only on Linux would never catch that class of bug for real, it
   would just look green. The workflow also byte-compiles the whole
-  project (including `app.py` itself, which the pytest suite never
-  imports directly since it's a Streamlit script) as a cheap first check
+  project (including `app.py` and `ui/` themselves, which the pytest
+  suite never imports directly since they're the Streamlit
+  script/pages) as a cheap first check
   before running the actual suite. Trigger it manually from the Actions
   tab any time via `workflow_dispatch`.
 - **Optional local pre-commit hook** (`.pre-commit-config.yaml`): runs
