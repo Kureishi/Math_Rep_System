@@ -4,6 +4,8 @@ retry -> steps -> scenarios pipeline (modules/pipeline.py -- the same code batch
 save, and then the results view for whatever problem is currently loaded (just solved, or restored
 from history in the sidebar).
 """
+from contextlib import contextmanager
+
 import streamlit as st
 
 from modules import history
@@ -75,10 +77,26 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
         known_context = ws.as_context_string()
 
         try:
-            # st.spinner is the `stage` hook: run_pipeline() wraps each stage in it, so the UI
-            # shows the same "Deriving... / Verifying... / Retrying (n/N)... / Computing... /
-            # Generating..." progress messages without the pipeline knowing Streamlit exists.
-            result = run_pipeline(client, problem_text, known_context=known_context, stage=st.spinner)
+            # One persistent status panel for the whole pipeline, instead of a
+            # sequence of st.spinner()s that each vanish once their step ends --
+            # so the person sees the full procedure (derive -> verify -> retry
+            # if needed -> compute -> narrate -> scenarios) as a running log
+            # with a checkmark per completed stage, the way a CI pipeline or a
+            # build log reads, rather than losing earlier steps as later ones
+            # start. `stage` (passed to run_pipeline as its `stage` hook) is a
+            # tiny context manager that updates the status label on entry and
+            # appends a checkmark line on exit -- it doesn't know Streamlit
+            # beyond that, matching pipeline.py's StageFn contract exactly.
+            with st.status("Solving problem...", expanded=True) as status:
+                @contextmanager
+                def stage(label: str):
+                    status.update(label=label)
+                    yield
+                    st.write(f"✅ {label}")
+
+                result = run_pipeline(client, problem_text, known_context=known_context, stage=stage)
+                status.update(label="Solved", state="complete", expanded=False)
+
             model, report, steps, scenarios = result.model, result.report, result.steps, result.scenarios
 
             st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios,
@@ -88,6 +106,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
             st.toast("Saved to history", icon="💾")
 
         except LLMOutputError as e:
+            status.update(label="Could not extract a valid model", state="error", expanded=False)
             st.error(f"⚠️ {e}")
             with st.expander("Raw model response (for debugging)"):
                 st.code(e.raw_output or "(empty response)")

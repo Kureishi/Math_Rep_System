@@ -10,6 +10,7 @@ from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
 from modules import history, chains
 from ui.common import restore_from_query_param, sync_query_param
+from ui.theme import dark_mode_css
 from modules.command_palette import MODE_LABELS
 from dataclasses import dataclass
 from modules.workspace import Workspace
@@ -95,27 +96,7 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         st.session_state.setdefault("dark_mode", False)
         st.checkbox("🌙 Dark mode", key="dark_mode")
         if st.session_state["dark_mode"]:
-            st.markdown("""
-                <style>
-                [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-                    background-color: #0E1117;
-                    color: #E8E8E8;
-                }
-                [data-testid="stSidebar"] {
-                    background-color: #1C1F26;
-                    color: #E8E8E8;
-                }
-                [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
-                [data-testid="stCaptionContainer"], label, .stMarkdown, h1, h2, h3, h4, h5, h6 {
-                    color: #E8E8E8 !important;
-                }
-                [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
-                [data-testid="stTextArea"] textarea, [data-baseweb="select"] {
-                    background-color: #262B36 !important;
-                    color: #E8E8E8 !important;
-                }
-                </style>
-            """, unsafe_allow_html=True)
+            st.markdown(dark_mode_css(), unsafe_allow_html=True)
 
         # ---- navigation: which tool is active. Kept near the very top of
         # the sidebar (rather than a horizontal radio competing with the main

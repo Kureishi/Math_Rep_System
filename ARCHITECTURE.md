@@ -123,6 +123,11 @@ math-rep-system/
 │   │                          #   with tests/test_app_modes.py enforcing the two can't drift
 │   ├── common.py                # helpers shared by several pages (upload-size guard,
 │   │                          #   snapshot/download buttons, query-param syncing, ...)
+│   ├── theme.py                   # visual design system: inject_base_styles() (cards,
+│   │                          #   badges, button/spacing polish -- called once from app.py),
+│   │                          #   render_hero(), badge()/badge_row(), and dark_mode_css()
+│   │                          #   (the sidebar dark-mode toggle's CSS, kept here so all of
+│   │                          #   the app's styling lives in one file)
 │   ├── sidebar.py                # the whole left sidebar as one function
 │   ├── word_problem.py            # the default page: input, Solve button, calls
 │   │                          #   modules/pipeline.py, then ui/results/

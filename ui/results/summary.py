@@ -17,42 +17,41 @@ from modules.plot_snapshot import snapshot_vector_plot
 from modules import history, chains
 from modules.exporter import build_markdown, build_pdf_bytes
 from ui.common import snapshot_button
+from ui.theme import badge_row
 
 
 def render_confidence_banner(report: VerificationReport):
     """The aggregated confidence banner: score, label, per-category pass counts and any critical failures."""
     # ---- confidence report: an aggregated, category-grouped view over
     # the raw check list, rather than making someone scan every check to
-    # get a sense of "how much should I trust this"
+    # get a sense of "how much should I trust this". Rendered as a compact
+    # badge row (see ui/theme.py) rather than a metric + a full-width
+    # st.success/warning paragraph + per-category captions -- the same
+    # information in roughly a quarter of the vertical space, which
+    # matters because this banner sits above EVERY OTHER section of a
+    # solved problem and was previously the single biggest chunk of
+    # scrolling before reaching the actual equations.
     cr = report.confidence_report()
     conf_label, worst_ratio = report.confidence()
 
-    banner_cols = st.columns([1, 3])
-    with banner_cols[0]:
-        st.metric("Confidence", f"{cr.score:.0%}", help="1.0 = every check passed with an "
-                   "essentially-exact margin. Capped below 50% if any check failed outright, "
-                   "regardless of how many others passed.")
-    with banner_cols[1]:
-        if report.passed:
-            if conf_label in ("essentially exact", "comfortable margin"):
-                st.success(f"✅ Self-check passed with high confidence ({conf_label}) -- symbolic "
-                            "checks and an independent re-solve agree.")
-            else:
-                st.warning(f"✅ Self-check passed, but confidence is only '{conf_label}' -- at least "
-                            "one check came close to its tolerance. Worth a second look before "
-                            "trusting the result completely.")
-        else:
-            st.warning(
-                "⚠️ Self-check found unresolved issues after retries -- review the equations below "
-                "carefully before trusting the result."
-            )
+    if report.passed:
+        overall_kind = "pass" if conf_label in ("essentially exact", "comfortable margin") else "warn"
+        overall_text = f"✅ Verified -- {conf_label}"
+    else:
+        overall_kind = "fail"
+        overall_text = "⚠️ Unresolved issues after retries"
 
-    cat_cols = st.columns(min(len(cr.categories), 5) or 1)
-    for i, (cat, summary) in enumerate(cr.categories.items()):
-        with cat_cols[i % len(cat_cols)]:
-            icon = "✅" if summary.all_passed else "❌"
-            st.caption(f"{icon} {cat}")
-            st.write(f"{summary.passed}/{summary.total}")
+    badges = [(f"Confidence {cr.score:.0%}", overall_kind), (overall_text, overall_kind)]
+    for cat, summary in cr.categories.items():
+        badges.append((f"{cat} {summary.passed}/{summary.total}",
+                        "pass" if summary.all_passed else "fail"))
+    badge_row(badges)
+
+    if report.passed and overall_kind == "warn":
+        st.caption("At least one check came close to its tolerance -- worth a second look before "
+                    "trusting the result completely.")
+    elif not report.passed:
+        st.caption("Review the equations below carefully before trusting the result.")
 
     if cr.critical_failures:
         st.error("**Critical checks that failed:** " +

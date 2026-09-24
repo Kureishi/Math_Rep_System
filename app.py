@@ -16,9 +16,11 @@ from modules.llm_client import LMStudioClient
 from modules.workspace import Workspace
 from ui import PAGES
 from ui.sidebar import render_sidebar
+from ui.theme import inject_base_styles, render_hero
 from ui.word_problem import render_word_problem_page
 
-st.set_page_config(page_title="Math Representation System", layout="wide")
+st.set_page_config(page_title="Math Representation System", page_icon="🧮", layout="wide")
+inject_base_styles()
 
 # ---------------------------------------------------------------- session
 client = LMStudioClient()
@@ -47,8 +49,8 @@ if "_pending_mode" in st.session_state:
 
 sidebar = render_sidebar(client, ws)
 
-st.title("🧮 Math Representation System")
-st.caption("Text or image → derived equations → self-verified solution → alternative applications.")
+render_hero("🧮 Math Representation System",
+            "Text or image → derived equations → self-verified solution → alternative applications.")
 
 # ---------------------------------------------------------------- mode dispatch
 # `sidebar.mode` comes from the sidebar's navigation radio. Every mode except the default word-problem
