@@ -6,13 +6,13 @@ import sympy as sp
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel, target_kind
 from modules.verifier import VerificationReport, _known_substitutions
-from modules.optimization_utils import solve_optimization
+from modules.optimization_utils import solve_optimization, gradient_descent_path
 from modules.matrix_utils import linear_system_view
 from modules.named_formulas import recognize_formula
 from modules.geometry_solver import solve_triangle, render_triangle
 from modules.followup import answer_followup
 from modules.vector_utils import vector_summary
-from modules.plotter import build_vector_plot
+from modules.plotter import build_vector_plot, build_descent_path_plot
 from modules.plot_snapshot import snapshot_vector_plot
 from modules import history, chains
 from modules.exporter import build_markdown, build_pdf_bytes
@@ -212,6 +212,57 @@ def render_derived_equations(model: ProblemModel):
                         st.write(f"**{pretty_pt}** -- {cls}")
                     for note in opt_result.feasibility_notes:
                         st.warning(note)
+
+                    # ---- descent-path animation: illustrative only -- an
+                    # actual numerical gradient descent run purely to show
+                    # HOW an iterative method would arrive at the critical
+                    # point already found above (solve_optimization uses
+                    # direct calculus/elimination, not iteration, so there's
+                    # no path to show without computing one separately).
+                    # Skipped for a Lagrange (constrained) result: the
+                    # UNCONSTRAINED objective's own gradient generally does
+                    # NOT vanish at a constrained optimum, so an unconstrained
+                    # descent from an arbitrary start point has no reason to
+                    # land there -- showing one anyway would be actively
+                    # misleading rather than just unavailable. Also limited
+                    # to exactly two free variables (contour plots are 2D).
+                    if opt_result.critical_points and not opt_result.used_lagrange:
+                        free_vars = sorted(opt_result.critical_points[0].keys())
+                        if len(free_vars) == 2:
+                            obj_expr = (opt_result.reduced_objective
+                                        if opt_result.reduced_objective is not None
+                                        else model.objective.sympy_expr)
+                            obj_expr = obj_expr.subs(_known_substitutions(model))
+                            fv_syms = [sp.Symbol(v) for v in free_vars]
+                            if not (obj_expr.free_symbols - set(fv_syms)):
+                                cp = opt_result.critical_points[0]
+                                try:
+                                    cp_vals = [float(cp[v]) for v in free_vars]
+                                    span = max(max(abs(v) for v in cp_vals), 1.0) * 2.0
+                                    start = tuple(v + span for v in cp_vals)
+                                    path = gradient_descent_path(
+                                        obj_expr, fv_syms, start, direction=model.objective.direction)
+                                    f_numeric = sp.lambdify(fv_syms, obj_expr, "numpy")
+                                    xs_p = [p[0] for p in path]
+                                    ys_p = [p[1] for p in path]
+                                    pad_x = 0.15 * max(max(xs_p) - min(xs_p), 1.0)
+                                    pad_y = 0.15 * max(max(ys_p) - min(ys_p), 1.0)
+                                    with st.expander("⛰️ Watch the descent to this critical point"):
+                                        st.caption(
+                                            "An illustrative numerical gradient descent from a "
+                                            "nearby starting point -- NOT how the answer above was "
+                                            "actually found (that was exact calculus, not "
+                                            "iteration), just a way to see convergence happen."
+                                        )
+                                        descent_fig = build_descent_path_plot(
+                                            f_numeric, path,
+                                            (min(xs_p) - pad_x, max(xs_p) + pad_x),
+                                            (min(ys_p) - pad_y, max(ys_p) + pad_y),
+                                            x_label=free_vars[0], y_label=free_vars[1])
+                                        st.plotly_chart(descent_fig, width="stretch",
+                                                          key=f"descent_{'_'.join(free_vars)}")
+                                except Exception:  # noqa: BLE001
+                                    pass
         else:
             st.error(f"Failed to parse objective: {model.objective.raw_expression} "
                       f"({model.objective.parse_error})")

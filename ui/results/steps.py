@@ -19,7 +19,8 @@ from modules.tutor_mode import check_final_answer_guess
 from modules.notebook_export import build_notebook
 from modules.unit_conversion import sweep_conversions, preferred_conversion
 from modules.code_export import formula_for_target, generate_python_function, generate_python_module
-from modules.plotter import build_tornado_chart, build_sweep_chart, build_histogram_plot
+from modules.plotter import build_tornado_chart, build_sweep_chart, build_histogram_plot, \
+    build_monte_carlo_convergence_plot
 from modules.plot_snapshot import snapshot_tornado_chart, snapshot_sweep_chart, snapshot_histogram_plot
 from ui.common import format_download_button, snapshot_button
 from modules.workspace import Workspace
@@ -278,6 +279,15 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                     render_fn=lambda fmt, r=mc_result: snapshot_histogram_plot(
                         r.samples, target_name, mean=r.mean, p5=r.p5, p95=r.p95, fmt=fmt),
                 )
+                if len(mc_result.samples) >= 10:
+                    with st.expander(f"📈 Watch the {target_name} estimate converge"):
+                        st.caption("The running mean (± running std, shaded) as samples "
+                                    "accumulate -- shows HOW the estimate settled, not just "
+                                    "where it ended up. A band that's still visibly narrowing "
+                                    "at the right edge means more samples would still help; "
+                                    "one that's flat well before the end means it's converged.")
+                        conv_fig = build_monte_carlo_convergence_plot(mc_result.samples, target_name)
+                        st.plotly_chart(conv_fig, width="stretch", key=f"mc_conv_{target_name}")
             elif mc_result is not None:
                 st.warning("No samples produced a real result -- try smaller std values.")
 

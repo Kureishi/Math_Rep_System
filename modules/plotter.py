@@ -460,3 +460,236 @@ def build_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: str, 
     fig.update_layout(xaxis_title=x_label, yaxis_title=y_label,
                         title=f"{target_symbol} across {x_label} \u00d7 {y_label}")
     return fig
+
+
+# ================================================================== animated / dynamical-systems views
+#
+# Everything above this line is a snapshot of a single static relationship.
+# The four functions below instead show something CHANGING -- a coupled
+# system's direction field and trajectory, a recurrence converging (or not)
+# to a fixed point, a Monte Carlo estimate stabilizing as samples accumulate,
+# and an optimizer's descent toward a critical point -- using Plotly's
+# frames + updatemenus play/pause mechanism already established by
+# ui/pde.py's PDE time-evolution animation, so all of the app's animations
+# share one interaction pattern rather than each inventing its own.
+
+def build_phase_portrait(dx_dt, dy_dt, x_range: tuple[float, float], y_range: tuple[float, float],
+                           x_label: str = "x", y_label: str = "y",
+                           trajectory: tuple[np.ndarray, np.ndarray] | None = None,
+                           resolution: int = 16) -> go.Figure:
+    """A 2D phase portrait for a coupled first-order system dx/dt = dx_dt(x, y),
+    dy/dt = dy_dt(x, y): a quiver direction field (via
+    plotly.figure_factory.create_quiver) showing the qualitative flow
+    everywhere in the plane, with the actual solved trajectory -- if one is
+    given -- drawn over it as a highlighted path from its start (circle) to
+    its end (star). Uses create_quiver rather than create_streamline: a
+    streamline plot integrates field lines via internal RK4 stepping, which
+    divides by the local speed and raises on any grid point sitting exactly
+    on an equilibrium (velocity = 0, a NaN "cannot convert float NaN to
+    integer" crash) -- and an equilibrium is usually the single most
+    important point a phase portrait exists to show, not a rare edge case
+    to design around. A quiver plot draws one arrow per grid point directly
+    from the field with no integration, so a zero-length arrow at an
+    equilibrium is just a dot, not a crash. `dx_dt`/`dy_dt` are plain
+    numpy-vectorized callables (e.g. from sp.lambdify((x, y), expr,
+    "numpy")), not sympy expressions -- this function does no symbolic work
+    itself. `trajectory` is (xs, ys): the same two arrays either axis of a
+    solved (x(t), y(t)) pair evaluates to over the plotted time range.
+    """
+    import plotly.figure_factory as ff
+    xs = np.linspace(x_range[0], x_range[1], resolution)
+    ys = np.linspace(y_range[0], y_range[1], resolution)
+    X, Y = np.meshgrid(xs, ys)
+    U = np.asarray(dx_dt(X, Y), dtype=float)
+    V = np.asarray(dy_dt(X, Y), dtype=float)
+    U = np.nan_to_num(U, nan=0.0, posinf=0.0, neginf=0.0)
+    V = np.nan_to_num(V, nan=0.0, posinf=0.0, neginf=0.0)
+    # normalize arrow length so a wildly varying speed across the grid
+    # doesn't make slow regions invisible or fast regions overlap --
+    # direction is what a phase portrait needs to show, not magnitude
+    speed = np.sqrt(U ** 2 + V ** 2)
+    speed[speed == 0] = 1.0
+    step = max((x_range[1] - x_range[0]) / resolution, (y_range[1] - y_range[0]) / resolution)
+    Un, Vn = (U / speed) * step * 0.8, (V / speed) * step * 0.8
+
+    fig = ff.create_quiver(X.flatten(), Y.flatten(), Un.flatten(), Vn.flatten(),
+                             scale=1, arrow_scale=0.35,
+                             line=dict(color="rgba(100,110,130,0.6)", width=1.4))
+    fig.update_traces(showlegend=False)
+    if trajectory is not None:
+        tx, ty = trajectory
+        fig.add_trace(go.Scatter(x=tx, y=ty, mode="lines", name="trajectory",
+                                    line=dict(color="#2E5EAA", width=3)))
+        fig.add_trace(go.Scatter(x=[tx[0]], y=[ty[0]], mode="markers", name="start",
+                                    marker=dict(symbol="circle", size=11, color="#1E7E34")))
+        fig.add_trace(go.Scatter(x=[tx[-1]], y=[ty[-1]], mode="markers", name="end",
+                                    marker=dict(symbol="star", size=14, color="#C0392B")))
+    fig.update_layout(xaxis_title=x_label, yaxis_title=y_label,
+                        title=f"Phase portrait: {x_label}\u2013{y_label}")
+    return fig
+
+
+def build_cobweb_plot(g, x0: float, x_range: tuple[float, float], n_steps: int = 25,
+                        x_label: str = "a(n)") -> go.Figure:
+    """A cobweb (staircase) diagram for a first-order recurrence
+    a(n+1) = g(a(n)): the curve y = g(x), the diagonal y = x (every fixed
+    point of the recurrence is where the two cross), and the zig-zag path
+    -- vertical from (x, x) up/down to (x, g(x)), horizontal across to
+    (g(x), g(x)), repeated -- that makes convergence, oscillation, or
+    divergence visually obvious in a way a plain "value vs. step index"
+    plot doesn't. `g` is a plain numpy-vectorized callable. Animated: each
+    frame reveals one more zig-zag segment, via the same
+    frames + play/pause pattern as the other functions in this section.
+    """
+    curve_xs = np.linspace(x_range[0], x_range[1], 300)
+    curve_ys = np.asarray(g(curve_xs), dtype=float)
+
+    xs = [x0]
+    for _ in range(n_steps):
+        xs.append(float(np.real(g(xs[-1]))))
+    # the staircase as one continuous polyline: (x0,x0) -> (x0,g(x0)) -> (g(x0),g(x0)) -> ...
+    path_x, path_y = [xs[0]], [xs[0]]
+    for i in range(n_steps):
+        path_x += [xs[i], xs[i + 1]]
+        path_y += [xs[i + 1], xs[i + 1]]
+
+    base = [
+        go.Scatter(x=curve_xs, y=curve_ys, mode="lines", name="y = g(x)",
+                    line=dict(color="#2E5EAA", width=2.5)),
+        go.Scatter(x=curve_xs, y=curve_xs, mode="lines", name="y = x",
+                    line=dict(color="rgba(100,100,100,0.5)", dash="dash")),
+        go.Scatter(x=[], y=[], mode="lines", name="path", line=dict(color="#C0392B", width=2)),
+    ]
+    frames = [go.Frame(data=[go.Scatter(x=path_x[:2 * i + 1], y=path_y[:2 * i + 1])],
+                         traces=[2], name=f"{i}") for i in range(n_steps + 1)]
+    fig = go.Figure(
+        data=base,
+        layout=go.Layout(
+            xaxis=dict(title=x_label, range=x_range), yaxis=dict(title=f"g({x_label})", range=x_range),
+            title=f"Cobweb diagram (x0 = {x0:g}, {n_steps} steps)",
+            updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15, buttons=[
+                dict(label="\u25b6 Play", method="animate",
+                      args=[None, {"frame": {"duration": 250, "redraw": True},
+                                     "fromcurrent": True, "transition": {"duration": 0}}]),
+                dict(label="\u23f8 Pause", method="animate",
+                      args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+            ])],
+            sliders=[dict(currentvalue={"prefix": "step "}, x=0.05, len=0.9, steps=[
+                dict(method="animate", args=[[f"{i}"],
+                      {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                      label=f"{i}") for i in range(n_steps + 1)])],
+        ),
+        frames=frames,
+    )
+    return fig
+
+
+def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
+                                          n_frames: int = 40) -> go.Figure:
+    """Animates a Monte Carlo estimate stabilizing as samples accumulate --
+    the running mean (with a running ±1 std band) plotted against sample
+    count, playing from the first handful of samples up to the full set.
+    The complementary view to build_histogram_plot's static end-state
+    snapshot: this one makes visible HOW the estimate settled down (or
+    didn't, within the sample budget used), which is the point a
+    fixed-in-time histogram can't make on its own.
+    """
+    arr = np.asarray(samples, dtype=float)
+    n = len(arr)
+    running_mean = np.cumsum(arr) / np.arange(1, n + 1)
+    # running (population) std via the running sum-of-squares identity --
+    # avoids an O(n^2) recompute of np.std(arr[:k]) for every k
+    running_sq_mean = np.cumsum(arr ** 2) / np.arange(1, n + 1)
+    running_var = np.maximum(running_sq_mean - running_mean ** 2, 0.0)
+    running_std = np.sqrt(running_var)
+
+    checkpoints = np.unique(np.linspace(1, n, min(n_frames, n)).astype(int))
+    idx = np.arange(1, n + 1)
+    y_min = float(np.min(running_mean - running_std))
+    y_max = float(np.max(running_mean + running_std))
+    pad = 0.1 * max(y_max - y_min, 1e-9)
+
+    def frame_data(k):
+        upper = (running_mean[:k] + running_std[:k]).tolist()
+        lower = (running_mean[:k] - running_std[:k]).tolist()
+        return [
+            go.Scatter(x=idx[:k].tolist() + idx[:k].tolist()[::-1], y=upper + lower[::-1],
+                        fill="toself", fillcolor="rgba(46,94,170,0.15)",
+                        line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip"),
+            go.Scatter(x=idx[:k], y=running_mean[:k], mode="lines", name="running mean",
+                        line=dict(color="#2E5EAA", width=3)),
+        ]
+
+    frames = [go.Frame(data=frame_data(k), name=f"{k}") for k in checkpoints]
+    fig = go.Figure(
+        data=frame_data(int(checkpoints[0])),
+        layout=go.Layout(
+            xaxis=dict(title="samples used", range=[1, n]),
+            yaxis=dict(title=target_symbol, range=[y_min - pad, y_max + pad]),
+            title=f"Convergence of the {target_symbol} estimate ({n} samples)",
+            updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15, buttons=[
+                dict(label="\u25b6 Play", method="animate",
+                      args=[None, {"frame": {"duration": 60, "redraw": True},
+                                     "fromcurrent": True, "transition": {"duration": 0}}]),
+                dict(label="\u23f8 Pause", method="animate",
+                      args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+            ])],
+            sliders=[dict(currentvalue={"prefix": "n = "}, x=0.05, len=0.9, steps=[
+                dict(method="animate", args=[[f"{k}"],
+                      {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                      label=f"{k}") for k in checkpoints])],
+        ),
+        frames=frames,
+    )
+    return fig
+
+
+def build_descent_path_plot(f, path: list[tuple[float, float]], x_range: tuple[float, float],
+                              y_range: tuple[float, float], x_label: str = "x", y_label: str = "y",
+                              resolution: int = 60) -> go.Figure:
+    """An objective function's contour map with a numerical optimization
+    path (see modules.optimization_utils.gradient_descent_path) animated
+    walking from its starting point to the critical point already found
+    symbolically -- turns "here is the answer" into "here is how an
+    iterative method would arrive at it", which the app's actual (direct
+    calculus / Lagrange) solve doesn't produce on its own since it jumps
+    straight to the critical point with no iteration to show. `f` is a
+    plain numpy-vectorized callable of two arguments.
+    """
+    xs = np.linspace(x_range[0], x_range[1], resolution)
+    ys = np.linspace(y_range[0], y_range[1], resolution)
+    X, Y = np.meshgrid(xs, ys)
+    Z = np.asarray(f(X, Y), dtype=float)
+    px = [p[0] for p in path]
+    py = [p[1] for p in path]
+
+    base = [
+        go.Contour(x=xs, y=ys, z=Z, colorscale="Blues", showscale=False,
+                    contours=dict(coloring="fill"), opacity=0.85),
+        go.Scatter(x=[], y=[], mode="lines+markers", name="descent path",
+                    line=dict(color="#C0392B", width=2), marker=dict(size=5, color="#C0392B")),
+        go.Scatter(x=[px[-1]], y=[py[-1]], mode="markers", name="critical point",
+                    marker=dict(symbol="star", size=16, color="#1E7E34")),
+    ]
+    frames = [go.Frame(data=[go.Scatter(x=px[:i + 1], y=py[:i + 1])], traces=[1], name=f"{i}")
+              for i in range(len(path))]
+    fig = go.Figure(
+        data=base,
+        layout=go.Layout(
+            xaxis=dict(title=x_label, range=x_range), yaxis=dict(title=y_label, range=y_range),
+            title="Convergence to the critical point",
+            updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15, buttons=[
+                dict(label="\u25b6 Play", method="animate",
+                      args=[None, {"frame": {"duration": 150, "redraw": True},
+                                     "fromcurrent": True, "transition": {"duration": 0}}]),
+                dict(label="\u23f8 Pause", method="animate",
+                      args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+            ])],
+            sliders=[dict(currentvalue={"prefix": "iteration "}, x=0.05, len=0.9, steps=[
+                dict(method="animate", args=[[f"{i}"],
+                      {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                      label=f"{i}") for i in range(len(path))])],
+        ),
+        frames=frames,
+    )
+    return fig

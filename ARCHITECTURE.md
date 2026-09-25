@@ -277,7 +277,12 @@ math-rep-system/
     │                             #   cross-check verification
     ├── solver.py                  # SymPy step trace per kind + LLM narration
     ├── scenarios.py                # alternative real-world context generator
-    ├── plotter.py                   # 2D line / 3D surface / feasible-region Plotly figures
+    ├── plotter.py                   # 2D line / 3D surface / feasible-region Plotly figures,
+    │                                 #   plus four animated views (frames + play/pause, the
+    │                                 #   same pattern ui/pde.py's time-evolution animation
+    │                                 #   established): ODE phase portraits, recurrence cobweb
+    │                                 #   diagrams, Monte Carlo convergence, and optimization
+    │                                 #   descent paths
     ├── plot_snapshot.py              # matplotlib static re-renders of the above, for
     │                                 #   the "include this plot in the report" export feature
     ├── templates.py                   # named, savable/loadable presets of a mode's INPUT

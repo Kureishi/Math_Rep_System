@@ -68,6 +68,62 @@ def _independent_variable(applied_funcs) -> sp.Symbol | None:
     return None
 
 
+def extract_step_map(model: ProblemModel, func_name: str) -> tuple[sp.Expr, sp.Symbol] | None:
+    """For a FIRST-ORDER recurrence a(n+1) = g(a(n)), returns (g(x), x) --
+    the one-step map a cobweb diagram (build_cobweb_plot in plotter.py)
+    needs, with x a fresh generic symbol standing in for "the current
+    value" so g can be lambdified and evaluated at any point, not just
+    along the actual solved sequence. Returns None when there's no
+    recurrence-kind equation defining func_name, when the equation isn't
+    genuinely first-order (anything beyond exactly {a(n), a(n+1)} -- e.g.
+    a(n+2) = a(n+1) + a(n) has no single-variable map to draw), when a
+    shift isn't a plain integer offset from n, or when solving for a(n+1)
+    fails or leaves the map depending on n itself (a(n+1) = g(a(n), n) has
+    no fixed curve to plot either -- a cobweb diagram needs g to be a
+    function of the PREVIOUS VALUE alone, not of the step index too)."""
+    for e in model.equations:
+        if e.kind != "recurrence" or e.sympy_eq is None:
+            continue
+        matching = [f for f in e.sympy_eq.atoms(AppliedUndef) if str(f.func) == func_name]
+        if not matching:
+            continue
+        indep_var = _independent_variable(matching)
+        if indep_var is None:
+            return None
+
+        shift_of = {}
+        for f in matching:
+            offset = sp.simplify(f.args[0] - indep_var)
+            if not offset.is_number:
+                return None
+            shift_of[offset] = f  # keep the ACTUAL atom from the equation for each shift --
+            # equation_engine.py parses everything with evaluate=False, so a freshly
+            # reconstructed sp.Function(func_name)(indep_var + 1) is a structurally
+            # DIFFERENT (if mathematically equal) Add node than the one actually
+            # embedded in e.sympy_eq (different internal .args order, different
+            # hash) -- sp.solve()/subs() would silently fail to match it. Using the
+            # real atom sidesteps that entirely, the same way verify_recurrence_solution
+            # above does (it substitutes via f.args[0] straight from eq_sympy.atoms(),
+            # never reconstructing a shift argument by hand).
+        if set(shift_of) != {sp.Integer(0), sp.Integer(1)}:
+            return None  # not first-order in exactly {a(n), a(n+1)}
+
+        next_app, cur_app = shift_of[sp.Integer(1)], shift_of[sp.Integer(0)]
+        try:
+            solutions = sp.solve(e.sympy_eq, next_app)
+        except Exception:  # noqa: BLE001
+            return None
+        if not solutions:
+            return None
+
+        placeholder = sp.Symbol(f"{func_name}_x")
+        g = solutions[0].subs(cur_app, placeholder)
+        if g.has(next_app) or g.has(cur_app) or indep_var in g.free_symbols:
+            return None
+        return g, placeholder
+    return None
+
+
 def verify_recurrence_solution(eq_sympy: sp.Eq, func_name: str, closed_form: sp.Expr,
                                  indep_var: sp.Symbol, tolerance: float = 1e-6,
                                  sample_points: tuple = (0, 1, 2, 3, 5, 8)) -> tuple[bool, sp.Expr]:

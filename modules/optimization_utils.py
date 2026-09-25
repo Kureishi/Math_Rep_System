@@ -19,6 +19,7 @@ module inside a function body (as it already does for ode_utils.py),
 never at its own module level.
 """
 from dataclasses import dataclass, field
+import numpy as np
 import sympy as sp
 
 from modules.equation_engine import ProblemModel
@@ -318,3 +319,68 @@ def solve_optimization(model: ProblemModel) -> OptimizationResult | None:
         eliminated_vars=eliminated_vars,
         feasibility_notes=feasibility_notes,
     )
+
+
+def gradient_descent_path(objective_expr: sp.Expr, free_vars: list[sp.Symbol],
+                            start: tuple[float, ...], direction: str = "minimize",
+                            learning_rate: float = 0.1, max_iters: int = 60,
+                            tol: float = 1e-6) -> list[tuple[float, ...]]:
+    """Runs plain numerical gradient descent (ascent, for direction=
+    "maximize") from `start`, purely to produce an illustrative path for
+    build_descent_path_plot -- this is NOT how solve_optimization() above
+    finds its answer (that's direct calculus/elimination/Lagrange, exact
+    and non-iterative) and the two are not required to agree on anything
+    beyond both converging toward the same critical point. Backtracking
+    step-halving is used on any step that increases (for minimize) /
+    decreases (for maximize) the objective, so a learning rate that's too
+    large for a particular objective degrades to smaller steps instead of
+    diverging or oscillating forever. Returns the path INCLUDING the start
+    and final points, capped at max_iters+1 points; stops early once the
+    step size falls below `tol`.
+    """
+    sign = 1.0 if direction == "minimize" else -1.0
+    f = sp.lambdify(free_vars, objective_expr, "numpy")
+    grad_exprs = [sp.diff(objective_expr, v) for v in free_vars]
+    grad_f = sp.lambdify(free_vars, grad_exprs, "numpy")
+
+    point = list(start)
+    path = [tuple(point)]
+    lr = learning_rate
+    try:
+        f_val = float(f(*point))
+    except Exception:  # noqa: BLE001
+        return path
+
+    for _ in range(max_iters):
+        try:
+            grad = [float(g) for g in grad_f(*point)]
+        except Exception:  # noqa: BLE001
+            break
+        step_norm = sum(g ** 2 for g in grad) ** 0.5
+        if step_norm < tol:
+            break
+        candidate = [p - sign * lr * g for p, g in zip(point, grad)]
+        try:
+            cand_val = float(f(*candidate))
+        except Exception:  # noqa: BLE001
+            break
+        # backtracking: halve the step until it actually improves the
+        # objective (in the requested direction), capped so a genuinely
+        # bad starting point doesn't spin here forever
+        backtracks = 0
+        while (sign * (cand_val - f_val) > 0 or not np.isfinite(cand_val)) and backtracks < 20:
+            lr *= 0.5
+            candidate = [p - sign * lr * g for p, g in zip(point, grad)]
+            try:
+                cand_val = float(f(*candidate))
+            except Exception:  # noqa: BLE001
+                cand_val = float("nan")
+            backtracks += 1
+        if not np.isfinite(cand_val):
+            break
+        point, f_val = candidate, cand_val
+        path.append(tuple(point))
+        if max(abs(a - b) for a, b in zip(path[-1], path[-2])) < tol:
+            break
+
+    return path
