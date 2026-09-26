@@ -171,7 +171,9 @@ math-rep-system/
     │                              #   heat when no closed form exists
     ├── geometry_solver.py          # triangle solving (SSS/SAS/ASA/AAS/SSA -- including
     │                              #   the genuinely ambiguous SSA case, which returns
-    │                              #   both valid triangles rather than picking one) --
+    │                              #   both valid triangles rather than picking one, plus
+    │                              #   build_ssa_ambiguity_animation() morphing between them
+    │                              #   via the shared "swinging compass" construction) --
     │                              #   also reachable from word-problem extraction via
     │                              #   ProblemModel.geometry, not just the standalone mode
     ├── tensor_calculus.py          # classical (index-based) tensor calculus on a
@@ -278,11 +280,17 @@ math-rep-system/
     ├── solver.py                  # SymPy step trace per kind + LLM narration
     ├── scenarios.py                # alternative real-world context generator
     ├── plotter.py                   # 2D line / 3D surface / feasible-region Plotly figures,
-    │                                 #   plus four animated views (frames + play/pause, the
+    │                                 #   plus five animated views (frames + play/pause, the
     │                                 #   same pattern ui/pde.py's time-evolution animation
     │                                 #   established): ODE phase portraits, recurrence cobweb
-    │                                 #   diagrams, Monte Carlo convergence, and optimization
-    │                                 #   descent paths
+    │                                 #   diagrams, Monte Carlo convergence, optimization
+    │                                 #   descent paths, and kinematics motion diagrams
+    ├── motion_diagram.py              # detects a SUVAT-style 1D kinematics setup among a
+    │                                 #   solved problem's variables (by each variable's own
+    │                                 #   `meaning` text, NOT problem_domain -- an LLM's free-text
+    │                                 #   domain label isn't reliable on its own) and, when
+    │                                 #   resolvable, builds the x(t)/v(t) trajectory
+    │                                 #   plotter.build_motion_diagram() animates
     ├── plot_snapshot.py              # matplotlib static re-renders of the above, for
     │                                 #   the "include this plot in the report" export feature
     ├── templates.py                   # named, savable/loadable presets of a mode's INPUT

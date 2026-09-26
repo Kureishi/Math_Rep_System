@@ -10,11 +10,12 @@ that file stays end-to-end through solve_optimization().
 """
 
 import sympy as sp
+import math
 
 from modules.equation_engine import build_model
 from modules.optimization_utils import (
     OptimizationResult, _backfill_point, _classify_critical_point,
-    _eliminate_greedy, solve_optimization,
+    _eliminate_greedy, solve_optimization, gradient_descent_path,
 )
 
 x, y, z, h, r = sp.symbols("x y z h r")
@@ -172,3 +173,35 @@ def test_no_real_critical_points_reports_error_not_crash():
     result = solve_optimization(model)
     assert result.error is not None
     assert "critical points" in result.error.lower() or "no solution" in result.error.lower()
+
+
+# ---------------------------------------------------------------- gradient_descent_path
+
+def test_gradient_descent_path_converges_to_the_minimum():
+    path = gradient_descent_path(x**2 + y**2, [x, y], (3.0, 2.0), direction="minimize")
+    assert path[0] == (3.0, 2.0)
+    assert abs(path[-1][0]) < 1e-3 and abs(path[-1][1]) < 1e-3
+    assert len(path) > 1
+
+
+def test_gradient_descent_path_converges_to_the_maximum():
+    path = gradient_descent_path(-x**2 - y**2 + 5, [x, y], (3.0, 2.0), direction="maximize")
+    assert abs(path[-1][0]) < 1e-3 and abs(path[-1][1]) < 1e-3
+
+
+def test_gradient_descent_path_backtracks_on_an_elongated_objective():
+    """A large learning rate that would overshoot on the steep axis of an
+    elongated bowl -- backtracking halves the step until it actually
+    improves the objective, rather than diverging or oscillating forever."""
+    path = gradient_descent_path(5*x**2 + y**2, [x, y], (4.0, 4.0), direction="minimize",
+                                    learning_rate=0.3)
+    assert abs(path[-1][0]) < 1e-3 and abs(path[-1][1]) < 1e-3
+    assert all(math.isfinite(p) for p in path[-1])
+
+
+def test_gradient_descent_path_stops_early_once_converged():
+    """A starting point already essentially at the minimum should converge
+    in very few iterations, not run the full max_iters budget."""
+    path = gradient_descent_path(x**2 + y**2, [x, y], (1e-8, 1e-8), direction="minimize",
+                                    max_iters=100)
+    assert len(path) < 100

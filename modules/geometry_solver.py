@@ -297,3 +297,134 @@ def render_triangle(solution: TriangleSolution, title: str = "Triangle") -> go.F
                         yaxis=dict(showgrid=False, zeroline=False, visible=False),
                         margin=dict(l=20, r=20, t=40, b=20), height=450)
     return fig
+
+
+def _ssa_shared_frame(sol1: TriangleSolution, sol2: TriangleSolution):
+    """Recovers the classic "swinging compass" construction shared by both
+    SSA solutions: a fixed pivot vertex (where the given angle sits), a
+    fixed neighbor (the far end of the given ADJACENT side), and a third
+    vertex that can land in one of two positions along the SAME ray from
+    the pivot -- exactly where a circle of radius s_opp (the given side
+    OPPOSITE the angle) centered at the neighbor crosses that ray. Returns
+    (pivot, neighbor, swinging, s_adj_len, angle_deg, r1, r2, s_opp_len) or
+    None if sol1/sol2 don't actually share two sides and an angle (i.e.
+    aren't a genuine SSA pair -- defensive; the only caller always passes
+    a real pair, but this function doesn't assume that).
+
+    Both solutions' OWN vertex placements (see _place_vertices) are NOT
+    used here -- each one places A at the origin independently, so the two
+    placements generally do NOT share a common frame when the differing
+    ("third") side changes vertex B's position. This reconstructs a frame
+    where the GENUINELY fixed quantities (pivot, neighbor, angle) are
+    actually fixed, which is what an ambiguity animation needs: something
+    held constant for the eye to anchor on while the rest visibly moves.
+    """
+    sides1 = {"a": sol1.a, "b": sol1.b, "c": sol1.c}
+    sides2 = {"a": sol2.a, "b": sol2.b, "c": sol2.c}
+    angles1 = {"A": sol1.A, "B": sol1.B, "C": sol1.C}
+    angles2 = {"A": sol2.A, "B": sol2.B, "C": sol2.C}
+    shared_sides = [k for k in "abc" if math.isclose(sides1[k], sides2[k], rel_tol=1e-6, abs_tol=1e-9)]
+    shared_angle = next((k for k in "ABC" if math.isclose(angles1[k], angles2[k], rel_tol=1e-6, abs_tol=1e-9)),
+                          None)
+    if len(shared_sides) != 2 or shared_angle is None:
+        return None
+
+    pivot = shared_angle
+    s_opp_letter = pivot.lower()  # the side opposite the pivot's own angle
+    if s_opp_letter not in shared_sides:
+        return None  # not the shape of a genuine SSA pair
+    s_adj_letter = next(s for s in shared_sides if s != s_opp_letter)
+    neighbor = next(v for v in "ABC" if v != pivot and v != s_adj_letter.upper())
+    swinging = next(v for v in "ABC" if v not in (pivot, neighbor))
+
+    s_adj_len = sides1[s_adj_letter]
+    s_opp_len = sides1[s_opp_letter]
+    ang = angles1[pivot]
+    r1 = getattr(sol1, neighbor.lower())  # pivot-to-swinging distance in each solution
+    r2 = getattr(sol2, neighbor.lower())
+    return pivot, neighbor, swinging, s_adj_len, ang, r1, r2, s_opp_len
+
+
+def build_ssa_ambiguity_animation(sol1: TriangleSolution, sol2: TriangleSolution,
+                                    n_frames: int = 30) -> go.Figure | None:
+    """Animates the morph between the two valid SSA triangles by sliding the
+    swinging vertex from its first valid position to its second, along the
+    ray fixed by the given angle -- with the pivot vertex, the neighbor
+    vertex, and the constraining circle (radius = the given side opposite
+    the angle) all drawn as fixed reference geometry. This is the SSA
+    ambiguity made literal: the same two given sides and angle, and TWO
+    genuinely different places the third vertex can land. Returns None when
+    sol1/sol2 don't share the two-sides-plus-angle structure a real SSA
+    pair has (see _ssa_shared_frame) -- the caller (both
+    ui/results/summary.py and ui/geometry.py) simply skips the animation
+    in that case rather than showing something built on a wrong premise.
+    """
+    frame_data = _ssa_shared_frame(sol1, sol2)
+    if frame_data is None:
+        return None
+    pivot, neighbor, swinging, s_adj, ang, r1, r2, s_opp = frame_data
+
+    P = (0.0, 0.0)
+    Q = (s_adj, 0.0)
+    ang_rad = math.radians(ang)
+    ray_dir = (math.cos(ang_rad), math.sin(ang_rad))
+    R1 = (r1 * ray_dir[0], r1 * ray_dir[1])
+    R2 = (r2 * ray_dir[0], r2 * ray_dir[1])
+
+    # the constraining circle: every point exactly s_opp away from the
+    # neighbor -- both R1 and R2 lie exactly on it by construction, and
+    # seeing that visually is the point of drawing it at all
+    circle_t = [i * 2 * math.pi / 100 for i in range(101)]
+    circle_x = [Q[0] + s_opp * math.cos(t) for t in circle_t]
+    circle_y = [Q[1] + s_opp * math.sin(t) for t in circle_t]
+
+    ray_len = max(r1, r2) * 1.15
+    static_traces = [
+        go.Scatter(x=circle_x, y=circle_y, mode="lines", line=dict(color="rgba(160,120,0,0.5)", dash="dot"),
+                    name=f"circle: {swinging} is always {s_opp:.3g} from {neighbor}", hoverinfo="skip"),
+        go.Scatter(x=[P[0], P[0] + ray_len * ray_dir[0]], y=[P[1], P[1] + ray_len * ray_dir[1]],
+                    mode="lines", line=dict(color="rgba(100,100,100,0.4)", dash="dash"),
+                    name=f"ray: where {swinging} must lie", hoverinfo="skip"),
+        go.Scatter(x=[R1[0]], y=[R1[1]], mode="markers", marker=dict(symbol="x", size=10, color="#888"),
+                    name="solution 1", hoverinfo="skip"),
+        go.Scatter(x=[R2[0]], y=[R2[1]], mode="markers", marker=dict(symbol="x", size=10, color="#888"),
+                    name="solution 2", hoverinfo="skip"),
+    ]
+
+    def moving_traces(f: float):
+        Rf = (R1[0] + f * (R2[0] - R1[0]), R1[1] + f * (R2[1] - R1[1]))
+        return [
+            go.Scatter(x=[P[0], Q[0], Rf[0], P[0]], y=[P[1], Q[1], Rf[1], P[1]],
+                        mode="lines", fill="toself", fillcolor="rgba(46,94,170,0.12)",
+                        line=dict(width=3, color="#2E5EAA"), name="triangle", hoverinfo="skip"),
+            go.Scatter(x=[P[0], Q[0], Rf[0]], y=[P[1], Q[1], Rf[1]], mode="markers+text",
+                        marker=dict(size=12, color="#2E5EAA"),
+                        text=[pivot, neighbor, swinging], textposition="top center",
+                        name="vertices", hoverinfo="skip"),
+        ]
+
+    steps = [i / (n_frames - 1) for i in range(n_frames)]
+    frames = [go.Frame(data=moving_traces(f), traces=[4, 5], name=f"{i}") for i, f in enumerate(steps)]
+
+    fig = go.Figure(
+        data=static_traces + moving_traces(0.0),
+        layout=go.Layout(
+            title=f"SSA ambiguity: {swinging} swinging between two valid positions",
+            xaxis=dict(scaleanchor="y", showgrid=False, zeroline=False, visible=False),
+            yaxis=dict(showgrid=False, zeroline=False, visible=False),
+            margin=dict(l=20, r=20, t=40, b=20), height=450, showlegend=True,
+            updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.1, buttons=[
+                dict(label="\u25b6 Play", method="animate",
+                      args=[None, {"frame": {"duration": 60, "redraw": True},
+                                     "fromcurrent": True, "transition": {"duration": 0}}]),
+                dict(label="\u23f8 Pause", method="animate",
+                      args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+            ])],
+            sliders=[dict(currentvalue={"prefix": "solution 1 \u2192 2: "}, x=0.05, len=0.9, steps=[
+                dict(method="animate", args=[[f"{i}"],
+                      {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                      label=f"{f:.2f}") for i, f in enumerate(steps)])],
+        ),
+        frames=frames,
+    )
+    return fig

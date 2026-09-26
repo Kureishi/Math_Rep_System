@@ -9,10 +9,11 @@ from modules.verifier import VerificationReport, _known_substitutions
 from modules.optimization_utils import solve_optimization, gradient_descent_path
 from modules.matrix_utils import linear_system_view
 from modules.named_formulas import recognize_formula
-from modules.geometry_solver import solve_triangle, render_triangle
+from modules.geometry_solver import solve_triangle, render_triangle, build_ssa_ambiguity_animation
+from modules.motion_diagram import build_kinematics_trajectory
 from modules.followup import answer_followup
 from modules.vector_utils import vector_summary
-from modules.plotter import build_vector_plot, build_descent_path_plot
+from modules.plotter import build_vector_plot, build_descent_path_plot, build_motion_diagram
 from modules.plot_snapshot import snapshot_vector_plot
 from modules import history, chains
 from modules.exporter import build_markdown, build_pdf_bytes
@@ -79,6 +80,9 @@ def render_geometry_schematic(model: ProblemModel):
                 if len(geom_result.solutions) > 1:
                     st.info(f"This is the ambiguous SSA case -- {len(geom_result.solutions)} valid "
                             "triangles match these measurements.")
+                    anim_fig = build_ssa_ambiguity_animation(*geom_result.solutions)
+                    if anim_fig is not None:
+                        st.plotly_chart(anim_fig, width="stretch", key="word_problem_ssa_animation")
                 for i, sol in enumerate(geom_result.solutions):
                     if len(geom_result.solutions) > 1:
                         st.markdown(f"**Solution {i + 1}**")
@@ -90,6 +94,26 @@ def render_geometry_schematic(model: ProblemModel):
                     fig = render_triangle(sol, title=f"Solution {i + 1}" if len(geom_result.solutions) > 1
                                            else "Triangle")
                     st.plotly_chart(fig, width="stretch", key=f"word_problem_triangle_fig_{i}")
+
+
+def render_motion_diagram(model: ProblemModel, report: VerificationReport):
+    """Animated kinematics motion diagram (a dot moving along a track with a
+    velocity vector, synced to a position-vs-time graph), when the problem
+    looks like 1D constant-acceleration kinematics -- see
+    modules.motion_diagram.build_kinematics_trajectory for the detection
+    rules. Silently skipped (nothing rendered) for anything else, same
+    convention as render_geometry_schematic above: the section simply
+    doesn't exist for a problem it doesn't apply to, no placeholder shown."""
+    trajectory = build_kinematics_trajectory(model, report)
+    if trajectory is None:
+        return
+    with st.expander("🏃 Motion diagram", expanded=True):
+        st.caption("An object moving with this problem's initial velocity and acceleration, "
+                    "over the solved time span -- the red arrow is the velocity vector.")
+        fig = build_motion_diagram(trajectory.t_values, trajectory.x_values, trajectory.v_values,
+                                     x_label=trajectory.x_label, x_unit=trajectory.x_unit,
+                                     t_unit=trajectory.t_unit)
+        st.plotly_chart(fig, width="stretch", key="word_problem_motion_diagram")
 
 
 

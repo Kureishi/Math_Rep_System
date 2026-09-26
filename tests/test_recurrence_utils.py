@@ -10,9 +10,9 @@ depend on how the (unrelated) extraction/parsing layer behaves.
 """
 import sympy as sp
 
-from modules.equation_engine import Equation, InitialCondition, ProblemModel
+from modules.equation_engine import Equation, InitialCondition, ProblemModel, build_model
 from modules.recurrence_utils import (
-    _independent_variable, solve_recurrence, verify_recurrence_solution,
+    _independent_variable, solve_recurrence, verify_recurrence_solution, extract_step_map,
 )
 
 n = sp.Symbol("n")
@@ -164,3 +164,59 @@ def test_verify_reports_false_for_a_genuinely_wrong_closed_form():
     wrong_closed_form = 2 * n  # a(n+1) - a(n) = 2, not 1
     ok, residual = verify_recurrence_solution(eq, "a", wrong_closed_form, n)
     assert ok is False
+
+
+# ---------------------------------------------------------------- extract_step_map
+
+def test_extract_step_map_on_a_real_extracted_model():
+    """Regression test for a real bug caught during development:
+    equation_engine.py parses everything with evaluate=False, so a fresh
+    sp.Function("a")(indep_var + 1) is a structurally DIFFERENT (if
+    mathematically equal) node than the one actually embedded in the
+    parsed equation -- sp.solve()/subs() silently failed to match it until
+    this was fixed to reuse the equation's own atoms. Goes through
+    build_model() (not a hand-built Equation) specifically because that's
+    what triggered the bug -- a hand-built sp.Eq(a(n+1), ...) auto-evaluates
+    and wouldn't have caught it."""
+    model = build_model({
+        "problem_domain": "test", "problem_type": "recurrence",
+        "variables": [{"symbol": "a", "meaning": "a", "known_value": None, "unit": None,
+                        "is_function": True},
+                      {"symbol": "n", "meaning": "n", "known_value": None, "unit": None}],
+        "equations": [{"name": "e0", "kind": "recurrence", "expression": "Eq(a(n+1), a(n)+500)",
+                        "derivation": ""}],
+        "solve_for": ["a"], "assumptions": [],
+    })
+    result = extract_step_map(model, "a")
+    assert result is not None
+    g, var = result
+    gf = sp.lambdify(var, g, "numpy")
+    assert gf(100) == 600
+
+
+def test_extract_step_map_logistic_map():
+    eq = Equation(name="logistic", raw_expression="Eq(a(n+1), 3.5*a(n)*(1-a(n)))", derivation="",
+                   kind="recurrence", sympy_eq=sp.Eq(a(n + 1), 3.5 * a(n) * (1 - a(n))))
+    model = _model([eq])
+    g, var = extract_step_map(model, "a")
+    gf = sp.lambdify(var, g, "numpy")
+    assert abs(gf(0.5) - 3.5 * 0.5 * 0.5) < 1e-9
+
+
+def test_extract_step_map_returns_none_for_second_order_recurrence():
+    eq = Equation(name="fib", raw_expression="Eq(a(n+2), a(n+1)+a(n))", derivation="",
+                   kind="recurrence", sympy_eq=sp.Eq(a(n + 2), a(n + 1) + a(n)))
+    model = _model([eq])
+    assert extract_step_map(model, "a") is None
+
+
+def test_extract_step_map_returns_none_for_unrelated_function_name():
+    eq = Equation(name="e0", raw_expression="Eq(a(n+1), a(n)+1)", derivation="",
+                   kind="recurrence", sympy_eq=sp.Eq(a(n + 1), a(n) + 1))
+    model = _model([eq])
+    assert extract_step_map(model, "b") is None
+
+
+def test_extract_step_map_returns_none_when_no_recurrence_equation_exists():
+    model = _model([])
+    assert extract_step_map(model, "a") is None

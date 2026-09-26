@@ -693,3 +693,81 @@ def build_descent_path_plot(f, path: list[tuple[float, float]], x_range: tuple[f
         frames=frames,
     )
     return fig
+
+
+def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: np.ndarray,
+                           x_label: str = "position", x_unit: str = "", t_unit: str = "",
+                           n_frames: int = 50) -> go.Figure:
+    """A classic kinematics motion diagram: a dot moving along a 1D track
+    with a velocity vector attached (top panel), synced to the same dot
+    tracing out position-vs-time underneath (bottom panel). Built from a
+    modules.motion_diagram.MotionTrajectory's three arrays -- this function
+    does no physics of its own, same separation as every other function in
+    this module. The top-panel view is the actual point of this function:
+    a position-vs-time GRAPH (the bottom panel, which build_plot could
+    already produce for any two related quantities) doesn't by itself show
+    the intro-physics idea of "an object moving through space with a
+    velocity" nearly as directly as watching a dot move along a line does.
+    """
+    from plotly.subplots import make_subplots
+
+    n = len(t_values)
+    idx = np.unique(np.linspace(0, n - 1, min(n_frames, n)).astype(int))
+    x_min, x_max = float(np.min(x_values)), float(np.max(x_values))
+    x_pad = 0.18 * max(x_max - x_min, 1.0)
+    v_max = max(abs(float(np.max(v_values))), abs(float(np.min(v_values))), 1e-9)
+    v_scale = 0.12 * max(x_max - x_min, 1.0) / v_max
+    x_unit_sfx = f" ({x_unit})" if x_unit else ""
+    t_unit_sfx = f" ({t_unit})" if t_unit else ""
+
+    fig = make_subplots(rows=2, cols=1, row_heights=[0.28, 0.72], vertical_spacing=0.16,
+                          subplot_titles=("motion", f"{x_label}{x_unit_sfx} vs. time{t_unit_sfx}"))
+
+    def frame_traces(i: int):
+        x, v = float(x_values[i]), float(v_values[i])
+        arrow_end = x + v * v_scale
+        arrow_symbol = "triangle-right" if v >= 0 else "triangle-left"
+        return [
+            go.Scatter(x=[x_min - x_pad, x_max + x_pad], y=[0, 0], mode="lines",
+                        line=dict(color="rgba(150,150,150,0.35)", width=2), showlegend=False,
+                        hoverinfo="skip"),
+            go.Scatter(x=[x, arrow_end], y=[0, 0], mode="lines+markers",
+                        line=dict(color="#C0392B", width=3),
+                        marker=dict(size=[0, 11], symbol=["circle", arrow_symbol], color="#C0392B"),
+                        name="velocity", showlegend=False, hoverinfo="skip"),
+            go.Scatter(x=[x], y=[0], mode="markers", marker=dict(size=18, color="#2E5EAA"),
+                        name="object", showlegend=False),
+            go.Scatter(x=t_values[:i + 1], y=x_values[:i + 1], mode="lines",
+                        line=dict(color="#2E5EAA", width=2), showlegend=False, hoverinfo="skip"),
+            go.Scatter(x=[t_values[i]], y=[x], mode="markers", marker=dict(size=11, color="#C0392B"),
+                        showlegend=False),
+        ]
+
+    base = frame_traces(0)
+    fig.add_trace(base[0], row=1, col=1)
+    fig.add_trace(base[1], row=1, col=1)
+    fig.add_trace(base[2], row=1, col=1)
+    fig.add_trace(base[3], row=2, col=1)
+    fig.add_trace(base[4], row=2, col=1)
+
+    frames = [go.Frame(data=frame_traces(int(i)), traces=[0, 1, 2, 3, 4], name=f"{int(i)}") for i in idx]
+    fig.update_layout(
+        height=520, margin=dict(t=60, b=40),
+        updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.14, buttons=[
+            dict(label="\u25b6 Play", method="animate",
+                  args=[None, {"frame": {"duration": 60, "redraw": True},
+                                 "fromcurrent": True, "transition": {"duration": 0}}]),
+            dict(label="\u23f8 Pause", method="animate",
+                  args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+        ])],
+        sliders=[dict(currentvalue={"prefix": "t = "}, x=0.05, len=0.9, steps=[
+            dict(method="animate", args=[[f"{int(i)}"],
+                  {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                  label=f"{t_values[int(i)]:.2g}") for i in idx])],
+    )
+    fig.update_yaxes(visible=False, row=1, col=1)
+    fig.update_xaxes(title=f"position{x_unit_sfx}", row=1, col=1)
+    fig.update_xaxes(title=f"time{t_unit_sfx}", row=2, col=1)
+    fig.update_yaxes(title=f"{x_label}{x_unit_sfx}", row=2, col=1)
+    fig.frames = frames
+    return fig

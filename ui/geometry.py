@@ -2,7 +2,7 @@
 Geometry mode: triangle solving (SSS/SAS/ASA/AAS/SSA) with a labeled schematic.
 """
 import streamlit as st
-from modules.geometry_solver import solve_triangle, render_triangle
+from modules.geometry_solver import solve_triangle, render_triangle, build_ssa_ambiguity_animation
 from ui.common import persist_on_click, render_template_bar
 
 
@@ -62,6 +62,9 @@ def render_geometry_tab():
             if len(result.solutions) > 1:
                 st.info(f"This is the ambiguous SSA case -- {len(result.solutions)} valid triangles "
                         "match these measurements. Both are shown below.")
+                anim_fig = build_ssa_ambiguity_animation(*result.solutions)
+                if anim_fig is not None:
+                    st.plotly_chart(anim_fig, width="stretch", key="geometry_mode_ssa_animation")
             for i, sol in enumerate(result.solutions):
                 if len(result.solutions) > 1:
                     st.markdown(f"#### Solution {i + 1}")

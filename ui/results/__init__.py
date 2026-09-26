@@ -9,7 +9,7 @@ from modules.llm_client import LMStudioClient
 from modules.verifier import VerificationReport
 from modules.workspace import Workspace
 from ui.results.summary import (
-    render_confidence_banner, render_geometry_schematic, render_send_to_chain,
+    render_confidence_banner, render_geometry_schematic, render_motion_diagram, render_send_to_chain,
     render_similar_past_problems, render_derived_equations, render_matrix_view, render_assumptions,
     render_variables, render_vector_summary, render_followup, render_scenarios, render_export,
 )
@@ -27,6 +27,7 @@ def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, r
     st.divider()
     render_confidence_banner(report)
     render_geometry_schematic(model)
+    render_motion_diagram(model, report)
     render_send_to_chain(model)
 
     st.caption("Secondary panels are grouped into tabs below -- verification checks, "
