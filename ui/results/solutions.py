@@ -11,9 +11,9 @@ from modules.verifier import _known_substitutions
 from modules.ode_utils import solve_ode, group_coupled_odes
 from modules.recurrence_utils import solve_recurrence, _independent_variable, extract_step_map
 from modules.proof import build_recurrence_induction_proof
-from modules.plot_snapshot import snapshot_ode_plot, snapshot_recurrence_plot
+from modules.plot_snapshot import snapshot_ode_plot, snapshot_recurrence_plot, snapshot_cobweb_gif
 from modules.plotter import build_phase_portrait, build_cobweb_plot
-from ui.common import snapshot_button
+from ui.common import snapshot_button, gif_download_button
 from modules.workspace import Workspace
 
 
@@ -240,6 +240,13 @@ def render_recurrence_solution(ws: Workspace, model: ProblemModel):
                             cob_fig = build_cobweb_plot(g_numeric, x0, cob_range, n_steps=cob_steps,
                                                           x_label=f"{func_name}({indep_sym})")
                             st.plotly_chart(cob_fig, width="stretch", key=f"cobweb_{func_name}")
+                            gif_download_button(
+                                key=f"cobweb_{func_name}",
+                                file_stem=f"cobweb_{func_name}",
+                                render_fn=lambda gn=g_numeric, x0_=x0, cr=cob_range, cs=cob_steps,
+                                                 fn=func_name, ind=indep_sym:
+                                    snapshot_cobweb_gif(gn, x0_, cr, n_steps=cs, x_label=f"{fn}({ind})"),
+                            )
                         except Exception as exc:  # noqa: BLE001
                             st.caption(f"Couldn't build a cobweb diagram: {exc}")
 

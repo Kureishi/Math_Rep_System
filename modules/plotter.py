@@ -771,3 +771,43 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
     fig.update_yaxes(title=f"{x_label}{x_unit_sfx}", row=2, col=1)
     fig.frames = frames
     return fig
+
+
+def add_camera_rotation(fig: go.Figure, n_frames: int = 60, elevation_deg: float = 25.0,
+                          radius: float = 1.9) -> go.Figure:
+    """Adds a slow orbit-around animation (frames + play/pause, same
+    pattern as every other function in this section) to an EXISTING 3D
+    Plotly figure, by sweeping the camera eye position in a circle at a
+    fixed elevation and distance. Works on any 3D scene, not just
+    build_surface_plot's output -- it only touches layout.scene.camera,
+    never the figure's data -- so a tensor-calculus or other 3D view could
+    reuse this exactly the same way. A static 3D surface is notoriously
+    hard to read from a single fixed angle (which bump is a peak and which
+    is a dip isn't always obvious without depth cues from motion); slowly
+    orbiting it is a cheap, well-known fix for that, not just a decoration.
+    """
+    import math as _math
+    thetas = [i * 2 * _math.pi / n_frames for i in range(n_frames)]
+    elev_rad = _math.radians(elevation_deg)
+
+    def eye(theta: float) -> dict:
+        return dict(x=radius * _math.cos(elev_rad) * _math.cos(theta),
+                     y=radius * _math.cos(elev_rad) * _math.sin(theta),
+                     z=radius * _math.sin(elev_rad))
+
+    frames = [go.Frame(layout=go.Layout(scene_camera=dict(eye=eye(t))), name=f"{i}")
+               for i, t in enumerate(thetas)]
+    fig.update_layout(
+        scene_camera=dict(eye=eye(thetas[0])),
+        updatemenus=list(fig.layout.updatemenus or []) + [dict(
+            type="buttons", showactive=False, x=0.02, y=0.02, buttons=[
+                dict(label="\U0001f504 Rotate", method="animate",
+                      args=[None, {"frame": {"duration": 40, "redraw": True},
+                                     "fromcurrent": True, "transition": {"duration": 0},
+                                     "mode": "immediate"}]),
+                dict(label="\u23f8 Stop", method="animate",
+                      args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+            ])],
+    )
+    fig.frames = frames
+    return fig

@@ -280,10 +280,11 @@ math-rep-system/
     ├── solver.py                  # SymPy step trace per kind + LLM narration
     ├── scenarios.py                # alternative real-world context generator
     ├── plotter.py                   # 2D line / 3D surface / feasible-region Plotly figures,
-    │                                 #   plus five animated views (frames + play/pause, the
-    │                                 #   same pattern ui/pde.py's time-evolution animation
-    │                                 #   established): ODE phase portraits, recurrence cobweb
-    │                                 #   diagrams, Monte Carlo convergence, optimization
+    │                                 #   plus add_camera_rotation() (an auto-orbit wrapper for
+    │                                 #   any 3D scene) and five animated views (frames +
+    │                                 #   play/pause, the same pattern ui/pde.py's time-evolution
+    │                                 #   animation established): ODE phase portraits, recurrence
+    │                                 #   cobweb diagrams, Monte Carlo convergence, optimization
     │                                 #   descent paths, and kinematics motion diagrams
     ├── motion_diagram.py              # detects a SUVAT-style 1D kinematics setup among a
     │                                 #   solved problem's variables (by each variable's own
@@ -292,7 +293,12 @@ math-rep-system/
     │                                 #   resolvable, builds the x(t)/v(t) trajectory
     │                                 #   plotter.build_motion_diagram() animates
     ├── plot_snapshot.py              # matplotlib static re-renders of the above, for
-    │                                 #   the "include this plot in the report" export feature
+    │                                 #   the "include this plot in the report" export feature --
+    │                                 #   plus animated GIF exports (matplotlib.animation +
+    │                                 #   PillowWriter, no ffmpeg/kaleido/Chrome needed) for the
+    │                                 #   rotating 3D surface, the motion diagram, and cobweb
+    │                                 #   diagrams, so those can go in a report too, not just
+    │                                 #   live in the browser
     ├── templates.py                   # named, savable/loadable presets of a mode's INPUT
     │                                 #   fields (SQLite-backed, like history.py)
     ├── command_palette.py             # fuzzy search over the app's navigable targets;

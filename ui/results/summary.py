@@ -14,10 +14,10 @@ from modules.motion_diagram import build_kinematics_trajectory
 from modules.followup import answer_followup
 from modules.vector_utils import vector_summary
 from modules.plotter import build_vector_plot, build_descent_path_plot, build_motion_diagram
-from modules.plot_snapshot import snapshot_vector_plot
+from modules.plot_snapshot import snapshot_vector_plot, snapshot_motion_diagram_gif
 from modules import history, chains
 from modules.exporter import build_markdown, build_pdf_bytes
-from ui.common import snapshot_button
+from ui.common import snapshot_button, gif_download_button
 from ui.theme import badge_row
 
 
@@ -114,6 +114,13 @@ def render_motion_diagram(model: ProblemModel, report: VerificationReport):
                                      x_label=trajectory.x_label, x_unit=trajectory.x_unit,
                                      t_unit=trajectory.t_unit)
         st.plotly_chart(fig, width="stretch", key="word_problem_motion_diagram")
+        gif_download_button(
+            key="motion_diagram",
+            file_stem="motion_diagram",
+            render_fn=lambda tr=trajectory: snapshot_motion_diagram_gif(
+                tr.t_values, tr.x_values, tr.v_values, x_label=tr.x_label,
+                x_unit=tr.x_unit, t_unit=tr.t_unit),
+        )
 
 
 

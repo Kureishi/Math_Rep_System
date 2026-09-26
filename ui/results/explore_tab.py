@@ -16,6 +16,7 @@ from modules.plotter import (
     build_dependency_graph_plot,
     build_contour_plot,
     build_sweep_heatmap,
+    add_camera_rotation,
 )
 from modules.plot_snapshot import (
     snapshot_line_plot,
@@ -24,8 +25,9 @@ from modules.plot_snapshot import (
     snapshot_dependency_graph,
     snapshot_contour_plot,
     snapshot_sweep_heatmap,
+    snapshot_rotating_surface_gif,
 )
-from ui.common import format_download_button, snapshot_button
+from ui.common import format_download_button, snapshot_button, gif_download_button
 
 
 def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
@@ -261,6 +263,10 @@ def render_interactive_plot(model: ProblemModel, edited_values, tab_explore):
 
                 fig = build_surface_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
                                            z_target=z_target)
+                if st.toggle("🔄 Auto-rotate", key=f"rotate_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                              help="A static 3D view can be hard to read from one fixed angle -- "
+                                    "orbiting it makes which bumps are peaks vs. dips much clearer."):
+                    fig = add_camera_rotation(fig)
                 st.plotly_chart(fig, width='stretch')
 
                 surf_caption = (
@@ -284,6 +290,13 @@ def render_interactive_plot(model: ProblemModel, edited_values, tab_explore):
                     render_fn=lambda fmt, ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
                                         xr=x_range, yr=y_range, zt=z_target:
                         snapshot_surface_plot(ec, xs, ys, pv, xr, yr, z_target=zt, fmt=fmt),
+                )
+                gif_download_button(
+                    key=f"surface_gif_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                    file_stem=f"{eq_choice.name}_surface_rotating",
+                    render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
+                                     xr=x_range, yr=y_range, zt=z_target:
+                        snapshot_rotating_surface_gif(ec, xs, ys, pv, xr, yr, z_target=zt),
                 )
 
             elif plot_mode == "Contour" and len(free_syms) >= 2:

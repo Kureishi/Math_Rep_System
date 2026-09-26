@@ -112,6 +112,28 @@ def format_download_button(key: str, file_stem: str, render_fn):
                                  mime=mime, key=f"save_{key}")
 
 
+def gif_download_button(key: str, file_stem: str, render_fn):
+    """A 'download this animation as a GIF' control -- the animated
+    counterpart to format_download_button() above (which only offers
+    static png/svg/pdf). Deliberately a SEPARATE function rather than a
+    format choice bolted onto that one: an animated GIF render is a
+    matplotlib.animation.FuncAnimation writing tens of frames, meaningfully
+    slower than a single savefig() call, so it gets its own explicit button
+    rather than sitting behind the same dropdown as the instant formats
+    (which would make every plot's download control silently slow down
+    the moment "gif" became a selectable option). render_fn is a zero-arg
+    callable producing GIF bytes -- lazy for the same reason
+    snapshot_button() above is: the render only happens when asked for."""
+    if st.button("🎞️ Download animation (GIF)", key=f"gif_{key}"):
+        try:
+            data = render_fn()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Couldn't render this animation as a GIF: {e}")
+        else:
+            st.download_button(f"Save {file_stem}.gif", data=data, file_name=f"{file_stem}.gif",
+                                 mime="image/gif", key=f"save_gif_{key}")
+
+
 def persist_on_click(button_label: str, button_key: str, session_key: str, ready: bool, compute_fn):
     """Runs compute_fn() and stores the result in st.session_state when
     the button is clicked, then ALWAYS reads back from session_state

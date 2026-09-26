@@ -473,3 +473,167 @@ def snapshot_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: st
     ax.set_ylabel(y_label)
     ax.set_title(f"{target_symbol} across {x_label} \u00d7 {y_label}", fontsize=10)
     return _finish(fig, fmt)
+
+
+def _finish_gif(fig, update_fn, n_frames: int, fps: int = 12) -> bytes:
+    """Renders an animated GIF via matplotlib.animation.FuncAnimation +
+    PillowWriter. Pillow is already a hard dependency of this module (see
+    its own docstring for why kaleido/Chrome is avoided for static export)
+    and PillowWriter needs nothing beyond it -- no ffmpeg, no browser,
+    which is exactly the "no extra binaries" bar the rest of this module
+    holds to. `update_fn(frame_index)` mutates `fig`'s own Axes in place
+    for that frame (typically via ax.clear() + redraw) and returns
+    nothing; matplotlib redraws the whole figure each frame rather than
+    blitting individual artists, which is simpler and plenty fast enough
+    at the frame counts these animations actually use (tens, not hundreds).
+
+    Writes to a temporary file rather than an in-memory buffer: matplotlib's
+    Animation.save() resolves its `outfile` argument as a filesystem path
+    (Path(outfile).parent.resolve(...)) before PillowWriter ever touches
+    it, so a BytesIO -- which has no filesystem parent -- fails there
+    before any actual writing happens. The temp file is read back into
+    bytes and removed immediately after, so callers still see this as a
+    plain in-memory bytes-producing function.
+    """
+    from matplotlib.animation import FuncAnimation, PillowWriter
+    import tempfile
+    import os
+    anim = FuncAnimation(fig, lambda i: update_fn(i), frames=n_frames, blit=False)
+    fd, path = tempfile.mkstemp(suffix=".gif")
+    os.close(fd)
+    try:
+        anim.save(path, writer=PillowWriter(fps=fps))
+        with open(path, "rb") as f:
+            data = f.read()
+    finally:
+        plt.close(fig)
+        os.remove(path)
+    return data
+
+
+def snapshot_rotating_surface_gif(eq: Equation, x_symbol: str, y_symbol: str,
+                                     param_values: dict[str, float],
+                                     x_range: tuple[float, float], y_range: tuple[float, float],
+                                     z_target: str | None = None, resolution: int = 40,
+                                     n_frames: int = 36, fps: int = 12) -> bytes:
+    """The animated counterpart to snapshot_surface_plot() above: the same
+    surface, orbited through a full revolution -- matplotlib's own
+    equivalent of plotter.add_camera_rotation()'s Plotly camera sweep, for
+    dropping into a report rather than only being interactive on-screen."""
+    if eq.sympy_eq is None:
+        raise ValueError(f"Equation {eq.name!r} has no parsed sympy expression to plot.")
+    x, y = sp.Symbol(x_symbol), sp.Symbol(y_symbol)
+    xs = np.linspace(x_range[0], x_range[1], resolution)
+    ys = np.linspace(y_range[0], y_range[1], resolution)
+    X, Y = np.meshgrid(xs, ys)
+    subs = {sp.Symbol(k): v for k, v in param_values.items()}
+
+    z_label = z_target or f"{eq.name} residual"
+    if z_target and z_target not in (x_symbol, y_symbol):
+        target = sp.Symbol(z_target)
+        try:
+            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
+        except Exception:  # noqa: BLE001
+            solved = []
+        expr = solved[0][target] if solved else None
+    else:
+        expr = None
+    if expr is None:
+        expr = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+
+    f = sp.lambdify((x, y), expr, "numpy")
+    Z = np.real(np.array(f(X, Y), dtype=complex))
+    if Z.shape != X.shape:
+        Z = np.full_like(X, float(Z))
+
+    fig = plt.figure(figsize=(6.5, 5.5))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.plot_surface(X, Y, Z, cmap="viridis", edgecolor="none", alpha=0.9)
+    ax.set_xlabel(x_symbol)
+    ax.set_ylabel(y_symbol)
+    ax.set_zlabel(z_label)
+
+    def update(i):
+        ax.view_init(elev=25, azim=i * 360 / n_frames)
+
+    return _finish_gif(fig, update, n_frames, fps)
+
+
+def snapshot_motion_diagram_gif(t_values, x_values, v_values, x_label: str = "position",
+                                   x_unit: str = "", t_unit: str = "",
+                                   n_frames: int = 40, fps: int = 15) -> bytes:
+    """The animated counterpart to modules.plotter.build_motion_diagram():
+    a dot moving along a track with a velocity arrow, synced to a
+    position-vs-time trace underneath, as a GIF for a report rather than
+    only interactive on-screen."""
+    t_values = np.asarray(t_values, dtype=float)
+    x_values = np.asarray(x_values, dtype=float)
+    v_values = np.asarray(v_values, dtype=float)
+    n = len(t_values)
+    idx = np.unique(np.linspace(0, n - 1, min(n_frames, n)).astype(int))
+    x_min, x_max = float(np.min(x_values)), float(np.max(x_values))
+    pad = 0.18 * max(x_max - x_min, 1.0)
+    v_max = max(abs(float(np.max(v_values))), abs(float(np.min(v_values))), 1e-9)
+    v_scale = 0.12 * max(x_max - x_min, 1.0) / v_max
+    x_unit_sfx = f" ({x_unit})" if x_unit else ""
+    t_unit_sfx = f" ({t_unit})" if t_unit else ""
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.5, 6), gridspec_kw={"height_ratios": [1, 3]})
+
+    def update(k):
+        i = int(idx[k])
+        ax1.clear()
+        ax2.clear()
+        xi, vi = float(x_values[i]), float(v_values[i])
+        ax1.axhline(0, color="lightgray", linewidth=2)
+        ax1.plot(xi, 0, "o", color="#2E5EAA", markersize=16, zorder=3)
+        ax1.annotate("", xy=(xi + vi * v_scale, 0), xytext=(xi, 0),
+                      arrowprops=dict(arrowstyle="-|>", color="#C0392B", linewidth=2))
+        ax1.set_xlim(x_min - pad, x_max + pad)
+        ax1.set_ylim(-1, 1)
+        ax1.set_yticks([])
+        ax1.set_xlabel(f"position{x_unit_sfx}")
+
+        ax2.plot(t_values[: i + 1], x_values[: i + 1], color="#2E5EAA", linewidth=2)
+        ax2.plot(t_values[i], x_values[i], "o", color="#C0392B", markersize=9, zorder=3)
+        ax2.set_xlim(float(t_values[0]), float(t_values[-1]))
+        ax2.set_ylim(x_min - pad, x_max + pad)
+        ax2.set_xlabel(f"time{t_unit_sfx}")
+        ax2.set_ylabel(f"{x_label}{x_unit_sfx}")
+        ax2.grid(alpha=0.3)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, len(idx), fps)
+
+
+def snapshot_cobweb_gif(g, x0: float, x_range: tuple[float, float], n_steps: int = 25,
+                           x_label: str = "a(n)", fps: int = 6) -> bytes:
+    """The animated counterpart to modules.plotter.build_cobweb_plot(): the
+    staircase drawn one zig-zag segment at a time, as a GIF."""
+    curve_xs = np.linspace(x_range[0], x_range[1], 300)
+    curve_ys = np.asarray(g(curve_xs), dtype=float)
+
+    xs = [x0]
+    for _ in range(n_steps):
+        xs.append(float(np.real(g(xs[-1]))))
+    path_x, path_y = [xs[0]], [xs[0]]
+    for i in range(n_steps):
+        path_x += [xs[i], xs[i + 1]]
+        path_y += [xs[i + 1], xs[i + 1]]
+
+    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+
+    def update(k):
+        ax.clear()
+        ax.plot(curve_xs, curve_ys, color="#2E5EAA", linewidth=2, label="y = g(x)")
+        ax.plot(curve_xs, curve_xs, color="gray", linestyle="--", linewidth=1.3, label="y = x")
+        ax.plot(path_x[: 2 * k + 1], path_y[: 2 * k + 1], color="#C0392B", linewidth=1.6)
+        ax.set_xlim(x_range)
+        ax.set_ylim(x_range)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(f"g({x_label})")
+        ax.legend(loc="upper left", fontsize=8)
+        ax.grid(alpha=0.3)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, n_steps + 1, fps)
