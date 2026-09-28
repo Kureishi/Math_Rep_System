@@ -297,7 +297,8 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                     )
                     st.caption(f"= {entry.value:.6g} {entry.unit or ''}  \n_{entry.source}_")
                 with c2:
-                    if st.button("✕", key=f"rm_{name}"):
+                    if st.button("", icon=":material/close:", key=f"rm_{name}", type="tertiary",
+                                  help="Remove this variable"):
                         ws.remove(name)
                         st.rerun()
                 if new_name != name:
@@ -354,12 +355,13 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
             for entry in recent:
                 badge = "✅" if entry["passed"] else "⚠️"
                 label = entry["problem_text"][:45] + ("..." if len(entry["problem_text"]) > 45 else "")
-                c1, c2, c3 = st.columns([5, 1, 1])
+                c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
                     st.caption(f"{badge} **{entry['domain'] or '—'}** -- {entry['timestamp'][:16].replace('T', ' ')}")
                     st.caption(label)
                 with c2:
-                    if st.button("↺", key=f"load_{entry['id']}", help="Load this problem"):
+                    if st.button("", icon=":material/restart_alt:", key=f"load_{entry['id']}",
+                                  type="tertiary", help="Load this problem"):
                         loaded = history.load(entry["id"])
                         if loaded is not None:
                             p_text, l_model, l_report, l_steps, l_scenarios = loaded
@@ -369,7 +371,8 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                             )
                             st.rerun()
                 with c3:
-                    if st.button("✕", key=f"delhist_{entry['id']}", help="Delete from history"):
+                    if st.button("", icon=":material/delete:", key=f"delhist_{entry['id']}",
+                                  type="tertiary", help="Delete from history"):
                         history.delete(entry["id"])
                         st.rerun()
         else:
