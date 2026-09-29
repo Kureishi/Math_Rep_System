@@ -170,3 +170,109 @@ def test_vision_extract_work_and_vision_extract_use_different_prompts():
     assert work_system_prompt != statement_system_prompt
     assert "problem statement" in statement_system_prompt.lower()
     assert "handwritten" in work_system_prompt.lower()
+
+
+# ---------------------------------------------------------------- connection check speed
+#
+# The sidebar's connection check runs on every fresh session and gates when the main panel can draw
+# (see ui/sidebar.py), so is_available()/list_models() failing SLOWLY when nothing is listening was a
+# real, user-visible bug (the OpenAI SDK's default retries/timeouts are tuned for a real completion
+# call, not a "is anything there?" ping). These tests use real throwaway sockets rather than mocking
+# httpx/OpenAI internals, so they exercise the actual TCP-probe-before-HTTP code path end to end.
+
+import socket
+import time
+
+import config
+from modules.llm_client import LMStudioClient, _server_reachable
+
+
+def _free_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_server_reachable_false_for_a_closed_port():
+    port = _free_port()  # nothing is listening here
+    assert _server_reachable(f"http://127.0.0.1:{port}/v1") is False
+
+
+def test_is_available_fails_fast_when_nothing_is_listening(monkeypatch):
+    port = _free_port()
+    monkeypatch.setattr(config.settings, "lm_studio_base_url", f"http://127.0.0.1:{port}/v1")
+    client = LMStudioClient()
+    start = time.monotonic()
+    ok, msg = client.is_available()
+    elapsed = time.monotonic() - start
+    assert ok is False
+    assert "Could not reach LM Studio" in msg
+    assert elapsed < 2.0  # previously this could take 10+ seconds (SDK retries/backoff)
+
+
+def test_list_models_returns_empty_fast_when_nothing_is_listening(monkeypatch):
+    port = _free_port()
+    monkeypatch.setattr(config.settings, "lm_studio_base_url", f"http://127.0.0.1:{port}/v1")
+    client = LMStudioClient()
+    start = time.monotonic()
+    assert client.list_models() == []
+    assert time.monotonic() - start < 2.0
+
+
+def test_is_available_true_and_models_listed_for_a_real_server(monkeypatch):
+    """A minimal HTTP server standing in for LM Studio -- confirms the fast
+    TCP pre-check doesn't accidentally short-circuit the GENUINELY
+    reachable case."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({"object": "list",
+                                 "data": [{"id": "model-b", "object": "model"},
+                                          {"id": "model-a", "object": "model"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setattr(config.settings, "lm_studio_base_url", f"http://127.0.0.1:{port}/v1")
+        client = LMStudioClient()
+        ok, msg = client.is_available()
+        assert ok is True
+        assert client.list_models() == ["model-a", "model-b"]  # sorted
+    finally:
+        server.shutdown()
+
+
+def test_is_available_bounded_when_port_accepts_but_never_responds(monkeypatch):
+    """A port that accepts the TCP connection (so the fast pre-check alone
+    wouldn't catch this) but the process behind it never sends an HTTP
+    response -- the probe client's own short timeout must still bound
+    this, not the SDK's much longer default."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        monkeypatch.setattr(config.settings, "lm_studio_base_url", f"http://127.0.0.1:{port}/v1")
+        client = LMStudioClient()
+        start = time.monotonic()
+        ok, msg = client.is_available()
+        elapsed = time.monotonic() - start
+        assert ok is False
+        assert elapsed < 8.0
+    finally:
+        listener.close()

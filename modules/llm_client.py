@@ -8,10 +8,46 @@ reuse the official `openai` python SDK and just repoint base_url.
 """
 import base64
 import json
+import socket
+from urllib.parse import urlparse
+
 from openai import OpenAI, APIConnectionError
 
 from config import settings
 from modules.app_logging import logger
+
+# The connection check runs from the sidebar on page load, and everything
+# drawn after the sidebar (i.e. the whole main panel) waits on it -- so it
+# has to fail FAST when LM Studio isn't running. Two things made it slow:
+#   * the OpenAI SDK's defaults (max_retries=2 with exponential backoff, and
+#     a much longer connect timeout) are right for a real completion request
+#     but wrong for a "is anything listening?" ping, and
+#   * some OSes (Windows, notably) take ~2 s to report a refused localhost
+#     connection, per address -- so a plain HTTP attempt could burn several
+#     seconds per try before the SDK even started backing off.
+# So the ping first does a raw TCP connect with a short, hard timeout (a
+# closed port fails within this window no matter how slowly the OS would
+# have reported the refusal), and only then makes the HTTP call, on a
+# separate no-retry client. Chat/extraction calls keep using the normal
+# client below, with its normal generous timeouts and retries.
+_TCP_PROBE_TIMEOUT_S = 0.5
+# A flat float (not an httpx.Timeout) -- OpenAI's own client accepts either, but its `timeout`
+# parameter's type hint expects openai's own internally-vendored Timeout type, not httpx's directly;
+# a plain float sidesteps that mismatch entirely and is all a bare status probe needs anyway.
+_HTTP_PROBE_TIMEOUT_S = 5.0
+
+
+def _server_reachable(base_url: str, timeout: float = _TCP_PROBE_TIMEOUT_S) -> bool:
+    """True if something accepts a TCP connection at base_url's host:port
+    within `timeout` seconds (per resolved address)."""
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 class LMStudioClient:
@@ -20,26 +56,40 @@ class LMStudioClient:
             base_url=settings.lm_studio_base_url,
             api_key=settings.lm_studio_api_key,
         )
+        # Separate client for status pings only -- see the note above.
+        self._probe = OpenAI(
+            base_url=settings.lm_studio_base_url,
+            api_key=settings.lm_studio_api_key,
+            max_retries=0,
+            timeout=_HTTP_PROBE_TIMEOUT_S,
+        )
+
+    def _unreachable_message(self) -> str:
+        return (
+            "Could not reach LM Studio at "
+            f"{settings.lm_studio_base_url}. Open LM Studio, load a model, "
+            "and click 'Start Server' on the Developer tab."
+        )
 
     def is_available(self) -> tuple[bool, str]:
         """Ping the server so the UI can show a clear connection status."""
+        if not _server_reachable(settings.lm_studio_base_url):
+            return False, self._unreachable_message()
         try:
-            self._client.models.list()
+            self._probe.models.list()
             return True, "Connected to LM Studio."
         except APIConnectionError:
-            return False, (
-                "Could not reach LM Studio at "
-                f"{settings.lm_studio_base_url}. Open LM Studio, load a model, "
-                "and click 'Start Server' on the Developer tab."
-            )
+            return False, self._unreachable_message()
         except Exception as e:  # noqa: BLE001
             return False, f"LM Studio responded with an error: {e}"
 
     def list_models(self) -> list[str]:
         """Models LM Studio currently has loaded/served -- ground truth for
         what's actually runnable, as opposed to config.py's defaults."""
+        if not _server_reachable(settings.lm_studio_base_url):
+            return []
         try:
-            return sorted(m.id for m in self._client.models.list().data)
+            return sorted(m.id for m in self._probe.models.list().data)
         except Exception:  # noqa: BLE001
             return []
 

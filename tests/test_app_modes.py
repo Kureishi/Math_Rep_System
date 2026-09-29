@@ -38,3 +38,18 @@ def test_word_problem_mode_is_not_also_in_pages():
 
 def test_mode_labels_has_no_duplicates():
     assert len(MODE_LABELS) == len(set(MODE_LABELS))
+
+
+def test_every_page_target_actually_resolves():
+    """PAGES now builds its functions lazily (see ui/__init__.py's own
+    docstring for why) -- a page's module is only imported the first time
+    its mode is selected, so a typo'd module/function name in
+    PAGE_TARGETS would previously have been caught at import time and now
+    would only surface the first time a person actually clicked that
+    mode. This test imports every target explicitly so that failure mode
+    is still caught here instead."""
+    import importlib
+    from ui import PAGE_TARGETS
+    for label, (module, func, _takes_client) in PAGE_TARGETS.items():
+        page = getattr(importlib.import_module(module), func, None)
+        assert callable(page), f"{label}: {module}.{func} is missing or not callable"

@@ -2,6 +2,8 @@
 The sidebar, moved out of app.py as one function. It reads only `client` and `ws`, and hands
 back the two values the main area needs (see SidebarState).
 """
+import time
+
 import streamlit as st
 from config import settings
 from modules.llm_client import LMStudioClient
@@ -14,6 +16,32 @@ from ui.theme import dark_mode_css
 from modules.command_palette import MODE_LABELS
 from dataclasses import dataclass
 from modules.workspace import Workspace
+
+
+# How long a connection-status result is trusted before pinging LM Studio again. Streamlit re-runs the
+# whole script on EVERY widget interaction, and the status used to be re-fetched each time -- two
+# network round trips (is_available + list_models) on every click. A healthy connection is unlikely to
+# change from one click to the next, so it's trusted longer; a failed one is re-tried sooner so that
+# starting LM Studio is noticed quickly (and there's a manual "Re-check" button for the impatient).
+_STATUS_TTL_OK_S = 30.0
+_STATUS_TTL_DOWN_S = 6.0
+
+
+def _lm_status(client: LMStudioClient) -> tuple[bool, str, list[str]]:
+    """(ok, message, loaded model names) for LM Studio, cached per browser session. Stored in
+    session_state rather than st.cache_data on purpose: it must be per-session (each person's own
+    check) and must not leak between sessions/tests."""
+    cached = st.session_state.get("_lm_status")
+    if cached is not None:
+        checked_at, ok, msg, models = cached
+        ttl = _STATUS_TTL_OK_S if ok else _STATUS_TTL_DOWN_S
+        if time.monotonic() - checked_at < ttl:
+            return ok, msg, models
+    with st.spinner("Checking LM Studio connection..."):
+        ok, msg = client.is_available()
+        models = client.list_models() if ok else []
+    st.session_state["_lm_status"] = (time.monotonic(), ok, msg, models)
+    return ok, msg, models
 
 
 @dataclass
@@ -157,11 +185,13 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         # status panels above it doesn't change from problem to problem, so
         # it shouldn't cost a full screen of scrolling on every visit. Left
         # expanded automatically when there's actually a problem to see.
-        ok, msg = client.is_available()
+        ok, msg, loaded_models = _lm_status(client)
         with st.expander("LM Studio", expanded=not ok):
             (st.success if ok else st.error)(msg)
+            st.button("Re-check connection", key="lm_recheck", type="tertiary",
+                       icon=":material/refresh:",
+                       on_click=lambda: st.session_state.pop("_lm_status", None))
 
-            loaded_models = client.list_models() if ok else []
             if ok and not loaded_models:
                 st.warning("Connected, but no models are loaded. Load one in LM Studio's Developer tab.")
             elif loaded_models:

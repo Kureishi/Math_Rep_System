@@ -10,6 +10,7 @@
 # green against the new version.
 streamlit==1.62.0
 openai==3.3.1
+httpx==0.28.1
 sympy==1.14.0
 plotly==6.9.0
 numpy==2.4.4

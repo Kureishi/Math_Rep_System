@@ -10,11 +10,13 @@ import streamlit as st
 
 from modules import history
 from modules.llm_client import LMStudioClient, LLMOutputError
-from modules.ocr import ocr_extract
-from modules.pipeline import run_pipeline
 from modules.workspace import Workspace
 from ui.common import check_upload_size
-from ui.results import render_results
+
+# modules.pipeline (-> solver, verifier, scipy, ...), modules.ocr (-> PIL) and ui.results (-> pandas,
+# plotly, matplotlib, ...) are imported inside the functions that use them rather than here: a fresh
+# session that has not solved anything yet needs none of them, and importing them up front delays the
+# first paint of the page by several seconds.
 
 
 def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) -> None:
@@ -58,6 +60,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                         if use_vision:
                             text = client.vision_extract(uploaded.getvalue(), mime_type=uploaded.type)
                         else:
+                            from modules.ocr import ocr_extract
                             text = ocr_extract(uploaded.getvalue())
                     except Exception as e:  # noqa: BLE001
                         st.error(f"Extraction failed: {e}")
@@ -73,6 +76,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
 
     # ---------------------------------------------------------------- pipeline
     if solve_clicked and problem_text.strip():
+        from modules.pipeline import run_pipeline
         st.session_state["problem_text"] = problem_text
         known_context = ws.as_context_string()
 
@@ -121,4 +125,5 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
     model = st.session_state["model"]
     report = st.session_state["report"]
     if model:
+        from ui.results import render_results
         render_results(client, ws, model, report, problem_text)

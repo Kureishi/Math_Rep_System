@@ -93,7 +93,11 @@ math-rep-system/
 │                              #   defaults, sidebar, mode dispatch. The pipeline and
 │                              #   every page's actual UI now live in ui/ (below);
 │                              #   this file is deliberately small enough to read in
-│                              #   one sitting.
+│                              #   one sitting. Draws the title and a first-load notice
+│                              #   BEFORE importing the heavy stack (the LLM client,
+│                              #   workspace, sidebar, pages), so the page shows
+│                              #   something immediately instead of staying blank while
+│                              #   those imports finish.
 ├── cli.py                     # non-interactive: `python cli.py solve "..."` -- a single
 │                              #   extract -> verify attempt with NO retry loop (reports
 │                              #   the first attempt honestly rather than re-prompting)
@@ -118,7 +122,10 @@ math-rep-system/
 │   │                          #   math/LLM logic of its own. See ui/__init__.py's own
 │   │                          #   docstring for the full package map.
 │   ├── __init__.py             # PAGES: mode label -> page function (the dispatch table
-│   │                          #   app.py falls through to); command_palette.MODE_LABELS
+│   │                          #   app.py falls through to), built lazily -- a page's own
+│   │                          #   module is only imported the first time its mode is
+│   │                          #   selected, so opening the app doesn't pay for every
+│   │                          #   page's imports up front; command_palette.MODE_LABELS
 │   │                          #   is the actual source of truth for the mode list itself,
 │   │                          #   with tests/test_app_modes.py enforcing the two can't drift
 │   ├── common.py                # helpers shared by several pages (upload-size guard,
@@ -150,7 +157,15 @@ math-rep-system/
     │                          #   narrate -> scenarios sequence -- ui/word_problem.py
     │                          #   and batch_solver.py both call this; see its own
     │                          #   docstring for what's deliberately NOT routed through it
-    ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper
+    ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper -- the
+    │                         #   connection check (is_available/list_models) does a
+    │                         #   fast, hard-timeout TCP probe before ever making an HTTP
+    │                         #   call, and uses a separate no-retry client for that call,
+    │                         #   so "LM Studio isn't running" is reported in well under a
+    │                         #   second instead of the several seconds the OpenAI SDK's
+    │                         #   own connect-timeout/retry defaults would otherwise take
+    │                         #   (those defaults are right for a real completion request,
+    │                         #   wrong for a bare status ping)
     ├── llm_schema.py           # pydantic validation of the LLM's extraction JSON, at
     │                          #   the exact boundary before equation_engine.build_model
     │                          #   ever sees it

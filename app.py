@@ -12,15 +12,34 @@ math/LLM logic lives in modules/, which has no Streamlit dependency.
 """
 import streamlit as st
 
-from modules.llm_client import LMStudioClient
-from modules.workspace import Workspace
-from ui import PAGES
-from ui.sidebar import render_sidebar
+# Everything imported ABOVE the set_page_config() call must be cheap: nothing can be drawn until the
+# script reaches its first st.* call, and the heavy imports (the OpenAI SDK, pandas, scipy, the whole
+# verification/solver stack -- several seconds cold) used to sit here, so a fresh page load showed a
+# blank screen until all of them had finished. Now only the theme helpers are imported first (ui/
+# __init__.py is lazy, so importing ui.theme does not pull the page modules in), the title and a
+# loading notice are drawn, and THEN the heavy imports run behind them.
 from ui.theme import inject_base_styles, render_hero
-from ui.word_problem import render_word_problem_page
 
 st.set_page_config(page_title="Math Representation System", page_icon="🧮", layout="wide")
 inject_base_styles()
+
+render_hero("🧮 Math Representation System",
+            "Text or image → derived equations → self-verified solution → alternative applications.")
+
+# Shown only on a session's first run (a page refresh starts a new session), and cleared just before the
+# real page content is drawn below. Later reruns (every widget click) skip it -- flashing a notice on
+# each interaction would be noise, and by then the imports are cached anyway.
+_boot_notice = None
+if not st.session_state.get("_booted"):
+    _boot_notice = st.empty()
+    _boot_notice.info("⏳ Loading the app -- the first load can take several seconds while the math "
+                       "libraries start up. This page will fill in automatically.")
+
+from modules.llm_client import LMStudioClient  # noqa: E402  (deliberately after the first paint, see above)
+from modules.workspace import Workspace  # noqa: E402
+from ui import PAGES  # noqa: E402
+from ui.sidebar import render_sidebar  # noqa: E402
+from ui.word_problem import render_word_problem_page  # noqa: E402
 
 # ---------------------------------------------------------------- session
 client = LMStudioClient()
@@ -49,8 +68,9 @@ if "_pending_mode" in st.session_state:
 
 sidebar = render_sidebar(client, ws)
 
-render_hero("🧮 Math Representation System",
-            "Text or image → derived equations → self-verified solution → alternative applications.")
+if _boot_notice is not None:
+    _boot_notice.empty()
+st.session_state["_booted"] = True
 
 # ---------------------------------------------------------------- mode dispatch
 # `sidebar.mode` comes from the sidebar's navigation radio. Every mode except the default word-problem
