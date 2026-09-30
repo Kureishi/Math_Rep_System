@@ -36,11 +36,12 @@ no_implicit_optional = true
 source = ["modules"]
 
 [tool.coverage.report]
-# 84%, just under the ~87% baseline measured when this was set up --
-# enough headroom that routine test additions/removals don't cause
-# flaky CI failures, while still catching the case this exists for: a
-# meaningful chunk of new code shipping with no test coverage at all.
-fail_under = 84
+# 90%, a few points under the ~94% baseline measured after the last
+# coverage pass (it was 84% against a ~87% baseline before that) -- enough
+# headroom that routine test additions/removals don't cause flaky CI
+# failures, while still catching the case this exists for: a meaningful
+# chunk of new code shipping with no test coverage at all.
+fail_under = 90
 show_missing = true
 
 

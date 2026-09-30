@@ -170,3 +170,116 @@ def test_seed_is_set_even_on_the_deterministic_no_dependence_path():
     })
     result = run_monte_carlo(model, "z", [UncertainVariable("x", 1.0, 0.5)], n_samples=50, seed=7)
     assert result.seed == 7
+
+
+# ---------------------------------------------------------------- error paths and fallbacks
+import numpy as np
+import sympy as sp
+
+import modules.monte_carlo as mc
+from modules.timeout_utils import ComputationTimeoutError
+
+
+def test_model_without_algebraic_equations_is_rejected():
+    # 'v' is mentioned by no relation, so target_kind() falls back to "equation"
+    # and the target passes the first guard; the only relation is an inequality
+    # on another variable, so there is nothing algebraic to solve.
+    model = build_model({
+        "problem_domain": "general", "problem_type": "inequality",
+        "variables": [{"symbol": "v", "meaning": "v", "known_value": None, "unit": None},
+                      {"symbol": "w", "meaning": "w", "known_value": None, "unit": None}],
+        "equations": [{"name": "c", "kind": "inequality", "expression": "w <= 25", "derivation": ""}],
+        "solve_for": ["v"], "assumptions": [],
+    })
+    with pytest.raises(ValueError, match="no algebraic equations"):
+        run_monte_carlo(model, "v", [UncertainVariable("w", 1.0, 0.1)], n_samples=20, seed=1)
+
+
+def test_solve_timeout_propagates_as_timeout(monkeypatch):
+    def boom(*a, **k):
+        raise ComputationTimeoutError(0.1, "monte carlo solve")
+    monkeypatch.setattr(mc, "run_with_timeout", boom)
+    with pytest.raises(ComputationTimeoutError):
+        run_monte_carlo(_kinematics_model(), "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=20, seed=1)
+
+
+def test_solve_crash_becomes_value_error(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("sympy exploded")
+    monkeypatch.setattr(mc, "run_with_timeout", boom)
+    with pytest.raises(ValueError, match="sympy exploded"):
+        run_monte_carlo(_kinematics_model(), "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=20, seed=1)
+
+
+def test_inconsistent_system_reports_unsolvable():
+    model = build_model({
+        "problem_domain": "general", "problem_type": "algebraic",
+        "variables": [{"symbol": "a", "meaning": "a", "known_value": None, "unit": None},
+                      {"symbol": "k", "meaning": "k", "known_value": None, "unit": None}],
+        "equations": [
+            {"name": "e1", "kind": "equation", "expression": "Eq(a, 1)", "derivation": ""},
+            {"name": "e2", "kind": "equation", "expression": "Eq(a, 2)", "derivation": ""},
+        ],
+        "solve_for": ["a"], "assumptions": [],
+    })
+    with pytest.raises(ValueError, match="Couldn't symbolically solve"):
+        run_monte_carlo(model, "a", [UncertainVariable("k", 1.0, 0.1)], n_samples=20, seed=1)
+
+
+def test_target_missing_from_solution_is_reported(monkeypatch):
+    monkeypatch.setattr(mc, "run_with_timeout", lambda *a, **k: [{sp.Symbol("zzz"): 1}])
+    with pytest.raises(ValueError, match="didn't appear"):
+        run_monte_carlo(_kinematics_model(), "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=20, seed=1)
+
+
+def test_per_sample_fallback_when_vectorized_evaluation_fails(monkeypatch):
+    # Simulates an expression lambdify can't vectorize (piecewise etc.): the
+    # function raises for a whole-array call but works on one scalar at a time.
+    def fake_lambdify(symbols, expr, modules=None):
+        def f(*args):
+            if any(np.ndim(a) > 0 for a in args):
+                raise TypeError("can't vectorize")
+            return args[0] * 2.0
+        return f
+    monkeypatch.setattr(mc.sp, "lambdify", fake_lambdify)
+    r = run_monte_carlo(_kinematics_model(), "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=50, seed=3)
+    assert r.n_failed == 0 and len(r.samples) == 50
+    # the scalar path evaluated the SAME draws the vectorized path would have seen
+    expected = np.random.default_rng(3).normal(20.0, 1.0, size=50) * 2.0
+    assert r.samples == pytest.approx(expected.tolist())
+
+
+def test_per_sample_fallback_counts_raising_samples_as_failed(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_lambdify(symbols, expr, modules=None):
+        def f(*args):
+            if any(np.ndim(a) > 0 for a in args):
+                raise TypeError("can't vectorize")
+            calls["n"] += 1
+            if calls["n"] % 2 == 0:
+                raise ZeroDivisionError("bad draw")   # every 2nd sample blows up
+            return args[0]
+        return f
+    monkeypatch.setattr(mc.sp, "lambdify", fake_lambdify)
+    r = run_monte_carlo(_kinematics_model(), "a", [UncertainVariable("v_f", 20.0, 1.0)], n_samples=40, seed=3)
+    assert r.n_failed == 20 and len(r.samples) == 20
+    assert r.n_failed + len(r.samples) == r.n_requested
+
+
+def test_all_samples_failing_returns_empty_result_without_stats():
+    # sqrt of a variable drawn from Normal(-100, 1): every single draw is
+    # negative -> NaN/complex -> every sample dropped. Must return a result
+    # (samples=[], stats None), NOT raise or divide by zero computing a mean.
+    model = build_model({
+        "problem_domain": "general", "problem_type": "algebraic",
+        "variables": [{"symbol": "y", "meaning": "y", "known_value": None, "unit": None},
+                      {"symbol": "x", "meaning": "x", "known_value": None, "unit": None}],
+        "equations": [{"name": "e", "kind": "equation", "expression": "Eq(y, sqrt(x))", "derivation": ""}],
+        "solve_for": ["y"], "assumptions": [],
+    })
+    with np.errstate(invalid="ignore"):
+        r = run_monte_carlo(model, "y", [UncertainVariable("x", -100.0, 1.0)], n_samples=60, seed=9)
+    assert r.samples == [] and r.n_failed == 60 and r.n_requested == 60
+    assert r.mean is None and r.std is None and r.p5 is None and r.p95 is None
+    assert r.seed == 9

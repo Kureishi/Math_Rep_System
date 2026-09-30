@@ -205,3 +205,208 @@ def test_gradient_descent_path_stops_early_once_converged():
     path = gradient_descent_path(x**2 + y**2, [x, y], (1e-8, 1e-8), direction="minimize",
                                     max_iters=100)
     assert len(path) < 100
+
+
+# ---------------------------------------------------------------- remaining branches (coverage round)
+import pytest
+
+import modules.optimization_utils as ou
+from modules.timeout_utils import ComputationTimeoutError
+
+
+def test_eliminate_greedy_skips_to_next_candidate_when_a_solve_raises(monkeypatch):
+    # constraint x + y - 10 = 0 could eliminate either variable. The first
+    # attempted solve (for x) fails; the heuristic must skip on to y rather
+    # than abort -- this is the "best-effort elimination" contract.
+    real = ou.run_with_timeout
+    calls = {"n": 0}
+
+    def flaky(func, *args, **kwargs):
+        if kwargs.get("label") == "constraint elimination":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ComputationTimeoutError(0.1, "constraint elimination")
+        return real(func, *args, **kwargs)
+
+    monkeypatch.setattr(ou, "run_with_timeout", flaky)
+    reduced, eliminated, free_vars = _eliminate_greedy(x * y, ["x", "y"], [x + y - 10])
+    assert calls["n"] == 2
+    assert list(eliminated) == ["y"]                      # x failed, y succeeded
+    assert sp.simplify(eliminated["y"] - (10 - x)) == 0
+    assert free_vars == [x]
+
+
+def test_eliminate_greedy_returns_failure_when_objective_collapses_to_a_constant():
+    # x - y subject to x - y = 5: eliminating x turns the objective into the
+    # constant 5, leaving no variable to differentiate -- signalled as
+    # (None, {}, []) so the caller falls back to Lagrange multipliers
+    reduced, eliminated, free_vars = _eliminate_greedy(x - y, ["x", "y"], [x - y - 5])
+    assert reduced is None and eliminated == {} and free_vars == []
+
+
+def test_classify_inconclusive_when_hessian_eigenvalues_stay_symbolic():
+    k = sp.Symbol("k")
+    # Hessian of x**2 + y**2 + k*x*y has eigenvalues containing the free
+    # symbol k, so complex() can't convert them -> inconclusive, not a crash
+    assert _classify_critical_point(x**2 + y**2 + k * x * y, [x, y], {x: 0, y: 0}) == "inconclusive"
+
+
+def test_classify_inconclusive_when_hessian_eigenvalues_are_complex():
+    # Hessian of I*x*y is [[0, I], [I, 0]]: eigenvalues +/- I, purely imaginary.
+    # A second-derivative test is meaningless for those -> inconclusive.
+    assert _classify_critical_point(sp.I * x * y, [x, y], {x: 0, y: 0}) == "inconclusive"
+
+
+def test_solve_optimization_returns_none_when_model_has_no_objective(kinematics_json):
+    import json
+    model = build_model(json.loads(kinematics_json))
+    assert model.objective is None
+    assert solve_optimization(model) is None
+
+
+# -- Lagrange-multiplier path. It is only reached when elimination collapses
+# the objective (see test above), so x - y subject to x - y = 5 is the
+# smallest real model that drives solve_optimization down it.
+def _lagrange_model():
+    return _model("x - y", optimize_over=["x", "y"], equations=["Eq(x - y, 5)"])
+
+
+def test_lagrange_path_returns_constrained_critical_point_and_multiplier():
+    result = solve_optimization(_lagrange_model())
+    assert result.error is None
+    assert result.used_lagrange is True
+    assert len(result.critical_points) == len(result.classifications) == len(result.multiplier_values) >= 1
+    assert "constrained" in result.classifications[0]         # explicitly NOT second-order classified
+    lam = next(iter(result.multiplier_values[0].values()))
+    assert lam == 1                                            # dL/dx = 1 - lambda = 0
+
+
+def test_lagrange_solve_timeout_is_reported(monkeypatch):
+    real = ou.run_with_timeout
+
+    def boom(func, *args, **kwargs):
+        # only the Lagrange solve times out -- the earlier elimination attempt
+        # must still run normally or the model never reaches the Lagrange path
+        if kwargs.get("label") == "Lagrange system solve":
+            raise ComputationTimeoutError(0.1, "Lagrange system solve")
+        return real(func, *args, **kwargs)
+    monkeypatch.setattr(ou, "run_with_timeout", boom)
+    result = solve_optimization(_lagrange_model())
+    assert result.used_lagrange is True
+    assert "Timed out solving the Lagrange system" in result.error
+
+
+def test_lagrange_solve_crash_is_reported(monkeypatch):
+    real = ou.run_with_timeout
+
+    def boom(func, *args, **kwargs):
+        if kwargs.get("label") == "Lagrange system solve":
+            raise RuntimeError("solver exploded")
+        return real(func, *args, **kwargs)
+    monkeypatch.setattr(ou, "run_with_timeout", boom)
+    result = solve_optimization(_lagrange_model())
+    assert result.used_lagrange is True
+    assert "Could not solve the Lagrange system: solver exploded" in result.error
+
+
+def test_lagrange_with_no_real_solution_is_reported(monkeypatch):
+    real = ou.run_with_timeout
+
+    def none_found(func, *args, **kwargs):
+        if kwargs.get("label") == "Lagrange system solve":
+            return []
+        return real(func, *args, **kwargs)
+    monkeypatch.setattr(ou, "run_with_timeout", none_found)
+    result = solve_optimization(_lagrange_model())
+    assert result.used_lagrange is True
+    assert "no real solution" in result.error
+
+
+# -- critical-point solve failures on the ordinary (non-Lagrange) path
+
+def test_critical_point_solve_timeout_is_reported(monkeypatch):
+    def boom(*a, **k):
+        raise ComputationTimeoutError(0.1, "critical point solve")
+    monkeypatch.setattr(ou, "run_with_timeout", boom)
+    result = solve_optimization(_model("x**2 - 4*x", optimize_over=["x"]))
+    assert "Timed out solving for critical points" in result.error
+
+
+def test_critical_point_solve_crash_is_reported(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("solver exploded")
+    monkeypatch.setattr(ou, "run_with_timeout", boom)
+    result = solve_optimization(_model("x**2 - 4*x", optimize_over=["x"]))
+    assert "Could not solve for critical points: solver exploded" in result.error
+
+
+def test_inequality_that_cannot_be_evaluated_is_skipped_not_fatal():
+    # an inequality mentioning a variable with no value at the critical point
+    # can't be decided -> skipped silently (no note, no crash); the genuinely
+    # violated one next to it is still reported
+    model = build_model({
+        "problem_domain": "t", "problem_type": "algebraic",
+        "variables": [{"symbol": s, "meaning": s, "known_value": None, "unit": None} for s in ("x", "w")],
+        "equations": [
+            {"name": "undecidable", "kind": "inequality", "expression": "w >= 1", "derivation": ""},
+            {"name": "too small", "kind": "inequality", "expression": "x >= 5", "derivation": ""},
+        ],
+        "objective": {"expression": "x**2 - 4*x + 7", "direction": "minimize", "optimize_over": ["x"]},
+        "solve_for": ["x"], "assumptions": [],
+    })
+    result = solve_optimization(model)
+    assert result.error is None
+    assert len(result.feasibility_notes) == 1
+    assert "too small" in result.feasibility_notes[0]
+
+
+# ---------------------------------------------------------------- gradient_descent_path failure handling
+
+def _fake_lambdify(f_impl, grad_impl):
+    """gradient_descent_path calls sp.lambdify twice -- objective first, then
+    the gradient list -- so hand back the two stand-ins in that order."""
+    impls = iter([f_impl, grad_impl])
+    return lambda *a, **k: next(impls)
+
+
+def test_descent_returns_just_the_start_when_objective_cannot_be_evaluated_there():
+    # wrong arity for the start point -> the objective call itself raises
+    path = gradient_descent_path(x**2 + y**2, [x, y], (1.0,), direction="minimize")
+    assert path == [(1.0,)]
+
+
+def test_descent_stops_when_gradient_evaluation_fails(monkeypatch):
+    def bad_grad(*p):
+        raise ValueError("gradient undefined here")
+    monkeypatch.setattr(ou.sp, "lambdify", _fake_lambdify(lambda *p: 1.0, bad_grad))
+    path = gradient_descent_path(x**2, [x], (2.0,), direction="minimize")
+    assert path == [(2.0,)]
+
+
+def test_descent_stops_when_candidate_evaluation_fails(monkeypatch):
+    calls = {"n": 0}
+
+    def f(*p):
+        calls["n"] += 1
+        if calls["n"] > 1:                      # fine at the start point, raises at the first candidate
+            raise ValueError("domain error")
+        return 4.0
+    monkeypatch.setattr(ou.sp, "lambdify", _fake_lambdify(f, lambda *p: [1.0]))
+    path = gradient_descent_path(x**2, [x], (2.0,), direction="minimize")
+    assert path == [(2.0,)]
+
+
+def test_descent_gives_up_when_backtracking_never_finds_a_finite_value(monkeypatch):
+    calls = {"n": 0}
+
+    def f(*p):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 4.0                          # start point
+        if calls["n"] == 2:
+            return 100.0                        # first candidate: worse -> enter backtracking
+        raise ValueError("domain error")        # every backtracked step raises -> NaN each time
+    monkeypatch.setattr(ou.sp, "lambdify", _fake_lambdify(f, lambda *p: [1.0]))
+    path = gradient_descent_path(x**2, [x], (2.0,), direction="minimize")
+    assert path == [(2.0,)]                     # never accepted a non-finite point
+    assert calls["n"] == 2 + 20                 # backtracking is capped at 20 attempts

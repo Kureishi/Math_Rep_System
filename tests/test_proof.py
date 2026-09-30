@@ -136,3 +136,127 @@ def test_induction_proof_requires_at_least_one_base_case():
     eq = sp.Eq(a(n + 1), a(n) + 1)
     result = build_recurrence_induction_proof(eq, "a", n + 1, n, {})
     assert result.error is not None
+
+
+# ---------------------------------------------------------------- defensive branches in build_proof
+import pytest
+
+import modules.proof as proofmod
+from modules.equivalence import EquivalenceResult
+from modules.timeout_utils import ComputationTimeoutError
+
+_x = sp.Symbol("x")
+
+
+def _confirmed(raw_difference):
+    return EquivalenceResult(True, "symbolic", sp.Integer(0), "ok", raw_difference=raw_difference)
+
+
+def test_proof_none_when_raw_difference_missing():
+    # a confirmed symbolic equivalence that somehow carries no raw difference
+    # (e.g. a result built by older code) has nothing to walk through
+    assert build_proof(_confirmed(None)) is None
+
+
+def test_proof_skips_a_step_that_times_out_and_keeps_going(monkeypatch):
+    real = proofmod.run_with_timeout
+
+    def fake(func, *args, **kwargs):
+        if kwargs.get("label") == "proof step: Expand":
+            raise ComputationTimeoutError(0.1, kwargs["label"])
+        return real(func, *args, **kwargs)
+
+    monkeypatch.setattr(proofmod, "run_with_timeout", fake)
+    steps = build_proof(_confirmed((_x + 1) ** 2 - (_x ** 2 + 2 * _x + 1)))
+    names = [n for n, _ in steps]
+    assert "Expand" not in names                 # the timed-out pass is skipped, not faked
+    assert steps[-1][1] == "0"                   # ...but a later pass still reaches zero
+    assert len(steps) >= 2
+
+
+def test_proof_skips_a_step_that_raises_and_keeps_going(monkeypatch):
+    real = proofmod.run_with_timeout
+
+    def fake(func, *args, **kwargs):
+        if kwargs.get("label") == "proof step: Expand":
+            raise RuntimeError("sympy internal error")
+        return real(func, *args, **kwargs)
+
+    monkeypatch.setattr(proofmod, "run_with_timeout", fake)
+    steps = build_proof(_confirmed((_x + 1) ** 2 - (_x ** 2 + 2 * _x + 1)))
+    assert "Expand" not in [n for n, _ in steps]
+    assert steps[-1][1] == "0"
+
+
+def test_proof_is_honest_when_named_steps_never_reach_zero(monkeypatch):
+    # every pass in the chain is a no-op, so the expression never reduces to 0
+    # -- the proof must say so explicitly instead of claiming it ended at zero
+    monkeypatch.setattr(proofmod, "_STEPS", [("Identity pass", lambda e: e)])
+    steps = build_proof(_confirmed(_x + 1))
+    assert len(steps) == 2                        # start + the honesty note; no padded no-op step
+    assert steps[0][0].startswith("Start from the difference")
+    assert "didn't fully reduce" in steps[-1][0]
+    assert steps[-1][1] == sp.latex(_x + 1)
+
+
+def test_proof_where_raw_difference_is_already_zero_has_only_the_start_step():
+    steps = build_proof(_confirmed(sp.Integer(0)))
+    # current == 0 from the start: every pass is a no-op (skipped), and since
+    # current IS zero no "didn't fully reduce" note is appended
+    assert [n for n, _ in steps] == ["Start from the difference of the two expressions"]
+
+
+# ---------------------------------------------------------------- induction proof: failure handling
+
+def test_induction_base_case_that_cannot_be_evaluated_is_marked_unverified():
+    n = sp.Symbol("n", integer=True)
+    k = sp.Symbol("k")
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 1), a(n) + 1)
+    # a closed form with a stray free symbol (n + k) doesn't reduce to a number
+    # at n=0, so complex() raises TypeError -- that must become an unverified
+    # step with an explanatory message, not an uncaught crash
+    result = build_recurrence_induction_proof(eq, "a", n + k, n, {0: 1})
+    assert not result.valid
+    assert result.steps[0].verified is False
+    assert "could not evaluate" in result.steps[0].detail
+    assert "does NOT match" in result.steps[0].detail
+
+
+def test_induction_base_case_with_divergent_closed_form_is_unverified():
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 1), a(n) + 1)
+    # 1/n at n=0 is zoo: evaluates without raising, but can't equal the base value
+    result = build_recurrence_induction_proof(eq, "a", 1 / n, n, {0: 1})
+    assert not result.valid
+    assert result.steps[0].verified is False
+    assert "zoo" in result.steps[0].detail
+
+
+def test_induction_inductive_step_exception_is_reported_not_raised(monkeypatch):
+    import modules.recurrence_utils as ru
+
+    def boom(*a, **k):
+        raise RuntimeError("simplify blew up")
+
+    monkeypatch.setattr(ru, "verify_recurrence_solution", boom)
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 1), a(n) + 1)
+    result = build_recurrence_induction_proof(eq, "a", n + 1, n, {0: 1})
+    assert not result.valid
+    assert result.steps[0].verified is True       # base case still stands on its own
+    assert result.steps[-1].verified is False
+    assert "could not verify" in result.steps[-1].detail
+    assert "does NOT go through" in result.conclusion
+
+
+def test_induction_conclusion_names_smallest_base_index_on_success():
+    n = sp.Symbol("n", integer=True)
+    a = sp.Function("a")
+    eq = sp.Eq(a(n + 2), a(n + 1) + a(n))
+    phi, psi = (1 + sp.sqrt(5)) / 2, (1 - sp.sqrt(5)) / 2
+    result = build_recurrence_induction_proof(eq, "a", (phi ** n - psi ** n) / sp.sqrt(5), n, {1: 1, 0: 0})
+    assert result.valid
+    assert "at or above 0" in result.conclusion   # min of {0, 1}, regardless of dict order

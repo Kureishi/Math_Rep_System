@@ -776,7 +776,11 @@ See `ARCHITECTURE.md` for the full design. In short:
     disagreement directly visible rather than only inferable from a
     similarity percentage.
 
-## Recently added
+## Additional modes and platform features
+
+Items 51-63 -- the standalone solver modes (geometry, PDE, tensor calculus,
+transforms & series) and the platform/infrastructure layer around them
+(templates, command palette, schema validation, REST API, migrations).
 
 51. **Geometry mode** (`modules/geometry_solver.py`, "📐 Geometry") --
     triangle solving (SSS, SAS, ASA, AAS, and the genuinely ambiguous
@@ -1386,11 +1390,26 @@ sample payloads and fixtures if you want to add more.
   tab any time via `workflow_dispatch`.
 - **Optional local pre-commit hook** (`.pre-commit-config.yaml`): runs
   the same suite before each commit, for immediate feedback rather than
-  finding out something broke only after pushing -- the suite runs in
-  roughly 10-15 seconds, so this isn't a meaningful slowdown. Opt in
-  with:
+  finding out something broke only after pushing. The full suite is well
+  over a thousand tests and takes a few minutes (roughly 2-5, depending on
+  the machine), so this IS a noticeable wait on every commit -- opt in only
+  if you want that trade, or run it on `git push` instead by adding
+  `stages: [pre-push]` to the hook and installing with
+  `pre-commit install --hook-type pre-push`. Opt in with:
   ```bash
   pip install pre-commit
   pre-commit install
   ```
   Skip it for a single commit with `git commit --no-verify`.
+- **Coverage floor**: `pytest` fails if line coverage of `modules/` drops
+  below the `fail_under` value in `pyproject.toml` (currently 90%; measured
+  coverage is in the mid-90s). It exists to catch a meaningful chunk of new
+  code shipping with no tests at all, not to chase 100% -- the remaining
+  uncovered lines are mostly defensive branches around third-party failures.
+- **Hypothesis deadlines are disabled suite-wide** (`tests/conftest.py`).
+  Nearly every property test drives SymPy, whose first call on a fresh
+  expression shape warms internal caches (a cold call can take several
+  times longer than the identical warm one), so Hypothesis' default 200ms
+  per-example deadline failed nondeterministically as a `FlakyFailure` --
+  a timing artifact, not a correctness signal. Each test's own
+  `@settings(max_examples=...)` still applies.

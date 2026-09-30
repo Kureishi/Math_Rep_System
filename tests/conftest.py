@@ -8,6 +8,22 @@ building this app), and can be pointed at a custom extraction payload via
 `payload_json`.
 """
 import pytest
+from hypothesis import settings as _hypothesis_settings
+
+# Hypothesis' default 200ms per-example deadline is wrong for this suite.
+# Nearly every property test drives SymPy, whose first call on a fresh
+# expression shape populates internal caches (a cold call can take 3x+
+# what the identical warm call does) -- so the deadline fails
+# nondeterministically depending on runner load and example order, and
+# Hypothesis then reports it as a FlakyFailure ("failed on the first call
+# but not a subsequent one"). Observed for real:
+# test_is_exactly_zero_rejects_genuinely_nonzero_polynomial took 256ms cold
+# vs 76ms warm. The deadline is a timing check, not a correctness check
+# (correctness is what the property assertions test), so it's disabled
+# suite-wide rather than played whack-a-mole with a bigger number per test.
+# Each test's own @settings(max_examples=...) still applies on top of this.
+_hypothesis_settings.register_profile("math_rep_system", deadline=None)
+_hypothesis_settings.load_profile("math_rep_system")
 
 
 class FakeClient:
