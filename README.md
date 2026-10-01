@@ -108,7 +108,13 @@ See `ARCHITECTURE.md` for the full design. In short:
    multipliers (equality-constrained, when the constraint can't be cleanly
    substituted away), classified min/max/saddle via the second-derivative
    test or the Hessian's eigenvalue signs, and checked against any
-   inequality constraints for feasibility.
+   inequality constraints for feasibility. Equality constraints are never
+   silently dropped: each is either used to eliminate a variable (and then
+   substituted out of every other constraint too), found redundant, or --
+   if sympy can't isolate a variable from it, or it pins the last variable
+   that has to stay free -- the whole problem falls back to Lagrange
+   multipliers instead. An unsolvable Lagrange system is reported as an
+   error, never as an answer that ignores the constraint.
 6. **Workspace & plotting** -- solved values can be pushed into a session
    workspace for reuse in later calculations (reference them by name in a
    new problem statement -- the model is automatically told their value).
@@ -1406,6 +1412,14 @@ sample payloads and fixtures if you want to add more.
   coverage is in the mid-90s). It exists to catch a meaningful chunk of new
   code shipping with no tests at all, not to chase 100% -- the remaining
   uncovered lines are mostly defensive branches around third-party failures.
+- **Plot target selectors** (Y-axis / Z-axis / contour value) solve the
+  equation for the chosen variable. The UI also shows a slider for that
+  variable (its selectbox comes after the sliders); the solve deliberately
+  ignores that slider value, and the UI says so in a caption. If sympy can't
+  solve for the target the plot falls back to the equation's residual, which
+  needs a value for every non-axis symbol -- a missing one raises a
+  `ValueError` naming it (`modules/plot_params.py`, shared by the live Plotly
+  figures and the exported matplotlib snapshots so the two always agree).
 - **Hypothesis deadlines are disabled suite-wide** (`tests/conftest.py`).
   Nearly every property test drives SymPy, whose first call on a fresh
   expression shape warms internal caches (a cold call can take several

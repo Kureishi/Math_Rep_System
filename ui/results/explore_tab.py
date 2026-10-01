@@ -260,6 +260,9 @@ def render_interactive_plot(model: ProblemModel, edited_values, tab_explore):
                                      if t not in (x_symbol, y_symbol) and target_kind(model, t) == "equation"]
                     if z_candidates:
                         z_target = st.selectbox("Z-axis target (solve equation for)", z_candidates)
+                        if z_target in param_values:
+                            st.caption(f"'{z_target}' is solved for, so its slider above is ignored "
+                                        "while it's the Z axis.")
 
                 fig = build_surface_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
                                            z_target=z_target)
@@ -331,6 +334,9 @@ def render_interactive_plot(model: ProblemModel, edited_values, tab_explore):
                     if z_candidates:
                         z_target = st.selectbox("Contour value (solve equation for)", z_candidates,
                                                   key="contour_z_target")
+                        if z_target in param_values:
+                            st.caption(f"'{z_target}' is solved for, so its slider above is ignored "
+                                        "while it's the contour value.")
 
                 fig = build_contour_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
                                            z_target=z_target)
@@ -387,6 +393,9 @@ def render_interactive_plot(model: ProblemModel, edited_values, tab_explore):
                                    if t != x_symbol and target_kind(model, t) == "equation"]
                     if candidates:
                         y_target = st.selectbox("Y-axis target (solve equation for)", candidates)
+                        if y_target in param_values:
+                            st.caption(f"'{y_target}' is solved for, so its slider above is ignored "
+                                        "while it's the Y axis.")
 
                 log_cols = st.columns(2)
                 with log_cols[0]:

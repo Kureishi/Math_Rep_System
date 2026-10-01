@@ -284,8 +284,11 @@ math-rep-system/
     │                              #   code_export.py's runnable functions as code cells, no new
     │                              #   dependency on the nbformat package
     ├── optimization_utils.py      # calculus/Lagrange optimization solver (elimination
-    │                              #   with a fresh-placeholder-safe fallback to Lagrange
-    │                              #   multipliers; imports verifier._known_substitutions
+    │                              #   that substitutes each eliminated variable out of the
+    │                              #   remaining constraints too, and that FAILS -- falling
+    │                              #   back to Lagrange multipliers -- rather than ever
+    │                              #   dropping a constraint it couldn't use; imports
+    │                              #   verifier._known_substitutions
     │                              #   at module level -- safe because verifier only
     │                              #   imports back from here inside a function body)
     ├── verifier.py               # structural + numeric + dimensional + inequality +
@@ -307,6 +310,11 @@ math-rep-system/
     │                                 #   domain label isn't reliable on its own) and, when
     │                                 #   resolvable, builds the x(t)/v(t) trajectory
     │                                 #   plotter.build_motion_diagram() animates
+    ├── plot_params.py                # shared "solve for the target, else plot the residual"
+    │                                 #   parameter handling for plotter.py AND plot_snapshot.py
+    │                                 #   (the target's own slider value must not be substituted
+    │                                 #   before solving; a missing residual value is a clear
+    │                                 #   ValueError, not a garbage figure)
     ├── plot_snapshot.py              # matplotlib static re-renders of the above, for
     │                                 #   the "include this plot in the report" export feature --
     │                                 #   plus animated GIF exports (matplotlib.animation +

@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import sympy as sp
 
 from modules.equation_engine import Equation, ProblemModel
+from modules.plot_params import solve_for_target, residual_expression
 
 
 def plottable_free_symbols(eq: Equation, fixed_symbols: set[str]) -> list[str]:
@@ -18,6 +19,8 @@ def plottable_free_symbols(eq: Equation, fixed_symbols: set[str]) -> list[str]:
     return sorted(s.name for s in expr.free_symbols if s.name not in fixed_symbols)
 
 
+@np.errstate(divide="ignore", invalid="ignore")  # a solved curve like a = 12/t is infinite at t=0; Plotly/matplotlib
+# drop non-finite points cleanly, so numpy's warning is just log noise on every slider drag
 def build_plot(model: ProblemModel, eq: Equation, x_symbol: str,
                 param_values: dict[str, float], x_range: tuple[float, float],
                 y_target: str | None = None, x_log: bool = False, y_log: bool = False) -> go.Figure:
@@ -47,17 +50,12 @@ def build_plot(model: ProblemModel, eq: Equation, x_symbol: str,
     else:
         xs = np.linspace(x_range[0], x_range[1], 400)
 
-    subs = {sp.Symbol(k): v for k, v in param_values.items()}
     fig = go.Figure()
 
     if y_target and y_target != x_symbol:
-        target = sp.Symbol(y_target)
-        try:
-            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
-        except Exception:  # noqa: BLE001
-            solved = []
-        if solved:
-            f = sp.lambdify(x, solved[0][target], "numpy")
+        solved_expr = solve_for_target(eq, y_target, param_values)
+        if solved_expr is not None:
+            f = sp.lambdify(x, solved_expr, "numpy")
             ys = f(xs)
             fig.add_trace(go.Scatter(x=xs, y=np.real(ys), mode="lines",
                                       name=f"{y_target} vs {x_symbol}"))
@@ -67,7 +65,7 @@ def build_plot(model: ProblemModel, eq: Equation, x_symbol: str,
             return fig
 
     # fallback: plot the residual of the equation itself
-    residual = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+    residual = residual_expression(eq, param_values, {x_symbol})
     f = sp.lambdify(x, residual, "numpy")
     ys = f(xs)
     fig.add_trace(go.Scatter(x=xs, y=np.real(ys), mode="lines", name=eq.name))
@@ -78,6 +76,8 @@ def build_plot(model: ProblemModel, eq: Equation, x_symbol: str,
     return fig
 
 
+@np.errstate(divide="ignore", invalid="ignore")  # a solved curve like a = 12/t is infinite at t=0; Plotly/matplotlib
+# drop non-finite points cleanly, so numpy's warning is just log noise on every slider drag
 def build_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
                          param_values: dict[str, float],
                          x_range: tuple[float, float], y_range: tuple[float, float],
@@ -95,17 +95,12 @@ def build_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
     ys = np.linspace(y_range[0], y_range[1], resolution)
     X, Y = np.meshgrid(xs, ys)
 
-    subs = {sp.Symbol(k): v for k, v in param_values.items()}
     fig = go.Figure()
 
     if z_target and z_target not in (x_symbol, y_symbol):
-        target = sp.Symbol(z_target)
-        try:
-            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
-        except Exception:  # noqa: BLE001
-            solved = []
-        if solved:
-            f = sp.lambdify((x, y), solved[0][target], "numpy")
+        solved_expr = solve_for_target(eq, z_target, param_values)
+        if solved_expr is not None:
+            f = sp.lambdify((x, y), solved_expr, "numpy")
             Z = np.real(np.array(f(X, Y), dtype=complex)) if not np.isscalar(f(X, Y)) else np.full_like(X, f(X, Y))
             fig.add_trace(go.Surface(x=xs, y=ys, z=Z, colorscale="Viridis",
                                        colorbar=dict(title=z_target)))
@@ -116,7 +111,7 @@ def build_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
             return fig
 
     # fallback: residual surface, with a zero-plane the equation satisfies
-    residual = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+    residual = residual_expression(eq, param_values, {x_symbol, y_symbol})
     f = sp.lambdify((x, y), residual, "numpy")
     Z = np.real(np.array(f(X, Y), dtype=complex)) if not np.isscalar(f(X, Y)) else np.full_like(X, f(X, Y))
     fig.add_trace(go.Surface(x=xs, y=ys, z=Z, colorscale="RdBu",
@@ -312,6 +307,8 @@ def build_sweep_chart(sweep_result):
     return fig
 
 
+@np.errstate(divide="ignore", invalid="ignore")  # a solved curve like a = 12/t is infinite at t=0; Plotly/matplotlib
+# drop non-finite points cleanly, so numpy's warning is just log noise on every slider drag
 def build_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
                          param_values: dict[str, float],
                          x_range: tuple[float, float], y_range: tuple[float, float],
@@ -330,18 +327,13 @@ def build_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
     ys = np.linspace(y_range[0], y_range[1], resolution)
     X, Y = np.meshgrid(xs, ys)
 
-    subs = {sp.Symbol(k): v for k, v in param_values.items()}
     fig = go.Figure()
 
     z_label = z_target or f"{eq.name} residual"
     if z_target and z_target not in (x_symbol, y_symbol):
-        target = sp.Symbol(z_target)
-        try:
-            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
-        except Exception:  # noqa: BLE001
-            solved = []
-        if solved:
-            f = sp.lambdify((x, y), solved[0][target], "numpy")
+        solved_expr = solve_for_target(eq, z_target, param_values)
+        if solved_expr is not None:
+            f = sp.lambdify((x, y), solved_expr, "numpy")
             Z = np.real(np.array(f(X, Y), dtype=complex)) if not np.isscalar(f(X, Y)) else np.full_like(X, f(X, Y))
             fig.add_trace(go.Contour(x=xs, y=ys, z=Z, colorscale="Viridis",
                                        contours=dict(showlabels=True),
@@ -349,7 +341,7 @@ def build_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
             fig.update_layout(xaxis_title=x_symbol, yaxis_title=y_symbol)
             return fig
 
-    residual = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+    residual = residual_expression(eq, param_values, {x_symbol, y_symbol})
     f = sp.lambdify((x, y), residual, "numpy")
     Z = np.real(np.array(f(X, Y), dtype=complex)) if not np.isscalar(f(X, Y)) else np.full_like(X, f(X, Y))
     fig.add_trace(go.Contour(

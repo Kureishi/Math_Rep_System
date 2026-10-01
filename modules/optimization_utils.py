@@ -38,6 +38,26 @@ class OptimizationResult:
     error: str | None = None
 
 
+def _is_identically_zero(expr: sp.Expr) -> bool:
+    """True if `expr` is zero for every value of its symbols (a constraint
+    that became redundant once other constraints were substituted into
+    it). A nonzero constant (an inconsistent constraint) is NOT zero.
+    Conservative on failure: anything that can't be shown to be zero counts
+    as nonzero, so it is kept and handled by the Lagrange fallback."""
+    expr = sp.expand(expr)
+    if expr == 0:
+        return True
+    if not expr.free_symbols:
+        try:
+            return abs(float(expr)) < 1e-9     # float noise, e.g. 1e-17 left by 0.1*x terms
+        except (TypeError, ValueError):
+            return False
+    try:
+        return run_with_timeout(sp.simplify, expr, label="constraint redundancy check") == 0
+    except Exception:  # noqa: BLE001 -- includes ComputationTimeoutError
+        return False
+
+
 def _eliminate_greedy(objective_expr: sp.Expr, optimize_over: list[str],
                         constraint_exprs: list[sp.Expr]) -> tuple[sp.Expr | None, dict[str, sp.Expr], list[sp.Symbol]]:
     """Eliminates as many of the objective's free variables as possible
@@ -54,6 +74,17 @@ def _eliminate_greedy(objective_expr: sp.Expr, optimize_over: list[str],
     genuinely NOT eliminable and NOT requested cause this to fail (return
     an empty free-variable list), signaling the caller to fall back to
     Lagrange multipliers instead.
+
+    Every constraint is either USED (solved for a variable, which is then
+    substituted out of the objective AND out of every other remaining
+    constraint -- otherwise a later constraint would be solved for a
+    variable that's already gone, reintroducing it into the objective) or
+    found redundant (it reduces to 0 once the others are substituted in).
+    If any constraint on a still-free variable is left over -- sympy
+    couldn't isolate a variable from it, or it pins the last free variable
+    that has to stay free to differentiate -- this FAILS rather than hand
+    back an objective that silently ignores it, so the caller falls back to
+    Lagrange multipliers, which honour every constraint.
 
     Returns (reduced_objective, eliminated_map, free_vars). free_vars is
     empty on failure; eliminated_map maps eliminated variable NAMES to
@@ -103,11 +134,23 @@ def _eliminate_greedy(objective_expr: sp.Expr, optimize_over: list[str],
                     reduced = reduced.subs(subs_map)
                     eliminated[cand] = chosen
                     eligible.discard(cand)
-                    remaining.remove(c)
+                    # rewrite every OTHER constraint without the variable just
+                    # eliminated, and drop any that became redundant -- see docstring
+                    remaining = [rewritten for other in remaining if other is not c
+                                 for rewritten in [other.subs(subs_map)]
+                                 if not _is_identically_zero(rewritten)]
                     changed = True
                     break
             if changed:
                 break
+
+    # a constraint still standing at this point was NOT used to reduce the
+    # objective. If it constrains a still-free variable (or is outright
+    # inconsistent) then returning `reduced` would silently drop it.
+    for leftover_constraint in remaining:
+        left_free = {sym.name for sym in leftover_constraint.free_symbols}
+        if left_free & eligible or not left_free:
+            return None, {}, []
 
     still_free_in_reduced = {s.name for s in reduced.free_symbols}
     # anything left that ISN'T an eligible/free optimize_over var and wasn't

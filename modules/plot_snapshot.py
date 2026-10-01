@@ -29,6 +29,7 @@ from matplotlib.colors import ListedColormap
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 -- registers 3d projection
 
 from modules.equation_engine import Equation
+from modules.plot_params import solve_for_target, residual_expression
 
 
 def _finish(fig, fmt: str = "png") -> bytes:
@@ -47,6 +48,8 @@ def _finish(fig, fmt: str = "png") -> bytes:
     return buf.getvalue()
 
 
+@np.errstate(divide="ignore", invalid="ignore")  # a solved curve like a = 12/t is infinite at t=0; Plotly/matplotlib
+# drop non-finite points cleanly, so numpy's warning is just log noise on every slider drag
 def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, float],
                          x_range: tuple[float, float], y_target: str | None = None,
                          x_log: bool = False, y_log: bool = False,
@@ -59,7 +62,6 @@ def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, floa
         xs = np.geomspace(lo, max(x_range[1], lo * 10), 400)
     else:
         xs = np.linspace(x_range[0], x_range[1], 400)
-    subs = {sp.Symbol(k): v for k, v in param_values.items()}
 
     fig, ax = plt.subplots(figsize=(7, 4.2))
     if x_log:
@@ -68,13 +70,9 @@ def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, floa
         ax.set_yscale("log")
 
     if y_target and y_target != x_symbol:
-        target = sp.Symbol(y_target)
-        try:
-            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
-        except Exception:  # noqa: BLE001
-            solved = []
-        if solved:
-            f = sp.lambdify(x, solved[0][target], "numpy")
+        solved_expr = solve_for_target(eq, y_target, param_values)
+        if solved_expr is not None:
+            f = sp.lambdify(x, solved_expr, "numpy")
             ys = np.real(np.array(f(xs), dtype=complex))
             ax.plot(xs, ys, color="#2a9d8f", linewidth=2)
             ax.set_xlabel(x_symbol)
@@ -82,7 +80,7 @@ def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, floa
             ax.grid(alpha=0.3)
             return _finish(fig, fmt)
 
-    residual = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+    residual = residual_expression(eq, param_values, {x_symbol})
     f = sp.lambdify(x, residual, "numpy")
     ys = np.real(np.array(f(xs), dtype=complex))
     ax.plot(xs, ys, color="#2a9d8f", linewidth=2)
@@ -93,6 +91,8 @@ def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, floa
     return _finish(fig, fmt)
 
 
+@np.errstate(divide="ignore", invalid="ignore")  # a solved curve like a = 12/t is infinite at t=0; Plotly/matplotlib
+# drop non-finite points cleanly, so numpy's warning is just log noise on every slider drag
 def snapshot_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
                             param_values: dict[str, float],
                             x_range: tuple[float, float], y_range: tuple[float, float],
@@ -104,19 +104,14 @@ def snapshot_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
     xs = np.linspace(x_range[0], x_range[1], resolution)
     ys = np.linspace(y_range[0], y_range[1], resolution)
     X, Y = np.meshgrid(xs, ys)
-    subs = {sp.Symbol(k): v for k, v in param_values.items()}
 
     fig = plt.figure(figsize=(7, 5.5))
     ax = fig.add_subplot(111, projection="3d")
 
     if z_target and z_target not in (x_symbol, y_symbol):
-        target = sp.Symbol(z_target)
-        try:
-            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
-        except Exception:  # noqa: BLE001
-            solved = []
-        if solved:
-            f = sp.lambdify((x, y), solved[0][target], "numpy")
+        solved_expr = solve_for_target(eq, z_target, param_values)
+        if solved_expr is not None:
+            f = sp.lambdify((x, y), solved_expr, "numpy")
             Z = np.real(np.array(f(X, Y), dtype=complex))
             if Z.shape != X.shape:
                 Z = np.full_like(X, float(Z))
@@ -126,7 +121,7 @@ def snapshot_surface_plot(eq: Equation, x_symbol: str, y_symbol: str,
             ax.set_zlabel(z_target)
             return _finish(fig, fmt)
 
-    residual = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+    residual = residual_expression(eq, param_values, {x_symbol, y_symbol})
     f = sp.lambdify((x, y), residual, "numpy")
     Z = np.real(np.array(f(X, Y), dtype=complex))
     if Z.shape != X.shape:
@@ -341,6 +336,8 @@ def snapshot_sweep_chart(sweep_result,
     return _finish(fig, fmt)
 
 
+@np.errstate(divide="ignore", invalid="ignore")  # a solved curve like a = 12/t is infinite at t=0; Plotly/matplotlib
+# drop non-finite points cleanly, so numpy's warning is just log noise on every slider drag
 def snapshot_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
                             param_values: dict[str, float],
                             x_range: tuple[float, float], y_range: tuple[float, float],
@@ -353,18 +350,13 @@ def snapshot_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
     xs = np.linspace(x_range[0], x_range[1], resolution)
     ys = np.linspace(y_range[0], y_range[1], resolution)
     X, Y = np.meshgrid(xs, ys)
-    subs = {sp.Symbol(k): v for k, v in param_values.items()}
 
     fig, ax = plt.subplots(figsize=(6.5, 5.5))
 
     if z_target and z_target not in (x_symbol, y_symbol):
-        target = sp.Symbol(z_target)
-        try:
-            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
-        except Exception:  # noqa: BLE001
-            solved = []
-        if solved:
-            f = sp.lambdify((x, y), solved[0][target], "numpy")
+        solved_expr = solve_for_target(eq, z_target, param_values)
+        if solved_expr is not None:
+            f = sp.lambdify((x, y), solved_expr, "numpy")
             Z = np.real(np.array(f(X, Y), dtype=complex))
             if Z.shape != X.shape:
                 Z = np.full_like(X, float(Z))
@@ -374,7 +366,7 @@ def snapshot_contour_plot(eq: Equation, x_symbol: str, y_symbol: str,
             ax.set_ylabel(y_symbol)
             return _finish(fig, fmt)
 
-    residual = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+    residual = residual_expression(eq, param_values, {x_symbol, y_symbol})
     f = sp.lambdify((x, y), residual, "numpy")
     Z = np.real(np.array(f(X, Y), dtype=complex))
     if Z.shape != X.shape:
@@ -511,6 +503,8 @@ def _finish_gif(fig, update_fn, n_frames: int, fps: int = 12) -> bytes:
     return data
 
 
+@np.errstate(divide="ignore", invalid="ignore")  # a solved curve like a = 12/t is infinite at t=0; Plotly/matplotlib
+# drop non-finite points cleanly, so numpy's warning is just log noise on every slider drag
 def snapshot_rotating_surface_gif(eq: Equation, x_symbol: str, y_symbol: str,
                                      param_values: dict[str, float],
                                      x_range: tuple[float, float], y_range: tuple[float, float],
@@ -526,20 +520,13 @@ def snapshot_rotating_surface_gif(eq: Equation, x_symbol: str, y_symbol: str,
     xs = np.linspace(x_range[0], x_range[1], resolution)
     ys = np.linspace(y_range[0], y_range[1], resolution)
     X, Y = np.meshgrid(xs, ys)
-    subs = {sp.Symbol(k): v for k, v in param_values.items()}
 
     z_label = z_target or f"{eq.name} residual"
+    expr = None
     if z_target and z_target not in (x_symbol, y_symbol):
-        target = sp.Symbol(z_target)
-        try:
-            solved = sp.solve(eq.sympy_eq.subs(subs), target, dict=True)
-        except Exception:  # noqa: BLE001
-            solved = []
-        expr = solved[0][target] if solved else None
-    else:
-        expr = None
+        expr = solve_for_target(eq, z_target, param_values)
     if expr is None:
-        expr = (eq.sympy_eq.lhs - eq.sympy_eq.rhs).subs(subs)
+        expr = residual_expression(eq, param_values, {x_symbol, y_symbol})
 
     f = sp.lambdify((x, y), expr, "numpy")
     Z = np.real(np.array(f(X, Y), dtype=complex))

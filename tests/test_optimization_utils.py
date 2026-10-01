@@ -30,12 +30,22 @@ def test_eliminate_greedy_no_free_symbols_returns_as_is():
     assert reduced == 5 and eliminated == {} and free_vars == []
 
 
-def test_eliminate_greedy_single_variable_skips_elimination_entirely():
+def test_eliminate_greedy_single_variable_skips_elimination_when_no_constraint_touches_it():
     """With only one eligible variable, the elimination loop never runs (a
     single free variable doesn't need eliminating) -- the objective and
-    variable are returned unchanged, still as the one free_var."""
-    reduced, eliminated, free_vars = _eliminate_greedy(x, ["x"], [x - 3])
+    variable are returned unchanged, still as the one free_var. That is only
+    safe when no constraint actually constrains that variable."""
+    reduced, eliminated, free_vars = _eliminate_greedy(x, ["x"], [y - 3])   # constraint is on an unrelated y
     assert reduced == x and eliminated == {} and free_vars == [x]
+
+
+def test_eliminate_greedy_single_variable_with_a_constraint_on_it_fails_to_lagrange():
+    """Regression: a constraint pinning the ONLY free variable used to be
+    silently dropped (the loop never runs for one variable), so the caller
+    then differentiated the unconstrained objective and reported a bogus
+    'no critical points' for a fully-determined problem. Now it fails so the
+    caller falls back to Lagrange multipliers, which honour the constraint."""
+    assert _eliminate_greedy(x, ["x"], [x - 3]) == (None, {}, [])
 
 
 def test_eliminate_greedy_prefers_helper_over_requested_variable():
@@ -51,14 +61,20 @@ def test_eliminate_greedy_prefers_helper_over_requested_variable():
 
 
 def test_eliminate_greedy_stops_once_one_variable_remains():
-    """x + y with both x=3 and y=4 pinned by separate constraints: the loop
-    eliminates one variable per pass and stops as soon as a single free
-    variable remains (it doesn't need eliminating), so exactly one of the
-    two constraints ends up used."""
-    reduced, eliminated, free_vars = _eliminate_greedy(x + y, ["x", "y"], [x - 3, y - 4])
-    assert len(eliminated) == 1 and len(free_vars) == 1
-    remaining_var = free_vars[0]
-    assert reduced == remaining_var + (3 if remaining_var == y else 4)
+    """x + y with ONE constraint (x = 3): x is eliminated, a single free
+    variable (y) remains, and the loop stops -- nothing left to eliminate or
+    to honour."""
+    reduced, eliminated, free_vars = _eliminate_greedy(x + y, ["x", "y"], [x - 3])
+    assert eliminated == {"x": 3} and free_vars == [y]
+    assert reduced == y + 3
+
+
+def test_eliminate_greedy_fails_when_a_second_constraint_pins_the_last_free_variable():
+    """Regression: x + y with BOTH x=3 and y=4. The loop eliminates x and
+    stops with y free (it must keep one variable to differentiate) -- which
+    used to silently discard y = 4. The leftover constraint on a still-free
+    variable must make this fail, not return an objective that ignores it."""
+    assert _eliminate_greedy(x + y, ["x", "y"], [x - 3, y - 4]) == (None, {}, [])
 
 
 # ---------------------------------------------------------------- _backfill_point
@@ -410,3 +426,130 @@ def test_descent_gives_up_when_backtracking_never_finds_a_finite_value(monkeypat
     path = gradient_descent_path(x**2, [x], (2.0,), direction="minimize")
     assert path == [(2.0,)]                     # never accepted a non-finite point
     assert calls["n"] == 2 + 20                 # backtracking is capped at 20 attempts
+
+
+# ---------------------------------------------------------------- constraints must never be silently dropped
+
+def _model_with(objective, over, equations, direction="minimize"):
+    import re
+    names = sorted(set(re.findall(r"[A-Za-z_]\w*", " ".join([objective, *equations]))) - {"Eq"})
+    return build_model({
+        "problem_domain": "t", "problem_type": "algebraic",
+        "variables": [{"symbol": n, "meaning": n, "known_value": None, "unit": None} for n in names],
+        "equations": [{"name": f"c{i}", "kind": "equation", "expression": e, "derivation": ""}
+                      for i, e in enumerate(equations)],
+        "objective": {"expression": objective, "direction": direction, "optimize_over": over},
+        "solve_for": over, "assumptions": [],
+    })
+
+
+def test_second_constraint_is_rewritten_after_the_first_elimination():
+    """Regression: minimize x^2+y^2+z^2 s.t. x+y+z=3 and x=y. After x was
+    eliminated via the first constraint, the second (x = y) still mentioned
+    the ELIMINATED x, so solving it for y re-introduced x into the objective
+    and the answer came back circular ({'x': x/2 - y + 3/2, 'y': ...}).
+    The second constraint must be rewritten without x first. True optimum
+    is x = y = z = 1."""
+    result = solve_optimization(_model_with(
+        "x**2 + y**2 + z**2", ["x", "y", "z"], ["Eq(x + y + z, 3)", "Eq(x, y)"]))
+    assert result.error is None
+    assert len(result.critical_points) == 1
+    assert {k: float(v) for k, v in result.critical_points[0].items()} == {"x": 1.0, "y": 1.0, "z": 1.0}
+    assert result.classifications == ["minimum"]
+    # no variable's value may still be expressed in terms of another symbol
+    assert all(not v.free_symbols for v in result.critical_points[0].values())
+
+
+def test_redundant_constraint_is_dropped_not_treated_as_unresolved():
+    """x + y = 10 and 2x + 2y = 20 say the same thing. Once the first is
+    substituted into the second it reduces to 0 -- redundant, harmless --
+    so plain elimination must still succeed (no pointless Lagrange fallback)."""
+    result = solve_optimization(_model_with(
+        "x*y", ["x", "y"], ["Eq(x + y, 10)", "Eq(2*x + 2*y, 20)"], direction="maximize"))
+    assert result.error is None and result.used_lagrange is False
+    assert {k: float(v) for k, v in result.critical_points[0].items()} == {"x": 5.0, "y": 5.0}
+    assert result.classifications == ["maximum"]
+
+
+def test_inconsistent_constraints_are_not_papered_over():
+    """x = 3 and x = 4 can't both hold. After substituting one into the
+    other the leftover is the nonzero constant -1 -- that must NOT be
+    mistaken for redundancy; the problem falls to Lagrange, which reports
+    that no solution exists."""
+    result = solve_optimization(_model_with("x**2 + y**2", ["x", "y"], ["Eq(x, 3)", "Eq(x, 4)"]))
+    assert result.used_lagrange is True
+    assert result.critical_points == []
+    assert result.error is not None
+
+
+def test_constraint_that_cannot_be_isolated_falls_back_to_lagrange_not_a_wrong_answer(monkeypatch):
+    """Regression: when sympy can't isolate any variable from an equation
+    constraint, that constraint was silently dropped, and the unconstrained
+    objective's critical point was reported as success -- maximizing x*y s.t.
+    x + y = 10 returned (x, y) = (0, 0), which violates the constraint.
+    Elimination is forced to fail here (the real-world trigger is a
+    constraint like x^5 + x + y^5 + y = 10, which sympy can't solve for
+    either variable) and the Lagrange fallback must still honour it."""
+    real = ou.run_with_timeout
+
+    def no_elimination(func, *args, **kwargs):
+        if kwargs.get("label") == "constraint elimination":
+            return []
+        return real(func, *args, **kwargs)
+    monkeypatch.setattr(ou, "run_with_timeout", no_elimination)
+
+    result = solve_optimization(_model_with("x*y", ["x", "y"], ["Eq(x + y, 10)"], direction="maximize"))
+    assert result.error is None
+    assert result.used_lagrange is True
+    assert len(result.critical_points) == 1
+    assert {k: float(v) for k, v in result.critical_points[0].items()} == {"x": 5.0, "y": 5.0}   # NOT (0, 0)
+
+
+def test_genuinely_unisolable_constraint_reports_an_error_instead_of_a_wrong_point(monkeypatch):
+    """The real trigger (x^5 + x + y^5 + y = 10: sympy returns [] for both
+    variables). The Lagrange system is itself too hard, which is reported
+    honestly -- the old behaviour was a SUCCESSFUL-looking (0, 0). The slow
+    Lagrange solve is short-circuited so the test doesn't wait the full
+    computation timeout."""
+    assert sp.solve(x**5 + x + y**5 + y - 10, x) == []        # premise: unisolable
+    real = ou.run_with_timeout
+
+    def instant_timeout(func, *args, **kwargs):
+        if kwargs.get("label") == "Lagrange system solve":
+            raise ComputationTimeoutError(0.1, "Lagrange system solve")
+        return real(func, *args, **kwargs)
+    monkeypatch.setattr(ou, "run_with_timeout", instant_timeout)
+
+    result = solve_optimization(_model_with("x*y", ["x", "y"], ["Eq(x**5 + x + y**5 + y, 10)"],
+                                            direction="maximize"))
+    assert result.used_lagrange is True
+    assert result.critical_points == []
+    assert "Timed out solving the Lagrange system" in result.error
+
+
+def test_fully_pinned_problem_is_solved_via_lagrange_not_reported_as_having_no_critical_points():
+    """Regression: maximize x + y s.t. x = 3 and y = 4 has exactly one
+    feasible point. It used to report 'No real-valued critical points'."""
+    result = solve_optimization(_model_with("x + y", ["x", "y"], ["Eq(x, 3)", "Eq(y, 4)"], direction="maximize"))
+    assert result.error is None and result.used_lagrange is True
+    assert {k: float(v) for k, v in result.critical_points[0].items()} == {"x": 3.0, "y": 4.0}
+
+
+def test_is_identically_zero_cases():
+    assert ou._is_identically_zero(x - x) is True                       # expands to 0
+    assert ou._is_identically_zero(sp.Float(1e-17)) is True             # float noise
+    assert ou._is_identically_zero(sp.Integer(-1)) is False             # nonzero constant
+    assert ou._is_identically_zero((x**2 - 1) / (x - 1) - x - 1) is True    # needs simplify, not just expand
+    assert ou._is_identically_zero(x - 1) is False                      # genuinely depends on x
+
+
+def test_is_identically_zero_is_conservative_when_simplify_fails(monkeypatch):
+    def boom(*a, **k):
+        raise ComputationTimeoutError(0.1, "constraint redundancy check")
+    monkeypatch.setattr(ou, "run_with_timeout", boom)
+    assert ou._is_identically_zero((x**2 - 1) / (x - 1) - x - 1) is False   # "can't prove zero" == nonzero
+
+
+def test_is_identically_zero_non_numeric_constant_is_not_zero():
+    # a constant that can't be converted to float (e.g. zoo) must not crash or count as zero
+    assert ou._is_identically_zero(sp.zoo) is False

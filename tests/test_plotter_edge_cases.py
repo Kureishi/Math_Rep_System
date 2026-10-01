@@ -72,9 +72,14 @@ def test_build_plot_raises_on_unparsed_equation():
 def test_build_plot_falls_back_to_residual_when_y_target_is_none():
     model = _kinematics_model()
     eq = model.equations[0]
-    fig = build_plot(model, eq, "t", {"v_f": 20.0, "v_i": 8.0}, (1, 10), y_target=None)
+    # the UI always supplies a value for every non-axis symbol (a included)
+    fig = build_plot(model, eq, "t", {"v_f": 20.0, "v_i": 8.0, "a": 3.0}, (1, 10), y_target=None)
     assert "residual" in fig.layout.yaxis.title.text
     assert len(fig.layout.shapes) >= 1  # the dashed zero-line
+    # and the plotted values are real numbers: this model's equation is Eq(a, (v_f - v_i)/t),
+    # so the residual a - (v_f - v_i)/t is 3 - 12/t, i.e. -9 at t=1
+    ys = np.asarray(fig.data[0].y, dtype=float)       # an object array of sympy exprs would raise here
+    assert ys[0] == pytest.approx(3.0 - 12.0 / 1.0)
 
 
 def test_build_plot_falls_back_to_residual_when_solve_raises(monkeypatch):
@@ -86,7 +91,7 @@ def test_build_plot_falls_back_to_residual_when_solve_raises(monkeypatch):
     def fake_solve(*a, **kw):
         raise NotImplementedError("sympy couldn't solve this")
     monkeypatch.setattr("modules.plotter.sp.solve", fake_solve)
-    fig = build_plot(model, eq, "t", {"v_f": 20.0, "v_i": 8.0}, (1, 10), y_target="a")
+    fig = build_plot(model, eq, "t", {"v_f": 20.0, "v_i": 8.0, "a": 3.0}, (1, 10), y_target="a")
     assert "residual" in fig.layout.yaxis.title.text
 
 
@@ -97,7 +102,8 @@ def test_build_plot_falls_back_to_residual_when_y_target_unsolvable():
     crashing on an empty `solved` list."""
     model = _kinematics_model()
     eq = model.equations[0]
-    fig = build_plot(model, eq, "t", {"v_f": 20.0, "v_i": 8.0}, (1, 10), y_target="nonexistent_symbol")
+    fig = build_plot(model, eq, "t", {"v_f": 20.0, "v_i": 8.0, "a": 3.0}, (1, 10),
+                     y_target="nonexistent_symbol")
     assert "residual" in fig.layout.yaxis.title.text
 
 
