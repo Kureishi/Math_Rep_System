@@ -1420,6 +1420,17 @@ sample payloads and fixtures if you want to add more.
   needs a value for every non-axis symbol -- a missing one raises a
   `ValueError` naming it (`modules/plot_params.py`, shared by the live Plotly
   figures and the exported matplotlib snapshots so the two always agree).
+- **Type checking covers everything**: CI runs
+  `mypy modules/ ui/ app.py cli.py config.py api_server.py` (zero errors).
+  It used to skip `ui/` and `app.py`; checking them turned up real latent
+  crashes (not just noise), so they're now held to the same standard.
+- **UI tests** (`tests/test_ui_smoke.py`) drive the real `app.py` through
+  Streamlit's `AppTest` harness: every sidebar mode must render without an
+  exception, plus regressions for the page-level bugs the type checker
+  found. The app's four SQLite databases are redirected to a temp dir, so
+  running the suite never touches your real history, chains, templates or
+  settings (only the log file, `data/app.log`, is created by importing the
+  app, same as it always was).
 - **Hypothesis deadlines are disabled suite-wide** (`tests/conftest.py`).
   Nearly every property test drives SymPy, whose first call on a fresh
   expression shape warms internal caches (a cold call can take several

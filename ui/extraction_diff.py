@@ -54,7 +54,7 @@ def render_extraction_diff_tab(client: LMStudioClient):
 
     m1, m2 = st.columns(2)
     m1.metric("Equation shape similarity", f"{diff.equation_shape_similarity:.0%}")
-    m2.metric("Variables matched", f"{sum(1 for e in diff.variables if e.status == 'matched')}"
+    m2.metric("Variables matched", f"{sum(1 for v in diff.variables if v.status == 'matched')}"
                                      f"/{len(diff.variables)}")
 
     if diff.domain_matches:
@@ -69,22 +69,22 @@ def render_extraction_diff_tab(client: LMStudioClient):
 
     st.write("### Variables")
     icons = {"matched": "✅", "changed": "🟡", "only_in_a": "◀️", "only_in_b": "▶️"}
-    for e in diff.variables:
-        if e.status == "matched":
-            st.write(f"{icons[e.status]} `{e.symbol_a}` (A) / `{e.symbol_b}` (B) -- matched")
-        elif e.status == "changed":
-            st.write(f"{icons[e.status]} `{e.symbol_a}` (A) / `{e.symbol_b}` (B) -- {e.detail}")
-        elif e.status == "only_in_a":
-            st.write(f"{icons[e.status]} only in A: `{e.symbol_a}` ({e.detail})")
+    for v in diff.variables:
+        if v.status == "matched":
+            st.write(f"{icons[v.status]} `{v.symbol_a}` (A) / `{v.symbol_b}` (B) -- matched")
+        elif v.status == "changed":
+            st.write(f"{icons[v.status]} `{v.symbol_a}` (A) / `{v.symbol_b}` (B) -- {v.detail}")
+        elif v.status == "only_in_a":
+            st.write(f"{icons[v.status]} only in A: `{v.symbol_a}` ({v.detail})")
         else:
-            st.write(f"{icons[e.status]} only in B: `{e.symbol_b}` ({e.detail})")
+            st.write(f"{icons[v.status]} only in B: `{v.symbol_b}` ({v.detail})")
 
     st.write("### Equations")
-    for e in diff.equations:
-        if e.status == "matched":
-            st.write(f"✅ `{e.name_a}` (A) / `{e.name_b}` (B) -- same structure, ignoring "
+    for eq_d in diff.equations:
+        if eq_d.status == "matched":
+            st.write(f"✅ `{eq_d.name_a}` (A) / `{eq_d.name_b}` (B) -- same structure, ignoring "
                       "variable names")
-        elif e.status == "only_in_a":
-            st.write(f"◀️ only in A: `{e.name_a}`")
+        elif eq_d.status == "only_in_a":
+            st.write(f"◀️ only in A: `{eq_d.name_a}`")
         else:
-            st.write(f"▶️ only in B: `{e.name_b}`")
+            st.write(f"▶️ only in B: `{eq_d.name_b}`")

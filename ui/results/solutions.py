@@ -88,9 +88,12 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
         if len(group) != 2:
             continue
         rhs_by_name = {}
-        for e in group:
-            lhs_func = next(iter(e.sympy_eq.lhs.atoms(AppliedUndef)))
-            rhs_by_name[str(lhs_func.func)] = e.sympy_eq.rhs
+        for ode_eq in group:
+            ode_sympy = ode_eq.sympy_eq
+            if ode_sympy is None:      # already filtered out above; kept so the type checker can see it
+                continue
+            lhs_func = next(iter(ode_sympy.lhs.atoms(AppliedUndef)))
+            rhs_by_name[str(lhs_func.func)] = ode_sympy.rhs
         names = sorted(rhs_by_name)
         if len(names) != 2 or not all(n in ode_solutions for n in names):
             continue
@@ -146,7 +149,9 @@ def render_recurrence_solution(ws: Workspace, model: ProblemModel):
                             and func_name in symbols_and_functions_used(e)), None)
             indep_sym = None
             if rec_eq is not None:
-                funcs = rec_eq.sympy_eq.atoms(AppliedUndef) if hasattr(rec_eq.sympy_eq, "atoms") else set()
+                rec_sympy = rec_eq.sympy_eq
+                funcs = (rec_sympy.atoms(AppliedUndef)
+                         if rec_sympy is not None and hasattr(rec_sympy, "atoms") else set())
                 indep_sym = _independent_variable(funcs)
             if indep_sym is None:
                 indep_sym = sp.Symbol(model.independent_variable or "n")

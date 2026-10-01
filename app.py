@@ -10,6 +10,7 @@ Requires LM Studio running locally with its server started
 This file is deliberately thin: the pages live in ui/ (see ui/__init__.py for the map) and the
 math/LLM logic lives in modules/, which has no Streamlit dependency.
 """
+from typing import Any
 import streamlit as st
 
 # Everything imported ABOVE the set_page_config() call must be cheap: nothing can be drawn until the
@@ -44,12 +45,15 @@ from ui.word_problem import render_word_problem_page  # noqa: E402
 # ---------------------------------------------------------------- session
 client = LMStudioClient()
 ws = Workspace(st.session_state)
-for key, default in [("problem_text", ""), ("model", None), ("report", None),
-                      ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
-                      ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
-                      ("batch_results", None), ("last_saved_history_id", None),
-                      ("paranoid_result", None), ("followup_history", []),
-                      ("self_consistency_result", None), ("error_pattern_messages", [])]:
+_SESSION_DEFAULTS: list[tuple[str, Any]] = [
+    ("problem_text", ""), ("model", None), ("report", None),
+    ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
+    ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
+    ("batch_results", None), ("last_saved_history_id", None),
+    ("paranoid_result", None), ("followup_history", []),
+    ("self_consistency_result", None), ("error_pattern_messages", []),
+]
+for key, default in _SESSION_DEFAULTS:
     st.session_state.setdefault(key, default)
 
 # ---- apply a pending Quick Start example (mode switch + prefilled

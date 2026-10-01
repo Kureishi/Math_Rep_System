@@ -14,17 +14,18 @@ testpaths = ["tests"]
 # based narrowing added throughout modules/ specifically because of
 # this config, not decorative).
 #
-# CI (see .github/workflows/tests.yml) only runs this against modules/
-# -- the actual math/verification engine, now fully clean (0 errors
-# across every file in modules/, pipeline.py included) -- not app.py or
-# ui/. Those lean heavily on st.session_state, a genuinely
-# dynamically-typed dict-like object whose value type depends on which
-# string key you used; type-checking it meaningfully would need
-# extensive per-key annotation for very little payoff, since a
-# session_state type mistake fails loudly and immediately at runtime
-# (Streamlit raises on the spot) rather than silently, unlike the sympy
-# union-attr bugs this config caught in the engine. That's a scoping
-# decision, not an oversight.
+# CI (see .github/workflows/tests.yml) runs this against EVERYTHING:
+# modules/, ui/, app.py, cli.py, config.py and api_server.py -- 0 errors
+# across all of it. It used to be scoped to modules/ only, on the theory
+# that ui/ leans on st.session_state (dynamically typed, so not worth
+# annotating) and would only fail loudly at runtime anyway. Checking it
+# anyway showed that theory was wrong on both counts: st.session_state is
+# typed Any, so it never caused an error -- the 66 errors were ordinary
+# unguarded Optionals and reused variable names, and several were real
+# latent crashes (a chain deleted mid-session read as None, a None
+# Durbin-Watson compared to a float, a best-fit result with no R-squared
+# being sorted). Those fail only on the unlucky input, not "immediately",
+# which is exactly what a type checker is for.
 python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = true

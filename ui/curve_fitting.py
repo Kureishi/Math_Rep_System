@@ -39,7 +39,7 @@ def _render_statistical_layer(xs, ys, family, degree, expr_str, param_names):
                     st.write(f"**{p.name}** = {p.estimate:.5g} ± {p.std_error:.4g}  "
                               f"(t={p.t_statistic:.3g}, p={p.p_value:.3g})  "
                               f"CI: [{p.ci_lower:.5g}, {p.ci_upper:.5g}]")
-                if result.f_statistic is not None:
+                if result.f_statistic is not None and result.f_p_value is not None:
                     verdict = "significant" if result.f_p_value < 0.05 else "not significant"
                     st.info(f"Overall model F-test: F={result.f_statistic:.4g}, "
                              f"p={result.f_p_value:.3g} ({verdict} at α=0.05) -- tests whether the "
@@ -85,7 +85,8 @@ def _render_statistical_layer(xs, ys, family, degree, expr_str, param_names):
                                   "consecutive residuals are related to each other (e.g. a run of "
                                   "positive residuals followed by a run of negative ones) rather than "
                                   "independent -- a value near 2 indicates no autocorrelation.", level="")
-                (st.success if 1.5 <= diag.durbin_watson <= 2.5 else st.warning)(diag.durbin_watson_note)
+                (st.success if diag.durbin_watson is None or 1.5 <= diag.durbin_watson <= 2.5
+                 else st.warning)(diag.durbin_watson_note)
                 tooltip_header("Heteroscedasticity", "Breusch-Pagan test: checks whether the "
                                   "residuals' spread stays roughly constant across the data, or "
                                   "instead grows/shrinks systematically (e.g. bigger errors at larger "
@@ -112,10 +113,10 @@ def _render_statistical_layer(xs, ys, family, degree, expr_str, param_names):
             else:
                 st.caption(f"{int(bayes.credible_level * 100)}% credible intervals from a conjugate "
                             f"Normal-Inverse-Gamma posterior (closed-form, no sampling).")
-                for p in bayes.parameters:
-                    st.write(f"**{p.name}** posterior mean = {p.posterior_mean:.5g} "
-                              f"(std = {p.posterior_std:.4g})  "
-                              f"credible interval: [{p.credible_lower:.5g}, {p.credible_upper:.5g}]")
+                for bp in bayes.parameters:
+                    st.write(f"**{bp.name}** posterior mean = {bp.posterior_mean:.5g} "
+                              f"(std = {bp.posterior_std:.4g})  "
+                              f"credible interval: [{bp.credible_lower:.5g}, {bp.credible_upper:.5g}]")
                 st.caption(bayes.comparison_note)
 
 
@@ -199,14 +200,19 @@ def render_curve_fitting_tab():
     expr_str, param_names = snapshot["expr_str"], snapshot["param_names"]
 
     if family == "best fit (try all)":
-        results = best_fit(xs, ys)
+        # best_fit() documents that it returns successful fits only, so every result here has
+        # an R-squared, an RMSE and an expression. Enforced rather than assumed: anything
+        # without them is dropped, so a broken contract can't crash the ranking or the plots.
+        results = {fam: res for fam, res in best_fit(xs, ys).items()
+                   if res.r_squared is not None and res.rmse is not None and res.expr is not None}
         if not results:
             st.error("No built-in family could fit this data (check for non-positive x/y values, "
                       "which rule out exponential/power/logarithmic).")
             return
-        ranked = sorted(results.items(), key=lambda kv: kv[1].r_squared, reverse=True)
+        ranked = sorted(results.items(), key=lambda kv: kv[1].r_squared or 0.0, reverse=True)
         st.write("Ranked by R² (higher is better):")
         for fam, res in ranked:
+            assert res.r_squared is not None and res.rmse is not None   # guaranteed by the filter above
             st.write(f"- **{fam}**: R² = {res.r_squared:.5f}, RMSE = {res.rmse:.5g}")
         best_family, result = ranked[0]
         st.success(f"Best fit: **{best_family}**")

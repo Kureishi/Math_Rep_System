@@ -80,7 +80,7 @@ def render_geometry_schematic(model: ProblemModel):
                 if len(geom_result.solutions) > 1:
                     st.info(f"This is the ambiguous SSA case -- {len(geom_result.solutions)} valid "
                             "triangles match these measurements.")
-                    anim_fig = build_ssa_ambiguity_animation(*geom_result.solutions)
+                    anim_fig = build_ssa_ambiguity_animation(geom_result.solutions[0], geom_result.solutions[1])
                     if anim_fig is not None:
                         st.plotly_chart(anim_fig, width="stretch", key="word_problem_ssa_animation")
                 for i, sol in enumerate(geom_result.solutions):
@@ -286,7 +286,7 @@ def render_derived_equations(model: ProblemModel):
                                             "iteration), just a way to see convergence happen."
                                         )
                                         descent_fig = build_descent_path_plot(
-                                            f_numeric, path,
+                                            f_numeric, [(p[0], p[1]) for p in path],
                                             (min(xs_p) - pad_x, max(xs_p) + pad_x),
                                             (min(ys_p) - pad_y, max(ys_p) + pad_y),
                                             x_label=free_vars[0], y_label=free_vars[1])

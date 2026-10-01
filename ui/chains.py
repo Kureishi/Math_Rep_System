@@ -51,6 +51,10 @@ def render_chains_tab(client: LMStudioClient):
                                format_func=lambda i: chain_names[i], key="active_chain_selector")
     st.session_state["active_chain_id"] = chosen_id
     chain = chains.load_chain(chosen_id)
+    if chain is None:   # deleted between the list query above and this load (e.g. from another tab)
+        st.session_state["active_chain_id"] = None
+        st.warning("That chain no longer exists -- pick another one or create a new one.")
+        return
 
     if st.button("🗑️ Delete this chain", key="delete_chain_button"):
         chains.delete_chain(chosen_id)
@@ -66,7 +70,7 @@ def render_chains_tab(client: LMStudioClient):
             with st.expander(f"{icon} Step {step.position + 1}: {step.problem_text[:60]}"):
                 st.caption(step.problem_text)
                 st.write(f"Solves for **{step.output_symbol}**")
-                if step.status == "ok":
+                if step.status == "ok" and step.output_value is not None:
                     st.success(f"{step.output_symbol} = {step.output_value:.6g}")
                 elif step.status == "error":
                     st.error(step.error_detail)
@@ -77,8 +81,9 @@ def render_chains_tab(client: LMStudioClient):
                         if b.source == "literal":
                             st.write(f"- `{b.symbol}` = {b.literal_value} (fixed value)")
                         else:
-                            st.write(f"- `{b.symbol}` ← step {b.upstream_position + 1}'s "
-                                      f"`{b.upstream_symbol}`")
+                            up_step = ("an upstream step" if b.upstream_position is None
+                                       else f"step {b.upstream_position + 1}")
+                            st.write(f"- `{b.symbol}` ← {up_step}'s `{b.upstream_symbol}`")
 
                     literal_bindings = [b for b in step.bindings if b.source == "literal"]
                     if literal_bindings:
@@ -86,7 +91,7 @@ def render_chains_tab(client: LMStudioClient):
                             "Try a different value for...", [b.symbol for b in literal_bindings],
                             key=f"edit_binding_symbol_{step.position}")
                         current = next(b.literal_value for b in literal_bindings
-                                        if b.symbol == edit_symbol)
+                                        if b.symbol == edit_symbol) or 0.0
                         new_val = st.number_input("New value", value=float(current),
                                                     key=f"edit_binding_value_{step.position}")
                         if st.button("Apply & re-solve chain", key=f"apply_binding_{step.position}"):
@@ -177,7 +182,7 @@ def render_chains_tab(client: LMStudioClient):
                     options = ["(leave unbound)"] + step_options + ["fixed value"]
                     default_idx = 0
                     match = suggested.get(var.symbol)
-                    if match is not None:
+                    if match is not None and match.upstream_position is not None:
                         default_idx = options.index(
                             f"step {match.upstream_position + 1}: {match.upstream_symbol}")
                     choice = st.selectbox(f"Input for `{var.symbol}` ({var.meaning})", options,

@@ -74,13 +74,13 @@ jobs:
         # identically on both.
         run: python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in ['app.py', 'config.py', 'api_server.py'] + glob.glob('modules/*.py') + glob.glob('ui/*.py') + glob.glob('ui/results/*.py')]"
 
-      - name: Type-check the engine (mypy)
-        # Scoped to modules/ -- see pyproject.toml's [tool.mypy] comment
-        # for why app.py is excluded (Streamlit's dynamically-typed
-        # session_state, not an oversight). Only needs to run once, not
-        # once per hash-seed value -- it doesn't execute anything.
+      - name: Type-check everything (mypy)
+        # The whole codebase: the engine (modules/), the UI (ui/, app.py)
+        # and the entrypoints. See pyproject.toml's [tool.mypy] comment for
+        # why ui/ is included. Only needs to run once, not once per
+        # hash-seed value -- it doesn't execute anything.
         if: matrix.hash-seed == '0'
-        run: mypy modules/ api_server.py
+        run: mypy modules/ ui/ app.py cli.py config.py api_server.py
 
       - name: Run the test suite
         env:

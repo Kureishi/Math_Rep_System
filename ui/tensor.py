@@ -82,8 +82,8 @@ def render_tensor_calculus_tab():
             st.write("**Explore how curvature depends on a parameter:**")
             subs = {}
             for p in extra_params:
-                val = st.slider(f"{p}", 0.1, 10.0, 1.0, key=f"tensor_param_{p}")
-                subs[p] = val
+                param_val = st.slider(f"{p}", 0.1, 10.0, 1.0, key=f"tensor_param_{p}")
+                subs[p] = param_val
             try:
                 numeric_ricci = complex(result.ricci_scalar.subs(subs))
                 display_val = numeric_ricci.real if abs(numeric_ricci.imag) < 1e-9 else numeric_ricci

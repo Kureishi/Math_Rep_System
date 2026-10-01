@@ -53,8 +53,8 @@ def render_verify_tab(client: LMStudioClient, model: ProblemModel, report: Verif
             with st.expander("⚠️ Physical plausibility check", expanded=True):
                 st.caption("Advisory only -- these values are mathematically valid, just unusual for this "
                             "kind of quantity. Worth a second look, not necessarily wrong.")
-                for note in report.plausibility_notes:
-                    st.warning(note.message)
+                for plaus_note in report.plausibility_notes:
+                    st.warning(plaus_note.message)
 
         # ---- paranoid mode: re-run extraction through a SECOND,
         # independently-configured model and compare its equations/answers

@@ -53,8 +53,8 @@ def render_batch_solver_tab(client: LMStudioClient):
         def _update(done, total):
             progress.progress(done / total, text=f"Solving {done}/{total}...")
 
-        results = solve_batch(client, problems, narrate=narrate, progress_callback=_update)
-        st.session_state["batch_results"] = results
+        fresh_results = solve_batch(client, problems, narrate=narrate, progress_callback=_update)
+        st.session_state["batch_results"] = fresh_results
         progress.empty()
 
     results = st.session_state.get("batch_results")

@@ -33,9 +33,9 @@ def render_geometry_tab():
         B_str = st.text_input("B (opposite b)", key="tri_B", placeholder="unknown")
         C_str = st.text_input("C (opposite c)", key="tri_C", placeholder="unknown")
 
-    def _collect_knowns() -> dict:
+    def _collect_knowns() -> dict[str, float | None]:
         raw = {"a": a_str, "b": b_str, "c": c_str, "A": A_str, "B": B_str, "C": C_str}
-        knowns = {}
+        knowns: dict[str, float | None] = {}
         for key, val in raw.items():
             if val.strip():
                 try:
@@ -52,7 +52,8 @@ def render_geometry_tab():
     result = persist_on_click(
         "Solve", "triangle_solve_button", "triangle_result",
         len(knowns_preview) == 3 and all(v is not None for v in knowns_preview.values()),
-        lambda: solve_triangle(knowns_preview))
+        # the enable-condition above guarantees every entry parsed, so nothing is dropped here
+        lambda: solve_triangle({k: v for k, v in knowns_preview.items() if v is not None}))
 
     if result is not None:
         if result.error:
@@ -62,7 +63,7 @@ def render_geometry_tab():
             if len(result.solutions) > 1:
                 st.info(f"This is the ambiguous SSA case -- {len(result.solutions)} valid triangles "
                         "match these measurements. Both are shown below.")
-                anim_fig = build_ssa_ambiguity_animation(*result.solutions)
+                anim_fig = build_ssa_ambiguity_animation(result.solutions[0], result.solutions[1])
                 if anim_fig is not None:
                     st.plotly_chart(anim_fig, width="stretch", key="geometry_mode_ssa_animation")
             for i, sol in enumerate(result.solutions):

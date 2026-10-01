@@ -382,17 +382,17 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         st.header("History")
         recent = history.list_recent()
         if recent:
-            for entry in recent:
-                badge = "✅" if entry["passed"] else "⚠️"
-                label = entry["problem_text"][:45] + ("..." if len(entry["problem_text"]) > 45 else "")
+            for hist_entry in recent:
+                badge = "✅" if hist_entry["passed"] else "⚠️"
+                label = hist_entry["problem_text"][:45] + ("..." if len(hist_entry["problem_text"]) > 45 else "")
                 c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
-                    st.caption(f"{badge} **{entry['domain'] or '—'}** -- {entry['timestamp'][:16].replace('T', ' ')}")
+                    st.caption(f"{badge} **{hist_entry['domain'] or '—'}** -- {hist_entry['timestamp'][:16].replace('T', ' ')}")
                     st.caption(label)
                 with c2:
-                    if st.button("", icon=":material/restart_alt:", key=f"load_{entry['id']}",
+                    if st.button("", icon=":material/restart_alt:", key=f"load_{hist_entry['id']}",
                                   type="tertiary", help="Load this problem"):
-                        loaded = history.load(entry["id"])
+                        loaded = history.load(hist_entry["id"])
                         if loaded is not None:
                             p_text, l_model, l_report, l_steps, l_scenarios = loaded
                             st.session_state.update(
@@ -401,9 +401,9 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                             )
                             st.rerun()
                 with c3:
-                    if st.button("", icon=":material/delete:", key=f"delhist_{entry['id']}",
+                    if st.button("", icon=":material/delete:", key=f"delhist_{hist_entry['id']}",
                                   type="tertiary", help="Delete from history"):
-                        history.delete(entry["id"])
+                        history.delete(hist_entry["id"])
                         st.rerun()
         else:
             st.caption("No solved problems yet -- they'll be saved here automatically.")

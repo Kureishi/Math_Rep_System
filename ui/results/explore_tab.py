@@ -1,10 +1,12 @@
 """
 The Explore tab of a solved problem: dependency graph, bulk uncertainty, parameter sweeps, and the live plots.
 """
+from typing import Any
+
 import streamlit as st
 import numpy as np
 import pandas as pd
-from modules.equation_engine import ProblemModel, target_kind
+from modules.equation_engine import ProblemModel, Variable, target_kind
 from modules.dependency_graph import build_dependency_graph
 from modules.monte_carlo import run_monte_carlo, UncertainVariable, MAX_SAMPLES as MC_MAX_SAMPLES
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
@@ -28,6 +30,18 @@ from modules.plot_snapshot import (
     snapshot_rotating_surface_gif,
 )
 from ui.common import format_download_button, snapshot_button, gif_download_button
+
+
+def _known_value(variables: list[Variable], symbol: str) -> float:
+    """The known numeric value of `symbol` among `variables`. Every caller
+    has already filtered to variables with a known value, so a missing one
+    is a programming error -- raised loudly rather than coerced to 0.0."""
+    for v in variables:
+        if v.symbol == symbol:
+            if v.known_value is None:
+                raise ValueError(f"Variable {symbol!r} has no known value.")
+            return float(v.known_value)
+    raise ValueError(f"Variable {symbol!r} not found.")
 
 
 def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
@@ -71,8 +85,7 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                 if sweep_symbols:
                     sweep_default_rows = []
                     for sym in sweep_symbols:
-                        var = next(v for v in sweepable_vars if v.symbol == sym)
-                        center = float(var.known_value)
+                        center = _known_value(sweepable_vars, sym)
                         width = abs(center) * 0.2 or 1.0
                         sweep_default_rows.append({"Symbol": sym, "Low": center - width,
                                                      "High": center + width, "Points": 5})
@@ -143,8 +156,7 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                 bulk_uncertain_vars = []
                 if bulk_symbols:
                     bulk_default_rows = [
-                        {"Symbol": sym, "Std (±)": abs(next(
-                            v for v in bulk_known_vars if v.symbol == sym).known_value) * 0.05 or 0.1}
+                        {"Symbol": sym, "Std (±)": abs(_known_value(bulk_known_vars, sym)) * 0.05 or 0.1}
                         for sym in bulk_symbols
                     ]
                     bulk_edited = st.data_editor(
@@ -159,9 +171,9 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                     for _, row in bulk_edited.iterrows():
                         std_val = row["Std (\u00b1)"]
                         if std_val is not None and std_val > 0:
-                            var = next(v for v in bulk_known_vars if v.symbol == row["Symbol"])
                             bulk_uncertain_vars.append(
-                                UncertainVariable(symbol=row["Symbol"], mean=var.known_value,
+                                UncertainVariable(symbol=row["Symbol"],
+                                                    mean=_known_value(bulk_known_vars, row["Symbol"]),
                                                     std=float(std_val)))
 
                 bulk_seed_key = "bulk_mc_seed"
@@ -186,7 +198,7 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                                      key="bulk_mc_n")
 
                 if st.button("Run for all targets", key="bulk_mc_run") and bulk_uncertain_vars:
-                    bulk_rows = []
+                    bulk_rows: list[dict[str, Any]] = []
                     with st.spinner(f"Sampling {bulk_n} times for {len(bulk_targets)} targets..."):
                         for t in bulk_targets:
                             try:
@@ -202,9 +214,9 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                                                 "error": None})
                     st.session_state["bulk_mc_results"] = bulk_rows
 
-                bulk_rows = st.session_state.get("bulk_mc_results")
-                if bulk_rows:
-                    bulk_df = pd.DataFrame(bulk_rows)
+                stored_bulk_rows = st.session_state.get("bulk_mc_results")
+                if stored_bulk_rows:
+                    bulk_df = pd.DataFrame(stored_bulk_rows)
                     st.dataframe(bulk_df, width='stretch', hide_index=True)
                     st.download_button("⬇️ Download as CSV", data=bulk_df.to_csv(index=False),
                                          file_name="uncertainty_all_targets.csv", mime="text/csv",
@@ -437,7 +449,8 @@ def render_interactive_plot(model: ProblemModel, edited_values, tab_explore):
         if len(inequality_eqs) >= 1:
             all_ineq_symbols = set()
             for e in inequality_eqs:
-                all_ineq_symbols |= {s.name for s in e.sympy_eq.free_symbols}
+                if e.sympy_eq is not None:     # already filtered above; kept so the type checker can see it
+                    all_ineq_symbols |= {s.name for s in e.sympy_eq.free_symbols}
             # only known-fixed symbols get sliders; the rest are candidate plot axes
             ineq_free_syms = sorted(all_ineq_symbols)
             if len(ineq_free_syms) >= 2:
