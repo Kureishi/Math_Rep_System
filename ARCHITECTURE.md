@@ -178,6 +178,12 @@ math-rep-system/
     ├── ode_utils.py             # shared dsolve()/dsolve_system() helper (solver.py +
     │                            #   verifier.py both need it; lives here to avoid a
     │                            #   circular import)
+    ├── time_uncertainty.py        # fan chart: sample uncertain parameters/initial values
+    │                              #   through the symbolic solution + interval-arithmetic envelope
+    ├── parameter_morph.py         # a family of solution curves as one parameter varies,
+    │                              #   with visible-turning-point counting
+    ├── bifurcation.py             # long-run values of a one-parameter map vs the parameter
+    ├── pde_field.py               # u(x, t) on a grid (vectorised) + max|u| and integral per time
     ├── ode_trajectories.py        # the closed-form-vs-numerical ODE comparison as a curve
     │                              #   over time (shares prepare_ivp with ode_utils'
     │                              #   numerical_cross_check) + multi-start phase flow

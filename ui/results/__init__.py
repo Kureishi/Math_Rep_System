@@ -17,6 +17,7 @@ from ui.results.verify_tab import render_verify_tab
 from ui.results.explore_tab import render_dependency_and_sweeps, render_interactive_plot
 from ui.results.practice_tab import render_practice_tab
 from ui.results.solutions import render_ode_solution, render_recurrence_solution
+from ui.results.time_views import render_ode_time_views, render_map_views
 from ui.results.steps import render_step_by_step
 
 
@@ -55,6 +56,8 @@ def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, r
     render_scenarios()
     render_practice_tab(client, model, report, tab_practice)
     render_ode_solution(ws, model)
+    render_ode_time_views(model)
     render_recurrence_solution(ws, model)
+    render_map_views(model)
     render_interactive_plot(model, edited_values, tab_explore)
     render_export(model, report, steps_by_target)

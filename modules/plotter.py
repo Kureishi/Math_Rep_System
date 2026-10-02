@@ -1043,3 +1043,154 @@ def build_partial_sum_animation(partial_sums, title: str = "") -> go.Figure:
                         yaxis=dict(title="y", range=list(ps.y_range)), title=frame_title(0),
                         **_play_layout([str(k + 1) for k in range(len(ps.sums))], "step ", duration_ms=700))
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Uncertainty over time, parameter morph, bifurcation diagram, space-time view
+# ---------------------------------------------------------------------------
+def build_uncertainty_fan(fan) -> go.Figure:
+    """A fan chart from a modules.time_uncertainty.FanResult: for each
+    function, the 5-95% and 25-75% bands of the sampled solutions around
+    their median, the nominal curve (every input at its mean) dashed, and --
+    if it was computed -- the guaranteed interval-arithmetic envelope dotted."""
+    from plotly.subplots import make_subplots
+    if not fan.applicable:
+        raise ValueError(fan.reason or "No uncertainty fan available.")
+    n = len(fan.names)
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                         subplot_titles=fan.names if n > 1 else None)
+    t = fan.t
+    for i, name in enumerate(fan.names):
+        row, colour, first = i + 1, _PALETTE[i % len(_PALETTE)], i == 0
+        if fan.envelope_lo is not None and fan.envelope_hi is not None:
+            for edge, label in ((fan.envelope_hi[i], f"guaranteed envelope (\u00b1{fan.envelope_sigmas:g}\u03c3)"),
+                                (fan.envelope_lo[i], None)):
+                fig.add_trace(go.Scatter(x=t, y=edge, mode="lines", name=label or "envelope",
+                                           showlegend=bool(label) and first,
+                                           line=dict(color="rgba(80,80,80,0.7)", width=1.5, dash="dot")),
+                              row=row, col=1)
+        fig.add_trace(go.Scatter(x=t, y=fan.p95[i], mode="lines", line=dict(width=0), showlegend=False,
+                                   hoverinfo="skip"), row=row, col=1)
+        fig.add_trace(go.Scatter(x=t, y=fan.p5[i], mode="lines", line=dict(width=0), fill="tonexty",
+                                   fillcolor=_rgba(colour, 0.18), name="5\u201395% of samples",
+                                   showlegend=first), row=row, col=1)
+        fig.add_trace(go.Scatter(x=t, y=fan.p75[i], mode="lines", line=dict(width=0), showlegend=False,
+                                   hoverinfo="skip"), row=row, col=1)
+        fig.add_trace(go.Scatter(x=t, y=fan.p25[i], mode="lines", line=dict(width=0), fill="tonexty",
+                                   fillcolor=_rgba(colour, 0.35), name="25\u201375% of samples",
+                                   showlegend=first), row=row, col=1)
+        fig.add_trace(go.Scatter(x=t, y=fan.median[i], mode="lines", name="median", showlegend=first,
+                                   line=dict(color=colour, width=2.5)), row=row, col=1)
+        fig.add_trace(go.Scatter(x=t, y=fan.nominal[i], mode="lines", name="nominal (inputs at their means)",
+                                   showlegend=first, line=dict(color="#222222", width=1.8, dash="dash")),
+                      row=row, col=1)
+        fig.update_yaxes(title_text=name, row=row, col=1)
+    fig.update_xaxes(title_text="t", row=n, col=1)
+    fig.update_layout(title=f"Uncertainty over time ({fan.n_samples} samples, seed {fan.seed})",
+                        height=380 + 230 * (n - 1))
+    return fig
+
+
+def build_parameter_morph(morph) -> go.Figure:
+    """The family of solution curves from a modules.parameter_morph.MorphResult
+    as an animation: every curve faint in the background, the current
+    parameter value's curve bold, the title naming the value and how many
+    turning points that curve has."""
+    if not morph.applicable:
+        raise ValueError(morph.reason or "No morph available.")
+    t, n = morph.t, len(morph.values)
+    gap = np.array([np.nan])
+    ghost_x = np.concatenate([np.concatenate([t, gap]) for _ in range(n)])
+    ghost_y = np.concatenate([np.concatenate([row, gap]) for row in morph.curves])
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=ghost_x, y=ghost_y, mode="lines", name="all values", hoverinfo="skip",
+                               line=dict(color="rgba(120,120,120,0.28)", width=1.2)))
+    if morph.nominal_curve is not None:
+        fig.add_trace(go.Scatter(x=t, y=morph.nominal_curve, mode="lines",
+                                   name=f"current setting ({morph.param_name} = {morph.nominal_value:g})",
+                                   line=dict(color="#222222", width=2, dash="dash")))
+    dyn = len(fig.data)
+    fig.add_trace(go.Scatter(x=t, y=morph.curves[0], mode="lines", name=f"{morph.function}(t)",
+                               line=dict(color="#C0392B", width=3.5)))
+
+    def title(i: int) -> str:
+        tp = morph.turning_points[i]
+        shape = "monotone" if tp == 0 else f"{tp} turning point{'s' if tp != 1 else ''}"
+        return f"{morph.param_name} = {morph.values[i]:.4g}  \u2014  {shape}"
+
+    idx = _frame_indices(n, 60)
+    fig.frames = [go.Frame(data=[go.Scatter(x=t, y=morph.curves[i])], traces=[dyn], name=str(k),
+                             layout=go.Layout(title_text=title(i))) for k, i in enumerate(idx)]
+    fig.update_layout(xaxis=dict(title="t"), yaxis=dict(title=morph.function, range=list(morph.y_range)),
+                        title=title(idx[0]),
+                        **_play_layout([f"{morph.values[i]:.3g}" for i in idx], f"{morph.param_name} = ",
+                                       duration_ms=120))
+    return fig
+
+
+def build_bifurcation_plot(result, marker: float | None = None) -> go.Figure:
+    """A modules.bifurcation.BifurcationResult as the classic diagram: the
+    long-run values of the map against the parameter. `marker` draws a line
+    at the parameter's current value (where the cobweb diagram is drawn);
+    dotted lines mark where the period changes through the 2, 4, 8, 16
+    doubling cascade."""
+    if not result.applicable:
+        raise ValueError(result.reason or "No bifurcation diagram available.")
+    xs = np.tile(result.params, result.values.shape[0]).astype(np.float32)
+    ys = result.values.ravel().astype(np.float32)
+    keep = np.isfinite(ys)
+    fig = go.Figure(go.Scattergl(x=xs[keep], y=ys[keep], mode="markers", name="long-run values",
+                                   marker=dict(size=1.6, color="rgba(46,94,170,0.45)")))
+    for p, period in result.transitions:
+        if period in (2, 4, 8, 16):
+            fig.add_vline(x=p, line=dict(color="rgba(192,57,43,0.55)", dash="dot", width=1),
+                           annotation_text=f"period {period}", annotation_position="top",
+                           annotation_font_size=9)
+    if marker is not None and result.params[0] <= marker <= result.params[-1]:
+        fig.add_vline(x=marker, line=dict(color="#1E7E34", dash="dash", width=2),
+                       annotation_text="current", annotation_position="bottom right")
+    fig.update_layout(xaxis=dict(title=result.param_name, range=[float(result.params[0]), float(result.params[-1])]),
+                        yaxis=dict(title="long-run value"), showlegend=False,
+                        title=f"Bifurcation diagram (x\u2080 = {result.x0:g})")
+    return fig
+
+
+def build_space_time_view(field, y_label: str = "u") -> go.Figure:
+    """A modules.pde_field.PDEField as two linked panels sharing the x axis:
+    the profile u(x, t) animated through time on top, and the whole
+    evolution as a heatmap below with a cursor line at the current time."""
+    from plotly.subplots import make_subplots
+    if field.error:
+        raise ValueError(field.error)
+    xs, ts, u = field.xs, field.ts, field.u
+    pad = 0.08 * max(field.u_max - field.u_min, 1e-9)
+    signed = field.u_min < 0 < field.u_max
+    bound = max(abs(field.u_min), abs(field.u_max))
+    heat = dict(colorscale="RdBu", zmin=-bound, zmax=bound, zmid=0) if signed else \
+        dict(colorscale="Inferno", zmin=field.u_min, zmax=field.u_max)
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.42, 0.58], vertical_spacing=0.1,
+                         subplot_titles=(f"Profile {y_label}(x, t)", "Whole evolution"))
+    fig.add_trace(go.Scatter(x=xs, y=u[0], mode="lines", line=dict(color="#C0392B", width=3), showlegend=False),
+                  row=1, col=1)
+    fig.add_trace(go.Heatmap(x=xs, y=ts, z=u, colorbar=dict(title=y_label, len=0.55, y=0.28), **heat),
+                  row=2, col=1)
+    fig.add_trace(go.Scatter(x=[float(xs[0]), float(xs[-1])], y=[float(ts[0])] * 2, mode="lines",
+                               line=dict(color="white", width=2, dash="dash"), showlegend=False,
+                               hoverinfo="skip"), row=2, col=1)
+
+    def title(i: int) -> str:
+        return (f"t = {ts[i]:.3g}   max|{y_label}| = {field.max_abs[i]:.4g}   "
+                f"\u222b{y_label} dx = {field.integral[i]:.4g}")
+
+    idx = _frame_indices(len(ts), 60)
+    fig.frames = [go.Frame(data=[go.Scatter(x=xs, y=u[i]),
+                                  go.Scatter(x=[float(xs[0]), float(xs[-1])], y=[float(ts[i])] * 2)],
+                             traces=[0, 2], name=str(k), layout=go.Layout(title_text=title(i)))
+                  for k, i in enumerate(idx)]
+    fig.update_yaxes(title_text=y_label, range=[field.u_min - pad, field.u_max + pad], row=1, col=1)
+    fig.update_yaxes(title_text="t", row=2, col=1)
+    fig.update_xaxes(title_text="x", row=2, col=1)
+    fig.update_layout(title=title(idx[0]), height=620,
+                        **_play_layout([f"{ts[i]:.3g}" for i in idx], "t = ", duration_ms=90))
+    return fig

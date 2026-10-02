@@ -77,11 +77,27 @@ def _ics_for_group(model: ProblemModel, func_names: set[str]) -> dict[sp.Basic, 
     return ics
 
 
-def solve_ode(model: ProblemModel) -> dict[str, sp.Eq]:
+def initial_condition_symbol(lhs: sp.Basic) -> sp.Symbol:
+    """The placeholder symbol standing for the VALUE of the initial condition
+    `lhs` (e.g. N(0) -> _ic_N_0_), used by solve_ode(symbolic_initial_conditions
+    =True) so a solution can be re-evaluated at other initial values. The
+    leading underscore keeps it from colliding with any variable a person
+    would declare."""
+    import re
+    return sp.Symbol("_ic_" + re.sub(r"\W", "_", str(lhs)))
+
+
+def solve_ode(model: ProblemModel, symbolic_initial_conditions: bool = False) -> dict[str, sp.Eq]:
     """Solves every ode-kind equation, applying any initial conditions that
     match. Coupled equations (sharing a function across equations) are
     solved together via dsolve_system; standalone ODEs use plain dsolve.
-    Returns {function_name: solution_Eq}, flattened across all groups."""
+    Returns {function_name: solution_Eq}, flattened across all groups.
+
+    With `symbolic_initial_conditions=True` each initial condition's VALUE is
+    replaced by its initial_condition_symbol() before solving, so the
+    solution is a formula in the initial values too -- which is what lets
+    modules.time_uncertainty sample an uncertain initial condition without
+    re-solving the ODE for every draw."""
     ode_equations = [e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]
     if not ode_equations:
         return {}
@@ -96,6 +112,8 @@ def solve_ode(model: ProblemModel) -> dict[str, sp.Eq]:
         for e in sympy_eqs:
             func_names |= _funcs_used(e)
         ics = _ics_for_group(model, func_names)
+        if symbolic_initial_conditions:
+            ics = {lhs: initial_condition_symbol(lhs) for lhs in ics}
 
         if len(group) == 1:
             func_applied = next(iter(sympy_eqs[0].atoms(AppliedUndef)))

@@ -898,6 +898,52 @@ ffmpeg needed, same as the existing GIFs.
   Axes are fixed from the true function so a diverging polynomial runs off
   the plot instead of rescaling it.
 
+### Uncertainty, parameter families, bifurcations and PDE evolution
+
+Four more views, built on the same Play/Pause + slider mechanism, each with a
+matplotlib export (PNG for the static ones, GIF for the animated ones).
+
+- **Uncertainty over time** (ODE solutions whose initial values are all given
+  and parameters all known). Give any parameter *or initial value* a standard
+  deviation; draws are pushed through the symbolic solution at every time
+  (vectorised -- no re-solving, no numerical integration per sample) and drawn
+  as a fan: the median, 25-75% and 5-95% bands, and the nominal curve. Optionally
+  also a **guaranteed envelope** from interval arithmetic -- not "90% of draws
+  fall here" but "the solution cannot leave this band if every input stays
+  within +/- k standard deviations". It is usually wider than the sampled
+  bands, because interval arithmetic treats each appearance of a parameter in
+  the formula as independent. Solutions written with complex exponentials
+  (what `dsolve_system` returns for an oscillator) are rewritten with sin and
+  cos first so the envelope still works. The seed is shown and recorded in the
+  exported figure. (`modules/time_uncertainty.py`; `solve_ode` gained a
+  `symbolic_initial_conditions` option so an uncertain initial value doesn't
+  need a re-solve per draw; interval arithmetic gained exact `sin` and `cos`.)
+- **Parameter morph** (same expander group). Vary one parameter or initial value
+  across a range and watch the whole solution change shape -- every curve faint,
+  the current one bold, your current setting dashed. Each frame is titled with
+  how many *visible* turning points it has, and the page reports where that
+  count first changes (where a solution starts to oscillate). "Visible" is a
+  zigzag filter: a heavily damped oscillator technically keeps turning forever
+  at an amplitude no plot could show, and calling that "six turning points"
+  would be misleading. (`modules/parameter_morph.py`)
+- **Bifurcation diagram** (any first-order map `a(n+1) = g(a(n))` with a
+  parameter). Iterate the map for each parameter value, discard the transient,
+  plot where it settles: fixed point, then 2, 4, 8, ... cycles, then chaos --
+  with the period-doubling points marked and the current parameter value shown.
+  Works from the numeric map alone, so no closed form is needed (the logistic map
+  has none). Checked against the classical values: period doubling at r = 3 and
+  1 + sqrt(6), the period-3 window near 3.83. A **cobweb diagram** is now also
+  shown for maps without a closed form -- previously it only appeared next to one,
+  so it was missing for exactly the nonlinear maps where it is most useful.
+  (`modules/bifurcation.py`)
+- **PDE evolution** (heat and wave). The profile u(x, t) was already animated;
+  it is now paired with a heatmap of the *whole* evolution beneath it (x against
+  t, with a cursor at the current time), a title that reads off max |u| and the
+  integral of u at that instant (total heat, for the heat equation), a diverging
+  colour scale when the solution changes sign, and a GIF export. Evaluation moved
+  into `modules/pde_field.py` and is vectorised over the grid. (The previous
+  version evaluated the formula one point at a time.)
+
 ## Rigor & analysis
 
 Three additions that give a solved problem's uncertainty/sensitivity a

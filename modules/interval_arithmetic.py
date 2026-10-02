@@ -141,12 +141,41 @@ def _interval_log(x):
     return Interval(math.log(x.lo), math.log(x.hi))  # monotonic increasing
 
 
+def _interval_sin(x):
+    """sin over an interval is NOT monotonic, so the endpoints alone can
+    miss the extremes: the range is [-1, 1] if the interval is at least a
+    full period wide, otherwise the endpoint values widened to +1 if it
+    contains a maximum (pi/2 + 2*pi*k) and to -1 if it contains a minimum
+    (-pi/2 + 2*pi*k)."""
+    import math
+    x = Interval._coerce(x)
+    if x.hi - x.lo >= 2 * math.pi:
+        return Interval(-1.0, 1.0)
+    at_lo, at_hi = math.sin(x.lo), math.sin(x.hi)
+    low, high = min(at_lo, at_hi), max(at_lo, at_hi)
+    first_max = math.pi / 2 + 2 * math.pi * math.ceil((x.lo - math.pi / 2) / (2 * math.pi))
+    if first_max <= x.hi:
+        high = 1.0
+    first_min = -math.pi / 2 + 2 * math.pi * math.ceil((x.lo + math.pi / 2) / (2 * math.pi))
+    if first_min <= x.hi:
+        low = -1.0
+    return Interval(low, high)
+
+
+def _interval_cos(x):
+    """cos(x) = sin(x + pi/2), so the same extremum handling applies."""
+    import math
+    x = Interval._coerce(x)
+    return _interval_sin(Interval(x.lo + math.pi / 2, x.hi + math.pi / 2))
+
+
 # passed to sp.lambdify's `modules` argument so that sympy function
 # calls (sqrt(...), exp(...), log(...)) in a lambdified expression
 # resolve to these interval-aware versions instead of numpy/math's --
 # ordinary + - * / ** need no such mapping since Interval's own operator
 # overloads handle those directly
-INTERVAL_FUNCTIONS = {"sqrt": _interval_sqrt, "exp": _interval_exp, "log": _interval_log}
+INTERVAL_FUNCTIONS = {"sqrt": _interval_sqrt, "exp": _interval_exp, "log": _interval_log,
+                       "sin": _interval_sin, "cos": _interval_cos}
 
 
 @dataclass

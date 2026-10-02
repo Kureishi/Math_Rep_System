@@ -16,53 +16,31 @@ from modules.pde_utils import (
     solve_pde_finite_difference_2d,
     solve_heat_equation_2d_dirichlet,
 )
-from ui.common import live_parse_preview, persist_on_click
+from modules.pde_field import evaluate_field
+from modules.plot_snapshot import snapshot_space_time_gif
+from modules.plotter import build_space_time_view
+from ui.common import gif_download_button, live_parse_preview, persist_on_click
 
 
 def _render_pde_time_animation(solution_expr, length: float, t_max: float, key_prefix: str,
                                  y_label: str = "u", n_frames: int = 30, n_x_points: int = 100) -> None:
-    """An animated Plotly line plot of u(x, t) scrubbing through t in
-    [0, t_max] via a native Plotly play button + slider (frames built
-    once, animated client-side -- no Streamlit rerun needed to step
-    through time), replacing what used to be no time-domain
-    visualization at all for the heat/wave Fourier solutions (only the
-    closed-form LaTeX was shown)."""
-    x = sp.Symbol("x", positive=True)
-    t = sp.Symbol("t", positive=True)
-    try:
-        f = sp.lambdify((x, t), solution_expr, "numpy")
-        xs = np.linspace(0, length, n_x_points)
-        ts = np.linspace(0, t_max, n_frames)
-        all_ys = [np.real(np.array([complex(f(xv, tv)) for xv in xs])) for tv in ts]
-    except Exception as exc:  # noqa: BLE001
-        st.caption(f"Could not build an animated view: {exc}")
+    """The heat/wave solution u(x, t) as a linked pair of views sharing a
+    time slider (one native Plotly Play button + slider, animated client-
+    side with no Streamlit rerun per step): the profile u(x, t) on top, and
+    below it the WHOLE evolution as a heatmap of x against t with a cursor at
+    the current time. The title reads off the largest |u| and the integral of
+    u over the rod (total heat, for the heat equation) at that instant.
+    Evaluation is vectorised over the whole grid in modules.pde_field --
+    the previous version evaluated the formula one point at a time.
+    `n_frames` and `n_x_points` are kept so existing callers still work: they
+    set the sampling of the time and space axes."""
+    field = evaluate_field(solution_expr, length, t_max, n_x=max(n_x_points, 2), n_t=max(4 * n_frames, 2))
+    if field.error:
+        st.caption(f"Could not build an animated view: {field.error}")
         return
-
-    y_min, y_max = float(np.min(all_ys)), float(np.max(all_ys))
-    pad = 0.1 * max(abs(y_max - y_min), 1e-6)
-    frames = [go.Frame(data=[go.Scatter(x=xs, y=all_ys[i], mode="lines", line=dict(width=3))],
-                        name=f"{i}") for i in range(n_frames)]
-    fig = go.Figure(
-        data=[go.Scatter(x=xs, y=all_ys[0], mode="lines", line=dict(width=3))],
-        layout=go.Layout(
-            xaxis=dict(title="x", range=[0, length]),
-            yaxis=dict(title=y_label, range=[y_min - pad, y_max + pad]),
-            updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15,
-                                buttons=[
-                                    dict(label="▶ Play", method="animate",
-                                          args=[None, {"frame": {"duration": 80, "redraw": True},
-                                                          "fromcurrent": True, "transition": {"duration": 0}}]),
-                                    dict(label="⏸ Pause", method="animate",
-                                          args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
-                                ])],
-            sliders=[dict(currentvalue={"prefix": "t = "}, x=0.05, len=0.9,
-                           steps=[dict(method="animate", args=[[f"{i}"],
-                                        {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
-                                        label=f"{ts[i]:.2g}") for i in range(n_frames)])],
-        ),
-        frames=frames,
-    )
-    st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_anim")
+    st.plotly_chart(build_space_time_view(field, y_label=y_label), width="stretch", key=f"{key_prefix}_anim")
+    gif_download_button(key=f"{key_prefix}_anim", file_stem=f"{key_prefix}_evolution",
+                         render_fn=lambda: snapshot_space_time_gif(field, y_label=y_label))
 
 
 def render_pde_tab():

@@ -383,3 +383,59 @@ def test_propagate_interval_evaluation_failure_is_wrapped():
     })
     with pytest.raises(ValueError, match="Couldn't evaluate"):
         propagate_interval(model, "a", {"v_f": (19.0, 21.0)})
+
+
+# ---------------------------------------------------------------- sin / cos over an interval
+import numpy as np
+
+from modules.interval_arithmetic import _interval_sin, _interval_cos
+
+
+@pytest.mark.parametrize("lo, hi, exp_lo, exp_hi", [
+    (0.0, math.pi / 2, 0.0, 1.0),                    # rises to its maximum at the right edge
+    (math.pi / 2, math.pi, 0.0, 1.0),                # falls from its maximum at the left edge
+    (0.0, math.pi, 0.0, 1.0),
+    (0.0, 3 * math.pi / 2, -1.0, 1.0),               # spans a maximum AND a minimum
+    (1.0, 1.2, math.sin(1.0), math.sin(1.2)),        # monotone stretch: endpoints are the extremes
+    (-1.0, -0.2, math.sin(-1.0), math.sin(-0.2)),
+    (3.0, 3.0, math.sin(3.0), math.sin(3.0)),        # a point
+    (-10.0, -3.0, -1.0, 1.0),                        # negative arguments: contains maxima and minima
+])
+def test_interval_sin_exact_cases(lo, hi, exp_lo, exp_hi):
+    r = _interval_sin(Interval(lo, hi))
+    assert (r.lo, r.hi) == pytest.approx((exp_lo, exp_hi), abs=1e-12)
+
+
+def test_interval_sin_of_a_full_period_is_the_whole_range():
+    r = _interval_sin(Interval(0.3, 0.3 + 2 * math.pi))
+    assert (r.lo, r.hi) == (-1.0, 1.0)
+
+
+def test_interval_cos_exact_cases():
+    assert (_interval_cos(Interval(0.0, 1.0)).lo, _interval_cos(Interval(0.0, 1.0)).hi) == \
+        pytest.approx((math.cos(1.0), 1.0))
+    r = _interval_cos(Interval(-1.0, 1.0))
+    assert (r.lo, r.hi) == pytest.approx((math.cos(1.0), 1.0))               # maximum at 0 in the middle
+    r = _interval_cos(Interval(2.0, 4.5))
+    assert (r.lo, r.hi) == pytest.approx((-1.0, math.cos(4.5)))              # minimum at pi inside
+    assert _interval_cos(Interval(0.0, 7.0)).lo == -1.0
+
+
+def test_interval_sin_and_cos_enclose_and_tightly_fit_every_value():
+    rng = np.random.default_rng(0)
+    for _ in range(600):
+        lo = rng.uniform(-20, 20)
+        hi = lo + rng.uniform(0, 9)
+        xs = np.linspace(lo, hi, 2001)
+        for fn, ref in ((_interval_sin, np.sin), (_interval_cos, np.cos)):
+            r, v = fn(Interval(lo, hi)), ref(xs)
+            assert r.lo <= v.min() + 1e-12 and r.hi >= v.max() - 1e-12          # never misses a value
+            assert r.lo >= v.min() - 1e-3 and r.hi <= v.max() + 1e-3            # and is not looser than needed
+
+
+def test_sin_cos_work_through_a_lambdified_expression():
+    from modules.interval_arithmetic import INTERVAL_FUNCTIONS
+    x = sp.Symbol("x")
+    f = sp.lambdify(x, sp.sin(x) + 2 * sp.cos(x), modules=[INTERVAL_FUNCTIONS])
+    r = f(Interval(0.0, 1.0))
+    assert r.lo <= math.sin(0.5) + 2 * math.cos(0.5) <= r.hi

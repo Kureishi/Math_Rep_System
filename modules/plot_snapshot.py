@@ -797,3 +797,125 @@ def snapshot_partial_sum_gif(partial_sums, title: str = "", fps: int = 2) -> byt
         fig.tight_layout()
 
     return _finish_gif(fig, update, len(ps.sums), fps)
+
+
+# ---------------------------------------------------------------------------
+# Matplotlib counterparts of plotter.build_uncertainty_fan / build_parameter_morph /
+# build_bifurcation_plot / build_space_time_view
+# ---------------------------------------------------------------------------
+@np.errstate(invalid="ignore")
+def snapshot_uncertainty_fan(fan, fmt: str = "png") -> bytes:
+    """PNG (or SVG/PDF) of a modules.time_uncertainty.FanResult."""
+    if not fan.applicable:
+        raise ValueError(fan.reason or "No uncertainty fan available.")
+    n = len(fan.names)
+    fig, axes = plt.subplots(n, 1, figsize=(7.5, 3.4 * n), sharex=True, squeeze=False)
+    for i, name in enumerate(fan.names):
+        ax, colour = axes[i][0], _TIME_PALETTE[i % len(_TIME_PALETTE)]
+        if fan.envelope_lo is not None and fan.envelope_hi is not None:
+            ax.plot(fan.t, fan.envelope_hi[i], color="#555555", linestyle=":", linewidth=1.3,
+                     label=f"guaranteed envelope (\u00b1{fan.envelope_sigmas:g}\u03c3)")
+            ax.plot(fan.t, fan.envelope_lo[i], color="#555555", linestyle=":", linewidth=1.3)
+        ax.fill_between(fan.t, fan.p5[i], fan.p95[i], color=colour, alpha=0.18, linewidth=0,
+                         label="5\u201395% of samples")
+        ax.fill_between(fan.t, fan.p25[i], fan.p75[i], color=colour, alpha=0.35, linewidth=0,
+                         label="25\u201375% of samples")
+        ax.plot(fan.t, fan.median[i], color=colour, linewidth=2.2, label="median")
+        ax.plot(fan.t, fan.nominal[i], color="#222222", linestyle="--", linewidth=1.5,
+                 label="nominal (inputs at their means)")
+        ax.set_ylabel(name)
+        ax.grid(alpha=0.3)
+        if i == 0:
+            ax.legend(fontsize=8, loc="best")
+    axes[-1][0].set_xlabel("t")
+    fig.suptitle(f"Uncertainty over time ({fan.n_samples} samples, seed {fan.seed})", fontsize=10)
+    fig.tight_layout()
+    return _finish(fig, fmt)
+
+
+def snapshot_parameter_morph_gif(morph, n_frames: int = 40, fps: int = 8) -> bytes:
+    """GIF of plotter.build_parameter_morph: the family of curves, one
+    parameter value's curve highlighted at a time."""
+    if not morph.applicable:
+        raise ValueError(morph.reason or "No morph available.")
+    picks = _frame_picks(len(morph.values), n_frames)
+    fig, ax = plt.subplots(figsize=(7, 4.4))
+
+    def update(k):
+        i = picks[k]
+        ax.clear()
+        for row in morph.curves:
+            ax.plot(morph.t, row, color="gray", alpha=0.2, linewidth=1)
+        if morph.nominal_curve is not None:
+            ax.plot(morph.t, morph.nominal_curve, color="#222222", linestyle="--", linewidth=1.6,
+                     label=f"current setting ({morph.param_name} = {morph.nominal_value:g})")
+            ax.legend(fontsize=8, loc="upper right")
+        ax.plot(morph.t, morph.curves[i], color="#C0392B", linewidth=3)
+        ax.set_ylim(morph.y_range)
+        ax.set_xlabel("t")
+        ax.set_ylabel(morph.function)
+        ax.grid(alpha=0.3)
+        tp = morph.turning_points[i]
+        shape = "monotone" if tp == 0 else f"{tp} turning point{'s' if tp != 1 else ''}"
+        ax.set_title(f"{morph.param_name} = {morph.values[i]:.4g}  \u2014  {shape}", fontsize=10)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, len(picks), fps)
+
+
+def snapshot_bifurcation_plot(result, marker: float | None = None, fmt: str = "png") -> bytes:
+    """PNG (or SVG/PDF) of a modules.bifurcation.BifurcationResult."""
+    if not result.applicable:
+        raise ValueError(result.reason or "No bifurcation diagram available.")
+    xs = np.tile(result.params, result.values.shape[0])
+    ys = result.values.ravel()
+    keep = np.isfinite(ys)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.scatter(xs[keep], ys[keep], s=0.4, color="#2E5EAA", alpha=0.45, linewidths=0, rasterized=True)
+    for p, period in result.transitions:
+        if period in (2, 4, 8, 16):
+            ax.axvline(p, color="#C0392B", linestyle=":", linewidth=0.9, alpha=0.7)
+            ax.text(p, ax.get_ylim()[1], f"{period}", color="#C0392B", fontsize=7, ha="center", va="bottom")
+    if marker is not None and result.params[0] <= marker <= result.params[-1]:
+        ax.axvline(marker, color="#1E7E34", linestyle="--", linewidth=1.8, label="current")
+        ax.legend(fontsize=8, loc="upper left")
+    ax.set_xlim(float(result.params[0]), float(result.params[-1]))
+    ax.set_xlabel(result.param_name)
+    ax.set_ylabel("long-run value")
+    ax.set_title(f"Bifurcation diagram (x\u2080 = {result.x0:g})", fontsize=10)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    return _finish(fig, fmt)
+
+
+def snapshot_space_time_gif(field, y_label: str = "u", n_frames: int = 40, fps: int = 10) -> bytes:
+    """GIF of plotter.build_space_time_view: the profile on top and the
+    whole evolution below, with a cursor at the current time."""
+    if field.error:
+        raise ValueError(field.error)
+    picks = _frame_picks(len(field.ts), n_frames)
+    pad = 0.08 * max(field.u_max - field.u_min, 1e-9)
+    signed = field.u_min < 0 < field.u_max
+    bound = max(abs(field.u_min), abs(field.u_max))
+    fig, (ax_p, ax_h) = plt.subplots(2, 1, figsize=(7, 6.4), sharex=True, gridspec_kw={"height_ratios": [1, 1.3]})
+    extent = [float(field.xs[0]), float(field.xs[-1]), float(field.ts[0]), float(field.ts[-1])]
+    image = ax_h.imshow(field.u, origin="lower", aspect="auto", extent=extent,
+                         cmap="RdBu" if signed else "inferno",
+                         vmin=-bound if signed else field.u_min, vmax=bound if signed else field.u_max)
+    fig.colorbar(image, ax=[ax_p, ax_h], label=y_label, fraction=0.04)
+    ax_h.set_xlabel("x")
+    ax_h.set_ylabel("t")
+    cursor = ax_h.axhline(float(field.ts[0]), color="white", linestyle="--", linewidth=1.6)
+
+    def update(k):
+        i = picks[k]
+        ax_p.clear()
+        ax_p.plot(field.xs, field.u[i], color="#C0392B", linewidth=2.6)
+        ax_p.set_ylim(field.u_min - pad, field.u_max + pad)
+        ax_p.set_ylabel(y_label)
+        ax_p.grid(alpha=0.3)
+        cursor.set_ydata([field.ts[i], field.ts[i]])
+        ax_p.set_title(f"t = {field.ts[i]:.3g}   max|{y_label}| = {field.max_abs[i]:.4g}   "
+                       f"\u222b{y_label} dx = {field.integral[i]:.4g}", fontsize=9)
+
+    return _finish_gif(fig, update, len(picks), fps)
