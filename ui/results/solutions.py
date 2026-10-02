@@ -11,8 +11,15 @@ from modules.verifier import _known_substitutions
 from modules.ode_utils import solve_ode, group_coupled_odes
 from modules.recurrence_utils import solve_recurrence, _independent_variable, extract_step_map
 from modules.proof import build_recurrence_induction_proof
-from modules.plot_snapshot import snapshot_ode_plot, snapshot_recurrence_plot, snapshot_cobweb_gif
-from modules.plotter import build_phase_portrait, build_cobweb_plot
+from modules.ode_trajectories import compare_trajectories, phase_flow, ring_of_starts
+from modules.plot_snapshot import (
+    snapshot_ode_plot, snapshot_recurrence_plot, snapshot_cobweb_gif, snapshot_ode_error_plot,
+    snapshot_phase_trail_gif, snapshot_time_linked_gif,
+)
+from modules.plotter import (
+    build_phase_portrait, build_cobweb_plot, build_ode_error_plot, build_phase_trail_animation,
+    build_time_linked_view,
+)
 from ui.common import snapshot_button, gif_download_button
 from modules.workspace import Workspace
 
@@ -76,6 +83,46 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
             except Exception as e:  # noqa: BLE001
                 st.caption(f"Couldn't plot this solution numerically: {e}")
 
+    # ---- closed form vs. an independent numerical integration, OVER TIME.
+    # The verifier already runs this comparison as a pass/fail at five sample
+    # points (ode_utils.numerical_cross_check); this draws the same comparison
+    # as a curve, so it also shows WHERE in time any disagreement starts.
+    # Silently skipped for anything numerical_cross_check itself doesn't
+    # cover (higher-order ODEs, unresolved parameters, no initial conditions),
+    # same convention as the phase portrait and cobweb diagram.
+    for group in group_coupled_odes([e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]):
+        default_cmp = compare_trajectories(model, group, ode_solutions)
+        if not default_cmp.applicable:
+            continue
+        label = ", ".join(default_cmp.names)
+        with st.expander(f"📏 Closed form vs. numerical integration over time: {label}"):
+            st.caption("The symbolic solution and an independent numerical integration of the original "
+                        "differential equation, from the same initial condition. The lower panel is their "
+                        "relative disagreement against the tolerance the verifier uses. Spikes in it line up "
+                        "with zero-crossings of the solution, where a RELATIVE error is naturally largest.")
+            t0_, default_end = default_cmp.t0, float(default_cmp.t[-1])
+            span = default_end - t0_
+            t_end = st.slider("Compare out to t =", float(t0_ + span / 4), float(t0_ + span * 8), default_end,
+                               key=f"odeerr_end_{label}")
+            cmp_ = default_cmp if abs(t_end - default_end) < 1e-12 else \
+                compare_trajectories(model, group, ode_solutions, t_end=t_end)
+            if not cmp_.applicable:
+                st.caption(f"Couldn't compare over that range: {cmp_.reason}")
+            else:
+                st.plotly_chart(build_ode_error_plot(cmp_), width="stretch", key=f"odeerr_{label}")
+                if cmp_.ok:
+                    st.success(f"Agreement everywhere shown (max relative error {cmp_.max_rel_error:.2e}).")
+                else:
+                    st.warning(f"The two solutions DISAGREE somewhere in this range (max relative error "
+                                f"{cmp_.max_rel_error:.2e}, tolerance {cmp_.tolerance:g}).")
+                snapshot_button(
+                    key=f"odeerr_{label}",
+                    title=f"Closed form vs. numerical integration: {label}",
+                    caption=f"Relative error against the verification tolerance, t in "
+                            f"[{cmp_.t0:g}, {t_end:g}]",
+                    render_fn=lambda c=cmp_: snapshot_ode_error_plot(c),
+                )
+
     # ---- phase portrait: only for a genuinely COUPLED 2-variable system
     # (dx/dt = f(x,y), dy/dt = g(x,y)) -- a view neither function's own
     # plot above can give, since it's about how the two variables move
@@ -134,6 +181,37 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                     (float(tys.min() - pad_y), float(tys.max() + pad_y)),
                     x_label=fname_x, y_label=fname_y, trajectory=(txs, tys))
                 st.plotly_chart(phase_fig, width="stretch", key=f"phase_{fname_x}_{fname_y}")
+
+                # ---- the same system as a MOVIE: points flowing along the field, trailing behind them
+                x_rng = (float(txs.min() - pad_x), float(txs.max() + pad_x))
+                y_rng = (float(tys.min() - pad_y), float(tys.max() + pad_y))
+                st.markdown("**Animated flow**")
+                n_extra = st.slider("Extra starting points", 0, 12, 6, key=f"phase_extra_{fname_x}_{fname_y}",
+                                     help="Additional paths of the same system, started on a ring around the "
+                                           "real initial condition, to show the flow around the solved "
+                                           "trajectory (blue) rather than only along it.")
+                starts = ring_of_starts((float(txs[0]), float(tys[0])), x_rng, y_rng, n_extra)
+                paths = [(txs, tys)] + phase_flow(dx_f, dy_f, starts, float(ts[-1] - ts[0]), n_points=len(ts))
+                st.plotly_chart(
+                    build_phase_trail_animation(dx_f, dy_f, x_rng, y_rng, paths, ts, x_label=fname_x,
+                                                  y_label=fname_y),
+                    width="stretch", key=f"phase_trail_{fname_x}_{fname_y}")
+                gif_download_button(
+                    key=f"phase_trail_{fname_x}_{fname_y}", file_stem=f"phase_flow_{fname_x}_{fname_y}",
+                    render_fn=lambda pa=paths, xr=x_rng, yr=y_rng, fx_=fname_x, fy_=fname_y, tt=ts:
+                        snapshot_phase_trail_gif(dx_f, dy_f, xr, yr, pa, tt, x_label=fx_, y_label=fy_))
+
+                # ---- one time cursor driving both the time series and the phase plane
+                st.markdown("**Time-linked view**")
+                st.caption("Drag the slider (or press Play): the cursor on the time series and the marker on "
+                            "the phase plane are the same instant.")
+                st.plotly_chart(
+                    build_time_linked_view(ts, [(fname_x, txs), (fname_y, tys)], field=(dx_f, dy_f)),
+                    width="stretch", key=f"phase_linked_{fname_x}_{fname_y}")
+                gif_download_button(
+                    key=f"phase_linked_{fname_x}_{fname_y}", file_stem=f"time_linked_{fname_x}_{fname_y}",
+                    render_fn=lambda fx_=fname_x, fy_=fname_y, xs_=txs, ys_=tys, tt=ts:
+                        snapshot_time_linked_gif(tt, [(fx_, xs_), (fy_, ys_)], field=(dx_f, dy_f)))
         except Exception as exc:  # noqa: BLE001
             st.caption(f"Couldn't build a phase portrait: {exc}")
 

@@ -624,3 +624,176 @@ def snapshot_cobweb_gif(g, x0: float, x_range: tuple[float, float], n_steps: int
         fig.tight_layout()
 
     return _finish_gif(fig, update, n_steps + 1, fps)
+
+
+# ---------------------------------------------------------------------------
+# Time-resolved views (matplotlib counterparts of plotter.build_ode_error_plot,
+# build_phase_trail_animation, build_time_linked_view and
+# build_partial_sum_animation -- PNG for the error plot, GIF for the three
+# animations, same no-extra-binaries approach as the GIFs above).
+# ---------------------------------------------------------------------------
+_TIME_PALETTE = ["#2E5EAA", "#C0392B", "#1E7E34", "#8E44AD", "#D68910", "#117A8B"]
+
+
+def _frame_picks(n: int, n_frames: int) -> list[int]:
+    """At most `n_frames` evenly spaced indices into a length-`n` series."""
+    return sorted({int(round(v)) for v in np.linspace(0, n - 1, min(n, n_frames))})
+
+
+def _draw_field(ax, dx_f, dy_f, x_range, y_range, resolution: int = 16) -> None:
+    """A normalized direction field -- every arrow the same length, so only
+    direction (not speed) is shown, matching plotter.build_phase_portrait."""
+    xs = np.linspace(x_range[0], x_range[1], resolution)
+    ys = np.linspace(y_range[0], y_range[1], resolution)
+    X, Y = np.meshgrid(xs, ys)
+    U = np.nan_to_num(np.asarray(dx_f(X, Y), dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+    V = np.nan_to_num(np.asarray(dy_f(X, Y), dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+    speed = np.sqrt(U ** 2 + V ** 2)
+    speed[speed == 0] = 1.0
+    step = max((x_range[1] - x_range[0]) / resolution, (y_range[1] - y_range[0]) / resolution)
+    ax.quiver(X, Y, U / speed, V / speed, color="#9AA3B2", angles="xy", scale_units="xy",
+               scale=1.0 / (step * 0.8), pivot="mid", width=0.003)
+
+
+@np.errstate(divide="ignore", invalid="ignore")
+def snapshot_ode_error_plot(comparison, fmt: str = "png") -> bytes:
+    """Closed form vs numerical integration, with relative error underneath
+    (log scale) against the verification tolerance."""
+    if not comparison.applicable:
+        raise ValueError(comparison.reason or "No comparison available.")
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7.5, 6.2), sharex=True,
+                                     gridspec_kw={"height_ratios": [1.3, 1]})
+    t = comparison.t
+    every = max(1, len(t) // 25)
+    for i, name in enumerate(comparison.names):
+        colour = _TIME_PALETTE[i % len(_TIME_PALETTE)]
+        ax1.plot(t, comparison.symbolic[i], color=colour, linewidth=2.2, label=f"{name} (closed form)")
+        ax1.plot(t[::every], comparison.numeric[i][::every], linestyle="none", marker="o", markersize=6,
+                  markerfacecolor="none", markeredgecolor=colour, markeredgewidth=1.6,
+                  label=f"{name} (numerical)")
+        ax2.semilogy(t, np.maximum(comparison.rel_error[i], 1e-16), color=colour, linewidth=1.8)
+    ax2.axhline(comparison.tolerance, color="#C0392B", linestyle="--", linewidth=1.3)
+    ax2.text(t[0], comparison.tolerance / 1.6, f"tolerance {comparison.tolerance:g}", color="#C0392B",
+              fontsize=8, va="top")
+    ax1.set_ylabel("value")
+    ax1.legend(fontsize=8, loc="best")
+    ax1.grid(alpha=0.3)
+    ax2.set_xlabel("t")
+    ax2.set_ylabel("relative error")
+    ax2.grid(alpha=0.3, which="both")
+    verdict = "agree" if comparison.ok else "DISAGREE"
+    fig.suptitle(f"Numerical integration and closed form {verdict} "
+                  f"(max relative error {comparison.max_rel_error:.2e})", fontsize=10)
+    fig.tight_layout()
+    return _finish(fig, fmt)
+
+
+def snapshot_phase_trail_gif(dx_f, dy_f, x_range: tuple[float, float], y_range: tuple[float, float],
+                               trajectories: list[tuple[np.ndarray, np.ndarray]], times: np.ndarray,
+                               x_label: str = "x", y_label: str = "y", trail_length: int = 25,
+                               n_frames: int = 40, fps: int = 10, highlight: int = 0) -> bytes:
+    """GIF of plotter.build_phase_trail_animation: points moving along their
+    paths over the direction field, each with a fading trail."""
+    from matplotlib.colors import to_rgba
+    picks = _frame_picks(len(times), n_frames)
+    fig, ax = plt.subplots(figsize=(5.8, 5.5))
+
+    def update(k):
+        i = picks[k]
+        ax.clear()
+        _draw_field(ax, dx_f, dy_f, x_range, y_range)
+        for j, (tx, ty) in enumerate(trajectories):
+            colour = _TIME_PALETTE[0] if j == highlight else _TIME_PALETTE[4]
+            ax.plot(tx, ty, color="gray", alpha=0.3, linewidth=1.2)
+            lo = max(0, i - trail_length + 1)
+            seg_x, seg_y = tx[lo:i + 1], ty[lo:i + 1]
+            ok = np.isfinite(seg_x) & np.isfinite(seg_y)
+            m = int(ok.sum())
+            if m:
+                rgba = [to_rgba(colour, a) for a in np.linspace(0.12, 0.85, m)]
+                ax.scatter(seg_x[ok], seg_y[ok], s=np.linspace(8, 40, m), c=rgba, zorder=3)
+            if np.isfinite(tx[i]) and np.isfinite(ty[i]):
+                ax.scatter([tx[i]], [ty[i]], s=90, color=colour, edgecolors="white", linewidths=1.2, zorder=4)
+        ax.set_xlim(x_range)
+        ax.set_ylim(y_range)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.set_title(f"Phase portrait flow    t = {times[i]:.3g}", fontsize=10)
+        ax.grid(alpha=0.25)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, len(picks), fps)
+
+
+def snapshot_time_linked_gif(ts: np.ndarray, series: list[tuple[str, np.ndarray]], field=None,
+                               n_frames: int = 40, fps: int = 10) -> bytes:
+    """GIF of plotter.build_time_linked_view: one moving instant shown on the
+    time series (vertical cursor) and the phase plane (marker) together."""
+    if len(series) < 2:
+        raise ValueError("The linked time view needs at least two functions (for the phase plane).")
+    (name_x, xs), (name_y, ys) = series[0], series[1]
+    picks = _frame_picks(len(ts), n_frames)
+
+    def padded(values: np.ndarray, frac: float) -> tuple[float, float]:
+        finite = values[np.isfinite(values)]
+        lo, hi = float(finite.min()), float(finite.max())
+        pad = frac * max(hi - lo, 1.0)
+        return lo - pad, hi + pad
+
+    x_range, y_range = padded(xs, 0.2), padded(ys, 0.2)
+    v_lo, v_hi = padded(np.concatenate([v for _, v in series]), 0.1)
+    fig, (ax_t, ax_p) = plt.subplots(1, 2, figsize=(10, 4.8), gridspec_kw={"width_ratios": [1.2, 1]})
+
+    def update(k):
+        i = picks[k]
+        ax_t.clear()
+        ax_p.clear()
+        for n, (name, vals) in enumerate(series):
+            colour = _TIME_PALETTE[n % len(_TIME_PALETTE)]
+            ax_t.plot(ts, vals, color=colour, linewidth=2, label=name)
+            ax_t.scatter([ts[i]], [vals[i]], s=70, color=colour, edgecolors="white", zorder=4)
+        ax_t.axvline(ts[i], color="#444444", linestyle="--", linewidth=1.2)
+        ax_t.set_ylim(v_lo, v_hi)
+        ax_t.set_xlabel("t")
+        ax_t.set_ylabel("value")
+        ax_t.legend(fontsize=8, loc="best")
+        ax_t.grid(alpha=0.3)
+        if field is not None:
+            _draw_field(ax_p, field[0], field[1], x_range, y_range, resolution=14)
+        ax_p.plot(xs, ys, color=_TIME_PALETTE[0], alpha=0.55, linewidth=2.5)
+        ax_p.scatter([xs[i]], [ys[i]], s=90, color=_TIME_PALETTE[1], edgecolors="white", zorder=4)
+        ax_p.set_xlim(x_range)
+        ax_p.set_ylim(y_range)
+        ax_p.set_xlabel(name_x)
+        ax_p.set_ylabel(name_y)
+        ax_p.grid(alpha=0.3)
+        fig.suptitle(f"t = {ts[i]:.3g}    {name_x} = {xs[i]:.4g}    {name_y} = {ys[i]:.4g}", fontsize=10)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, len(picks), fps)
+
+
+def snapshot_partial_sum_gif(partial_sums, title: str = "", fps: int = 2) -> bytes:
+    """GIF of plotter.build_partial_sum_animation: the function with its
+    series partial sums added one term (or harmonic) at a time."""
+    if partial_sums.error:
+        raise ValueError(partial_sums.error)
+    ps = partial_sums
+    fig, ax = plt.subplots(figsize=(7, 4.6))
+
+    def update(k):
+        ax.clear()
+        ax.plot(ps.xs, ps.target, color="#222222", linewidth=2.6, label="function")
+        if ps.center is not None:
+            ax.axvline(ps.center, color="gray", linestyle=":", linewidth=1.2)
+        ax.plot(ps.xs, ps.sums[k], color="#C0392B", linewidth=2.2, label="partial sum")
+        ax.set_xlim(float(ps.xs[0]), float(ps.xs[-1]))
+        ax.set_ylim(ps.y_range)
+        ax.set_xlabel("x")
+        ax.legend(loc="upper right", fontsize=8)
+        ax.grid(alpha=0.3)
+        head = f"{title} \u2014 " if title else ""
+        ax.set_title(f"{head}{ps.labels[k]}\nRMS error {ps.errors[k]:.3g} {ps.error_region}", fontsize=9)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, len(ps.sums), fps)

@@ -178,6 +178,9 @@ math-rep-system/
     ├── ode_utils.py             # shared dsolve()/dsolve_system() helper (solver.py +
     │                            #   verifier.py both need it; lives here to avoid a
     │                            #   circular import)
+    ├── ode_trajectories.py        # the closed-form-vs-numerical ODE comparison as a curve
+    │                              #   over time (shares prepare_ivp with ode_utils'
+    │                              #   numerical_cross_check) + multi-start phase flow
     ├── recurrence_utils.py       # shared rsolve() helper, same circular-import reason
     ├── pde_utils.py                # partial differential equations: first-order PDEs,
     │                              #   heat/wave with Dirichlet/Neumann/Robin boundary
@@ -199,6 +202,8 @@ math-rep-system/
     │                              #   their inverses), each independently verified
     ├── series_asymptotics.py       # Taylor/Maclaurin/Laurent series expansions and
     │                              #   asymptotic expansions
+    ├── series_animation.py         # cumulative partial sums of a Taylor result, and a
+    │                              #   Fourier series by harmonic, for convergence animations
     ├── statistical_inference.py    # the statistics layer on top of curve_fitting.py:
     │                              #   parameter confidence intervals, hypothesis tests,
     │                              #   and related inference on a fitted model

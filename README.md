@@ -855,6 +855,49 @@ transforms & series) and the platform/infrastructure layer around them
     change ships safely against an existing `data/*.db` file from a
     previous version rather than requiring a manual reset.
 
+## Time-resolved views
+
+Four views that show a solution changing over time (or a series
+converging term by term) instead of a single static curve. Each has an
+interactive Plotly version with Play/Pause and a slider, plus a matplotlib
+export (a PNG for the first, an animated GIF for the rest) -- no kaleido or
+ffmpeg needed, same as the existing GIFs.
+
+- **Closed form vs. numerical integration, over time** (an expander under
+  any first-order ODE solution with initial conditions and known
+  parameters). `numerical_cross_check` already integrates the original
+  equation and compares it to the symbolic solution, but as one pass/fail
+  at five sample points. This draws the same comparison as curves: the
+  closed form and the integration overlaid, and underneath their relative
+  disagreement on a log axis against the verifier's tolerance
+  (`modules/ode_trajectories.compare_trajectories`, which shares its setup
+  with the verifier via `ode_utils.prepare_ivp`, so the two cannot disagree
+  about what the problem is). A slider extends the window beyond the
+  automatic one. The PNG can be included in the exported report.
+- **Animated phase-portrait flow** (inside the phase-portrait expander of a
+  coupled two-function system). Points move along their paths over the
+  direction field, each dragging a fading trail: the real solved trajectory
+  in blue, plus a ring of extra starting points (a slider, default 6) in
+  amber to show the flow around it. Paths that blow up in finite time are
+  cut off and the rest left blank rather than dropped.
+- **Time-linked view** (same expander). One time slider drives a vertical
+  cursor across the time series and a marker on the phase plane at the same
+  instant, with the values read out in the title.
+- **Series partial-sum animation**, in Transforms & series. A Taylor/Laurent
+  result gets a "Watch the approximation converge" expander: the function
+  with its partial sums added one nonzero term at a time (so `sin` animates
+  x, x - x^3/6, ... rather than repeating a frame for each zero
+  coefficient), with the plot window adjustable to show where the
+  polynomial breaks down. A new **Fourier series** tab does the same for a
+  function on [-L, L] by harmonic -- square and sawtooth waves included,
+  with the Gibbs overshoot at a jump. Coefficients come from numerical
+  quadrature, so a piecewise function costs nothing and can't time out. The
+  check shown is a real property of Fourier partial sums: the RMS error over
+  a period never rises as a harmonic is added (each partial sum is the best
+  trigonometric fit of its degree), so a rise would mean wrong coefficients.
+  Axes are fixed from the true function so a diverging polynomial runs off
+  the plot instead of rescaling it.
+
 ## Rigor & analysis
 
 Three additions that give a solved problem's uncertainty/sensitivity a

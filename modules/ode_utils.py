@@ -18,7 +18,9 @@ from scipy.integrate import solve_ivp
 from sympy.core.function import AppliedUndef
 from sympy.solvers.ode.systems import dsolve_system
 from sympy.solvers.deutils import ode_order
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from modules.equation_engine import ProblemModel, Equation
 from modules.timeout_utils import run_with_timeout
@@ -207,42 +209,29 @@ def _defined_function(eq_sympy: sp.Eq):
     return next(iter(funcs))
 
 
-def numerical_cross_check(model: ProblemModel, group: list[Equation],
-                            solutions: dict[str, sp.Eq]) -> NumericalCrossCheckResult:
-    """A SECOND, INDEPENDENT solve path for an initial-value ODE problem,
-    alongside the symbolic checkodesol/verify_coupled_solution check
-    _ode_checks already does -- this integrates the ORIGINAL differential
-    equation(s) numerically (scipy's adaptive RK45, via solve_ivp) from
-    the same initial condition, then compares the numerical trajectory
-    against the symbolic closed-form solution at several sample points.
+@dataclass
+class IVPSetup:
+    """Everything needed to integrate a first-order initial-value problem
+    numerically AND to evaluate its symbolic closed form at the same times:
+    shared by numerical_cross_check (a pass/fail verdict at a few sample
+    points) and modules.ode_trajectories (the same comparison drawn over
+    time), so the two can never disagree about what "the" IVP is."""
+    func_order: list[str]                 # fixed order of the state vector
+    t0: float
+    y0: list[float]
+    window: float                         # a sensible default time span to integrate over
+    rhs: Callable[..., list[float]]       # rhs(t, y) -> dy/dt, for solve_ivp
+    sol_funcs: list[Callable[..., Any]]   # symbolic closed form per function, lambdified in t
 
-    This exists because checkodesol-style verification has a real,
-    narrow blind spot: it confirms the closed-form solution satisfies
-    the DIFFERENTIAL EQUATION (a true statement about the whole solution
-    family), but does NOT independently re-confirm that dsolve's
-    ics=-driven constant-solving actually landed on the constant
-    matching the SPECIFIC given initial condition -- if dsolve picked a
-    wrong root while solving for an integration constant (plausible for
-    equations with sign ambiguity, e.g. from a square root), checkodesol
-    would still report success, since the resulting expression genuinely
-    does satisfy the ODE -- just not the one matching the stated initial
-    value. A numerical integration started from the SAME initial
-    condition has no such blind spot: it has no algebraic constant-
-    solving step to get wrong in the first place, so a mismatch here is
-    a strong, independent signal something is actually wrong, not a
-    restatement of the same computation the symbolic check already did.
 
-    SCOPED to first-order initial-value problems (every equation in the
-    group has ode_order 1, an initial condition exists for every
-    function, and every OTHER symbol appearing in the equations has a
-    known numeric value in the model) -- a real, documented limitation,
-    not a silent gap: higher-order ODEs would need converting to a
-    first-order companion system with correctly-ordered derivative
-    initial conditions (y'(0), y''(0), ...), which the current
-    initial-condition representation doesn't reliably distinguish from
-    plain y(0); extending to that is future work, not attempted here
-    rather than risking a wrong companion-state mapping.
-    """
+def prepare_ivp(model: ProblemModel, group: list[Equation],
+                  solutions: dict[str, sp.Eq]) -> "IVPSetup | NumericalCrossCheckResult":
+    """Validates that `group` is a first-order initial-value problem this
+    module can integrate (see numerical_cross_check's docstring for the
+    scope and why) and builds the numeric right-hand side, initial state,
+    closed-form evaluators and a default integration window. Returns an
+    IVPSetup, or a NumericalCrossCheckResult(applicable=False, reason=...)
+    saying specifically why not."""
     orders = []
     for eq in group:
         func = _defined_function(eq.sympy_eq)
@@ -341,6 +330,50 @@ def numerical_cross_check(model: ProblemModel, group: list[Equation],
         window = min(max(window, 1e-6), 1e6)  # guard against a pathological/degenerate estimate
     except Exception:  # noqa: BLE001
         window = 5.0
+
+    return IVPSetup(func_order=func_order, t0=t0, y0=y0, window=window, rhs=rhs, sol_funcs=sol_funcs)
+
+
+def numerical_cross_check(model: ProblemModel, group: list[Equation],
+                            solutions: dict[str, sp.Eq]) -> NumericalCrossCheckResult:
+    """A SECOND, INDEPENDENT solve path for an initial-value ODE problem,
+    alongside the symbolic checkodesol/verify_coupled_solution check
+    _ode_checks already does -- this integrates the ORIGINAL differential
+    equation(s) numerically (scipy's adaptive RK45, via solve_ivp) from
+    the same initial condition, then compares the numerical trajectory
+    against the symbolic closed-form solution at several sample points.
+
+    This exists because checkodesol-style verification has a real,
+    narrow blind spot: it confirms the closed-form solution satisfies
+    the DIFFERENTIAL EQUATION (a true statement about the whole solution
+    family), but does NOT independently re-confirm that dsolve's
+    ics=-driven constant-solving actually landed on the constant
+    matching the SPECIFIC given initial condition -- if dsolve picked a
+    wrong root while solving for an integration constant (plausible for
+    equations with sign ambiguity, e.g. from a square root), checkodesol
+    would still report success, since the resulting expression genuinely
+    does satisfy the ODE -- just not the one matching the stated initial
+    value. A numerical integration started from the SAME initial
+    condition has no such blind spot: it has no algebraic constant-
+    solving step to get wrong in the first place, so a mismatch here is
+    a strong, independent signal something is actually wrong, not a
+    restatement of the same computation the symbolic check already did.
+
+    SCOPED to first-order initial-value problems (every equation in the
+    group has ode_order 1, an initial condition exists for every
+    function, and every OTHER symbol appearing in the equations has a
+    known numeric value in the model) -- a real, documented limitation,
+    not a silent gap: higher-order ODEs would need converting to a
+    first-order companion system with correctly-ordered derivative
+    initial conditions (y'(0), y''(0), ...), which the current
+    initial-condition representation doesn't reliably distinguish from
+    plain y(0); extending to that is future work, not attempted here
+    rather than risking a wrong companion-state mapping.
+    """
+    setup = prepare_ivp(model, group, solutions)
+    if isinstance(setup, NumericalCrossCheckResult):
+        return setup
+    t0, y0, window, rhs, sol_funcs = setup.t0, setup.y0, setup.window, setup.rhs, setup.sol_funcs
 
     try:
         ivp = run_with_timeout(solve_ivp, rhs, (t0, t0 + window), y0, label="ode_numerical_cross_check",

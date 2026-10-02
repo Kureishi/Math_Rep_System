@@ -803,3 +803,243 @@ def add_camera_rotation(fig: go.Figure, n_frames: int = 60, elevation_deg: float
     )
     fig.frames = frames
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Time-resolved views: error over time, animated phase trails, a time cursor
+# linking a time series to its phase plane, and series partial-sum animation.
+# All four use the same Play/Pause + slider mechanism as the cobweb diagram
+# above; their matplotlib GIF/PNG counterparts live in plot_snapshot.py.
+# ---------------------------------------------------------------------------
+_PALETTE = ["#2E5EAA", "#C0392B", "#1E7E34", "#8E44AD", "#D68910", "#117A8B"]
+
+
+def _frame_indices(n: int, max_frames: int) -> list[int]:
+    """At most `max_frames` evenly spaced indices into a length-`n` series,
+    always including the first and last -- keeps an animation's payload
+    bounded however finely the underlying data is sampled."""
+    if n <= 0:
+        return []
+    return sorted({int(round(v)) for v in np.linspace(0, n - 1, min(n, max_frames))})
+
+
+def _play_layout(labels: list[str], prefix: str, duration_ms: int = 90) -> dict:
+    """updatemenus (Play/Pause) + a slider over frames named "0".."n-1"."""
+    return dict(
+        updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15, buttons=[
+            dict(label="\u25b6 Play", method="animate",
+                  args=[None, {"frame": {"duration": duration_ms, "redraw": True},
+                                 "fromcurrent": True, "transition": {"duration": 0}}]),
+            dict(label="\u23f8 Pause", method="animate",
+                  args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
+        ])],
+        sliders=[dict(currentvalue={"prefix": prefix}, x=0.05, len=0.9, steps=[
+            dict(method="animate",
+                  args=[[str(i)], {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
+                  label=label) for i, label in enumerate(labels)])],
+    )
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha:.2f})"
+
+
+def build_ode_error_plot(comparison) -> go.Figure:
+    """The closed-form ODE solution against an independent numerical
+    integration, over time, with the pointwise relative error underneath on
+    a log axis against the same tolerance numerical_cross_check uses for its
+    verdict. `comparison` is a modules.ode_trajectories.TrajectoryComparison
+    with applicable=True."""
+    from plotly.subplots import make_subplots
+    if not comparison.applicable:
+        raise ValueError(comparison.reason or "No comparison available.")
+    verdict = "agree" if comparison.ok else "DISAGREE"
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.58, 0.42], vertical_spacing=0.1,
+                         subplot_titles=("Closed form vs. numerical integration",
+                                         "Relative error (log scale)"))
+    t = comparison.t
+    marker_every = max(1, len(t) // 25)
+    for i, name in enumerate(comparison.names):
+        color = _PALETTE[i % len(_PALETTE)]
+        fig.add_trace(go.Scatter(x=t, y=comparison.symbolic[i], mode="lines", name=f"{name} (closed form)",
+                                   line=dict(color=color, width=2.5)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=t[::marker_every], y=comparison.numeric[i][::marker_every], mode="markers",
+                                   name=f"{name} (numerical)",
+                                   marker=dict(color=color, size=7, symbol="circle-open", line=dict(width=2))),
+                      row=1, col=1)
+        fig.add_trace(go.Scatter(x=t, y=np.maximum(comparison.rel_error[i], 1e-16), mode="lines",
+                                   name=f"{name} error", line=dict(color=color, width=2), showlegend=False),
+                      row=2, col=1)
+    fig.add_hline(y=comparison.tolerance, line=dict(color="#C0392B", dash="dash"), row=2, col=1,
+                   annotation_text=f"tolerance {comparison.tolerance:g}", annotation_position="top left")
+    fig.update_yaxes(type="log", row=2, col=1, title_text="|numeric \u2212 closed form| / |closed form|")
+    fig.update_xaxes(title_text="t", row=2, col=1)
+    fig.update_layout(title=f"Numerical integration and closed form {verdict} "
+                              f"(max relative error {comparison.max_rel_error:.2e})",
+                        height=560)
+    return fig
+
+
+def build_phase_trail_animation(dx_f, dy_f, x_range: tuple[float, float], y_range: tuple[float, float],
+                                  trajectories: list[tuple[np.ndarray, np.ndarray]], times: np.ndarray,
+                                  x_label: str = "x", y_label: str = "y", trail_length: int = 25,
+                                  max_frames: int = 60, resolution: int = 16,
+                                  highlight: int = 0) -> go.Figure:
+    """The phase portrait's direction field with one or more points MOVING
+    along their paths, each dragging a fading trail -- showing the flow, not
+    just the one solved path. `trajectories` are equal-length (xs, ys)
+    arrays sampled at `times` (NaN where a path has left the finite range or
+    couldn't be integrated: those points are simply not drawn); trajectory
+    `highlight` (the actual solved path) is drawn in blue, the rest in
+    amber. Axis ranges are fixed so the view doesn't rescale mid-animation."""
+    n = len(times)
+    base = build_phase_portrait(dx_f, dy_f, x_range, y_range, x_label, y_label, resolution=resolution)
+    fig = go.Figure(data=list(base.data))
+
+    gap = np.array([np.nan])
+    all_x = np.concatenate([np.concatenate([tx, gap]) for tx, _ in trajectories]) if trajectories else gap
+    all_y = np.concatenate([np.concatenate([ty, gap]) for _, ty in trajectories]) if trajectories else gap
+    fig.add_trace(go.Scatter(x=all_x, y=all_y, mode="lines", showlegend=False, hoverinfo="skip",
+                               line=dict(color="rgba(120,120,120,0.35)", width=1.5)))
+
+    def colour(j: int) -> str:
+        return _PALETTE[0] if j == highlight else _PALETTE[4]
+
+    def dynamic(i: int) -> list[go.Scatter]:
+        trail_x: list[float] = []
+        trail_y: list[float] = []
+        trail_c: list[str] = []
+        trail_s: list[float] = []
+        head_x: list[float] = []
+        head_y: list[float] = []
+        head_c: list[str] = []
+        for j, (tx, ty) in enumerate(trajectories):
+            lo = max(0, i - trail_length + 1)
+            seg_x, seg_y = tx[lo:i + 1], ty[lo:i + 1]
+            ok = np.isfinite(seg_x) & np.isfinite(seg_y)
+            m = int(ok.sum())
+            if m:
+                alphas = np.linspace(0.12, 0.85, m)
+                trail_x += seg_x[ok].tolist()
+                trail_y += seg_y[ok].tolist()
+                trail_c += [_rgba(colour(j), a) for a in alphas]
+                trail_s += np.linspace(3, 8, m).tolist()
+            if np.isfinite(tx[i]) and np.isfinite(ty[i]):
+                head_x.append(float(tx[i]))
+                head_y.append(float(ty[i]))
+                head_c.append(colour(j))
+        return [
+            go.Scatter(x=trail_x, y=trail_y, mode="markers", showlegend=False, hoverinfo="skip",
+                        marker=dict(color=trail_c, size=trail_s)),
+            go.Scatter(x=head_x, y=head_y, mode="markers", showlegend=False,
+                        marker=dict(color=head_c, size=13, line=dict(color="white", width=1.5))),
+        ]
+
+    idx = _frame_indices(n, max_frames)
+    first = len(fig.data)
+    fig.add_traces(dynamic(idx[0]))
+    fig.frames = [go.Frame(data=dynamic(i), traces=[first, first + 1], name=str(k)) for k, i in enumerate(idx)]
+    fig.update_layout(
+        xaxis=dict(title=x_label, range=list(x_range)), yaxis=dict(title=y_label, range=list(y_range)),
+        title=f"Phase portrait flow: {x_label}\u2013{y_label}", showlegend=False,
+        **_play_layout([f"{times[i]:.3g}" for i in idx], "t = "))
+    return fig
+
+
+def build_time_linked_view(ts: np.ndarray, series: list[tuple[str, np.ndarray]], field=None,
+                             max_frames: int = 60, resolution: int = 14) -> go.Figure:
+    """Two panels sharing ONE time cursor: the left plots every function of
+    time with a vertical cursor line, the right plots the first two against
+    each other (the phase plane, optionally over its direction field) with a
+    marker at the same instant -- so the slider scrubs both at once and the
+    title reads off the values. `field` is an optional (dx_f, dy_f) pair of
+    numpy-vectorized callables for the direction field."""
+    from plotly.subplots import make_subplots
+    if len(series) < 2:
+        raise ValueError("The linked time view needs at least two functions (for the phase plane).")
+    (name_x, xs), (name_y, ys) = series[0], series[1]
+    n = len(ts)
+
+    def padded(values: np.ndarray, frac: float = 0.2) -> tuple[float, float]:
+        finite = values[np.isfinite(values)]
+        lo, hi = float(finite.min()), float(finite.max())
+        pad = frac * max(hi - lo, 1.0)
+        return lo - pad, hi + pad
+
+    x_range, y_range = padded(xs), padded(ys)
+    all_vals = np.concatenate([v for _, v in series])
+    v_lo, v_hi = padded(all_vals, 0.1)
+
+    fig = make_subplots(rows=1, cols=2, column_widths=[0.55, 0.45], horizontal_spacing=0.1,
+                         subplot_titles=("Time series", f"Phase plane: {name_x}\u2013{name_y}"))
+    for k, (name, vals) in enumerate(series):
+        fig.add_trace(go.Scatter(x=ts, y=vals, mode="lines", name=name,
+                                   line=dict(color=_PALETTE[k % len(_PALETTE)], width=2.5)), row=1, col=1)
+    if field is not None:
+        quiver = build_phase_portrait(field[0], field[1], x_range, y_range, name_x, name_y,
+                                        resolution=resolution)
+        for tr in quiver.data:
+            fig.add_trace(tr, row=1, col=2)
+    fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", showlegend=False, hoverinfo="skip",
+                               line=dict(color="rgba(46,94,170,0.55)", width=3)), row=1, col=2)
+
+    def dynamic(i: int) -> list[go.Scatter]:
+        t_i = float(ts[i])
+        return [
+            go.Scatter(x=[t_i, t_i], y=[v_lo, v_hi], mode="lines", showlegend=False, hoverinfo="skip",
+                        line=dict(color="rgba(60,60,60,0.7)", dash="dash", width=1.5)),
+            go.Scatter(x=[t_i] * len(series), y=[float(v[i]) for _, v in series], mode="markers",
+                        showlegend=False, marker=dict(size=11, color=[_PALETTE[k % len(_PALETTE)]
+                                                                       for k in range(len(series))],
+                                                       line=dict(color="white", width=1.5))),
+            go.Scatter(x=[float(xs[i])], y=[float(ys[i])], mode="markers", showlegend=False,
+                        marker=dict(size=13, color=_PALETTE[1], line=dict(color="white", width=1.5))),
+        ]
+
+    def title(i: int) -> str:
+        return f"t = {ts[i]:.3g}   {name_x} = {xs[i]:.4g}   {name_y} = {ys[i]:.4g}"
+
+    idx = _frame_indices(n, max_frames)
+    first = len(fig.data)
+    # the cursor line and the series markers live in the left panel, the phase marker in the right
+    for tr, col in zip(dynamic(idx[0]), (1, 1, 2)):
+        fig.add_trace(tr, row=1, col=col)
+    fig.frames = [go.Frame(data=dynamic(i), traces=[first, first + 1, first + 2], name=str(k),
+                             layout=go.Layout(title_text=title(i))) for k, i in enumerate(idx)]
+    fig.update_xaxes(title_text="t", row=1, col=1)
+    fig.update_yaxes(title_text="value", range=[v_lo, v_hi], row=1, col=1)
+    fig.update_xaxes(title_text=name_x, range=list(x_range), row=1, col=2)
+    fig.update_yaxes(title_text=name_y, range=list(y_range), row=1, col=2)
+    fig.update_layout(title=title(idx[0]), **_play_layout([f"{ts[i]:.3g}" for i in idx], "t = "))
+    return fig
+
+
+def build_partial_sum_animation(partial_sums, title: str = "") -> go.Figure:
+    """A function (black) with its series partial sums (red) added one term
+    -- or harmonic -- at a time. `partial_sums` is a
+    modules.series_animation.PartialSums. Axes are fixed from the TRUE
+    function so a diverging polynomial runs off the plot instead of
+    rescaling it; the title of each frame reports that frame's RMS error."""
+    if partial_sums.error:
+        raise ValueError(partial_sums.error)
+    ps = partial_sums
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=ps.xs, y=ps.target, mode="lines", name="function",
+                               line=dict(color="#222222", width=3)))
+    if ps.center is not None:
+        fig.add_trace(go.Scatter(x=[ps.center, ps.center], y=list(ps.y_range), mode="lines",
+                                   name="expansion point", line=dict(color="rgba(100,100,100,0.5)", dash="dot")))
+    dyn = len(fig.data)
+    fig.add_trace(go.Scatter(x=ps.xs, y=ps.sums[0], mode="lines", name="partial sum",
+                               line=dict(color="#C0392B", width=2.5)))
+
+    def frame_title(k: int) -> str:
+        return f"{title + ' \u2014 ' if title else ''}{ps.labels[k]}   (RMS error {ps.errors[k]:.3g} {ps.error_region})"
+
+    fig.frames = [go.Frame(data=[go.Scatter(x=ps.xs, y=ps.sums[k])], traces=[dyn], name=str(k),
+                             layout=go.Layout(title_text=frame_title(k))) for k in range(len(ps.sums))]
+    fig.update_layout(xaxis=dict(title="x", range=[float(ps.xs[0]), float(ps.xs[-1])]),
+                        yaxis=dict(title="y", range=list(ps.y_range)), title=frame_title(0),
+                        **_play_layout([str(k + 1) for k in range(len(ps.sums))], "step ", duration_ms=700))
+    return fig

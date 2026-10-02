@@ -1,6 +1,8 @@
 """
 Transforms & series mode: Laplace/Fourier and Taylor/asymptotic expansions, each verified.
 """
+import numpy as np
+import pandas as pd
 import streamlit as st
 import sympy as sp
 from modules.transforms import (
@@ -10,7 +12,12 @@ from modules.transforms import (
     inverse_fourier_transform_expr,
 )
 from modules.series_asymptotics import taylor_series, asymptotic_expansion
-from ui.common import live_parse_preview, persist_on_click, restore_from_query_param, sync_query_param
+from modules.series_animation import taylor_partial_sums, fourier_partial_sums
+from modules.plotter import build_partial_sum_animation
+from modules.plot_snapshot import snapshot_partial_sum_gif
+from ui.common import (
+    live_parse_preview, persist_on_click, restore_from_query_param, sync_query_param, gif_download_button,
+)
 
 
 def render_transforms_series_tab():
@@ -19,8 +26,8 @@ def render_transforms_series_tab():
     pattern as render_dimensional_analysis_tab. See transforms.py and
     series_asymptotics.py."""
     st.subheader("🔄 Transforms & series")
-    tab_laplace, tab_fourier, tab_series = st.tabs(
-        ["Laplace transform", "Fourier transform", "Series & asymptotics"])
+    tab_laplace, tab_fourier, tab_series, tab_fseries = st.tabs(
+        ["Laplace transform", "Fourier transform", "Series & asymptotics", "Fourier series"])
 
     with tab_laplace:
         st.caption("Enter a function of t (t > 0 assumed) to transform, or a function of s to "
@@ -90,6 +97,26 @@ def render_transforms_series_tab():
         if result is not None:
             _render_series_result(result)
 
+    with tab_fseries:
+        st.caption("The Fourier SERIES of a function on [-L, L], extended periodically (not the Fourier "
+                    "transform in the previous tab): add one harmonic at a time and watch the partial sums "
+                    "converge -- including the overshoot at a jump (the Gibbs phenomenon). Try "
+                    "`Piecewise((-1, x < 0), (1, True))` for a square wave, or `x` for a sawtooth.")
+        expr_str_fs = st.text_input("f(x) on [-L, L]", key="fseries_expr",
+                                     placeholder="Piecewise((-1, x < 0), (1, True))")
+        live_parse_preview(expr_str_fs, ["x"])
+        fs_col1, fs_col2 = st.columns(2)
+        with fs_col1:
+            half_period = st.number_input("Half-period L", min_value=0.01, value=float(np.pi), key="fseries_L",
+                                           help="The function is defined on [-L, L] and repeats with period 2L.")
+        with fs_col2:
+            harmonics = st.slider("Harmonics", 2, 40, 12, key="fseries_N")
+        fs_result = persist_on_click(
+            "Build", "fseries_button", "fseries_result", bool(expr_str_fs.strip()),
+            lambda: fourier_partial_sums(expr_str_fs, half_period=half_period, n_harmonics=harmonics))
+        if fs_result is not None:
+            _render_fourier_series_result(fs_result, expr_str_fs)
+
 
 def _render_transform_result(result):
     if result.error:
@@ -122,3 +149,43 @@ def _render_series_result(result):
         st.success(f"Verified: {result.verification_detail}")
     else:
         st.warning(f"Could not verify: {result.verification_detail}")
+    if result.kind == "taylor":
+        _render_taylor_animation(result)
+
+
+def _render_taylor_animation(result):
+    """Partial sums of the series just computed, one term at a time -- shown
+    only for a Taylor/Laurent result (an asymptotic series is an expansion at
+    infinity, where "converging onto the function near a point" doesn't apply)."""
+    with st.expander("▶ Watch the approximation converge"):
+        half_width = st.slider("Plot half-width", 0.5, 20.0, 6.0, key="series_anim_halfwidth",
+                                help="How far either side of the expansion point to draw. A Taylor "
+                                      "polynomial is only accurate near that point -- widen this to see "
+                                      "where it breaks down.")
+        frames = taylor_partial_sums(result, half_width=half_width)
+        if frames.error:
+            st.caption(frames.error)
+            return
+        title = sp.sstr(result.input_expr)
+        st.plotly_chart(build_partial_sum_animation(frames, title=title), width="stretch", key="series_anim")
+        gif_download_button(key="series_anim", file_stem="taylor_partial_sums",
+                             render_fn=lambda: snapshot_partial_sum_gif(frames, title))
+
+
+def _render_fourier_series_result(result, expr_str):
+    if result.error:
+        st.error(result.error)
+        return
+    if result.monotone:
+        st.success("Checked: the RMS error over one period never increased as harmonics were added, as it "
+                    "must for Fourier partial sums (each is the best trigonometric fit of its degree).")
+    else:
+        st.warning("The RMS error INCREASED when a harmonic was added, which a correct Fourier series "
+                    "can't do -- treat these coefficients with suspicion.")
+    st.plotly_chart(build_partial_sum_animation(result, title=expr_str), width="stretch", key="fseries_anim")
+    gif_download_button(key="fseries_anim", file_stem="fourier_partial_sums",
+                         render_fn=lambda: snapshot_partial_sum_gif(result, expr_str))
+    with st.expander("Coefficients"):
+        st.caption("f(x) ≈ a₀/2 + Σ aₙ cos(nπx/L) + bₙ sin(nπx/L), coefficients by numerical quadrature.")
+        st.dataframe(pd.DataFrame([{"n": n, "aₙ": a, "bₙ": b} for n, (a, b) in enumerate(result.coefficients)]),
+                      hide_index=True)
