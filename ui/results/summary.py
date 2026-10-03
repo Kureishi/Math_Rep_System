@@ -109,17 +109,30 @@ def render_motion_diagram(model: ProblemModel, report: VerificationReport):
         return
     with st.expander("🏃 Motion diagram", expanded=True):
         st.caption("An object moving with this problem's initial velocity and acceleration, "
-                    "over the solved time span -- the red arrow is the velocity vector.")
+                    "over the solved time span -- the red arrow is the velocity vector and the green arrow "
+                    "the acceleration (each scaled separately, since they are in different units). The "
+                    "faint dots are the strobe trail: where the object was at evenly spaced earlier "
+                    "instants, each with its own arrows.")
+        c_acc, c_strobe, c_count = st.columns(3)
+        with c_acc:
+            show_acceleration = st.checkbox("Acceleration arrow", value=True, key="motion_show_a")
+        with c_strobe:
+            show_strobes = st.checkbox("Strobe trail", value=True, key="motion_show_strobes")
+        with c_count:
+            strobe_count = st.slider("Strobe positions", 3, 20, 8, key="motion_strobe_n",
+                                      disabled=not show_strobes)
+        a_values = trajectory.a_values if show_acceleration else None
+        n_strobes = int(strobe_count) if show_strobes else 0
         fig = build_motion_diagram(trajectory.t_values, trajectory.x_values, trajectory.v_values,
                                      x_label=trajectory.x_label, x_unit=trajectory.x_unit,
-                                     t_unit=trajectory.t_unit)
+                                     t_unit=trajectory.t_unit, a_values=a_values, n_strobes=n_strobes)
         st.plotly_chart(fig, width="stretch", key="word_problem_motion_diagram")
         gif_download_button(
             key="motion_diagram",
             file_stem="motion_diagram",
-            render_fn=lambda tr=trajectory: snapshot_motion_diagram_gif(
+            render_fn=lambda tr=trajectory, av=a_values, ns=n_strobes: snapshot_motion_diagram_gif(
                 tr.t_values, tr.x_values, tr.v_values, x_label=tr.x_label,
-                x_unit=tr.x_unit, t_unit=tr.t_unit),
+                x_unit=tr.x_unit, t_unit=tr.t_unit, a_values=av, n_strobes=ns),
         )
 
 

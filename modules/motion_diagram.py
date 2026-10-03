@@ -42,6 +42,7 @@ class MotionTrajectory:
     x_label: str = "position"
     x_unit: str = ""
     t_unit: str = ""
+    a_values: np.ndarray | None = None      # acceleration at each time (constant for SUVAT)
 
 
 def _find_by_meaning(model: ProblemModel, hints: tuple[str, ...]) -> Variable | None:
@@ -118,4 +119,4 @@ def build_kinematics_trajectory(model: ProblemModel, report: VerificationReport,
         x_unit = ""
 
     return MotionTrajectory(t_values=ts, x_values=xs, v_values=vs, x_label="position",
-                              x_unit=x_unit, t_unit=t_unit)
+                              x_unit=x_unit, t_unit=t_unit, a_values=np.full_like(ts, float(a)))

@@ -178,6 +178,7 @@ math-rep-system/
     ├── ode_utils.py             # shared dsolve()/dsolve_system() helper (solver.py +
     │                            #   verifier.py both need it; lives here to avoid a
     │                            #   circular import)
+    ├── chain_flow.py              # a problem chain as a cascade: what each step received and carried on
     ├── time_uncertainty.py        # fan chart: sample uncertain parameters/initial values
     │                              #   through the symbolic solution + interval-arithmetic envelope
     ├── parameter_morph.py         # a family of solution curves as one parameter varies,
@@ -267,7 +268,8 @@ math-rep-system/
     │                              #   root/inverse-function/etc.) isolates a target, since
     │                              #   sp.solve() doesn't expose its own internal step trace
     ├── dependency_graph.py           # three-column known/equation/unknown diagram of which
-    │                              #   variables feed into which equations
+    │                              #   variables feed into which equations, plus solve_order():
+    │                              #   the order they become determined, and replay_frames()
     ├── followup.py                   # grounded Q&A -- numeric "what if" questions get a REAL
     │                              #   SymPy recompute (LLM only classifies intent); conceptual
     │                              #   questions get an LLM answer grounded in the actual equations

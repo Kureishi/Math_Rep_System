@@ -944,6 +944,44 @@ matplotlib export (PNG for the static ones, GIF for the animated ones).
   into `modules/pde_field.py` and is vectorised over the grid. (The previous
   version evaluated the formula one point at a time.)
 
+### Solve-order replay, chain value flow, and a richer motion diagram
+
+Three more animations, each with a GIF export.
+
+- **Solve-order replay** (the dependency graph's expander in the Explore tab,
+  once there are two or more equations). The graph is played back in the order
+  its quantities get determined: the givens light up first, then each equation
+  in turn once everything feeding into it is known (ringed in orange, with the
+  edges it reads and writes drawn thick), then the unknowns it determines. What
+  is already determined stays lit; what is still to come is faint. A numbered
+  list underneath says the same in words ("solve d from displacement equation
+  (needs a, t, u)"). Equations that share several unknowns are one
+  **simultaneous** stage; an equation whose results are already known is a
+  **check**; one with more unknowns than equations is **underdetermined**; and
+  anything that can never become determined (a cycle, or an input nothing
+  supplies) is shown as **unresolved**, with what it is missing. This is the
+  order implied by the *dependencies* -- the earliest each quantity can be found
+  from the givens -- not a trace of the solver's own internal sequence, which
+  substitutes into each target separately. (`modules/dependency_graph.py`)
+- **Chain value flow** (Problem chains, once a chain has two or more steps). The
+  chain as a cascade: each step a node reading "Step n, symbol = value", each
+  link labelled with the value it carried forward, and inputs typed in by hand
+  shown as small squares above their step. Press Play to watch it resolve one
+  step at a time; a step that failed is red, and a binding that points nowhere
+  useful (a step that doesn't exist, a later step, or one that produced no
+  value) is drawn dashed with the reason. A sentence per step says what it
+  received and what it produced. (`modules/chain_flow.py`)
+- **Motion diagram: strobe trail and acceleration arrows** (kinematics
+  problems). Beside the moving dot and its red velocity arrow there is now a
+  green **acceleration** arrow, and a **strobe trail**: faint ghosts of where the
+  object was at evenly spaced earlier instants, each with its own velocity arrow
+  above it and acceleration arrow below, so how the arrows change from instant
+  to instant can be read straight off the picture -- the classic stroboscopic
+  motion diagram. Velocity and acceleration are in different units, so each is
+  scaled on its own (the longest of each is a fixed fraction of the track).
+  Both are on by default and can be switched off, which gives back exactly the
+  previous diagram.
+
 ## Rigor & analysis
 
 Three additions that give a solved problem's uncertainty/sensitivity a

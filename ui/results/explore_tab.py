@@ -7,7 +7,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from modules.equation_engine import ProblemModel, Variable, target_kind
-from modules.dependency_graph import build_dependency_graph
+from modules.dependency_graph import build_dependency_graph, describe_stage, replay_frames, solve_order
 from modules.monte_carlo import run_monte_carlo, UncertainVariable, MAX_SAMPLES as MC_MAX_SAMPLES
 from modules.parameter_sweep import sweep_parameters, sweep_result_to_grid
 from modules.plotter import (
@@ -16,6 +16,7 @@ from modules.plotter import (
     build_surface_plot,
     build_feasible_region_plot,
     build_dependency_graph_plot,
+    build_solve_order_replay,
     build_contour_plot,
     build_sweep_heatmap,
     add_camera_rotation,
@@ -25,6 +26,7 @@ from modules.plot_snapshot import (
     snapshot_surface_plot,
     snapshot_feasible_region,
     snapshot_dependency_graph,
+    snapshot_solve_order_gif,
     snapshot_contour_plot,
     snapshot_sweep_heatmap,
     snapshot_rotating_surface_gif,
@@ -62,6 +64,23 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                     caption=f"{model.problem_domain} -- variable/equation dependencies",
                     render_fn=lambda: snapshot_dependency_graph(dep_nodes, dep_edges),
                 )
+
+                # ---- the same graph as a replay: the order in which the givens let each
+                # equation, and so each unknown, be determined
+                stages = solve_order(model, dep_nodes, dep_edges)
+                if stages:
+                    st.markdown("**Replay the solve order**")
+                    st.caption("The givens light up first, then each equation in turn once everything it "
+                                "needs is known, and the unknowns it determines. This is the order "
+                                "implied by the dependencies -- the earliest each quantity can be found "
+                                "from the givens -- rather than a trace of the solver's own internal steps.")
+                    frames = replay_frames(dep_nodes, dep_edges, stages)
+                    st.plotly_chart(build_solve_order_replay(dep_nodes, dep_edges, frames),
+                                     width="stretch", key="solve_order_replay")
+                    st.markdown("\n".join(f"{i}. {describe_stage(s, dep_nodes)}" for i, s in enumerate(stages, 1)))
+                    gif_download_button(
+                        key="solve_order", file_stem="solve_order",
+                        render_fn=lambda: snapshot_solve_order_gif(dep_nodes, dep_edges, frames))
 
         # ---- N-dimensional parameter sweep: grid-sweep two or more of
         # a problem's own inputs at once and get a results TABLE (plus

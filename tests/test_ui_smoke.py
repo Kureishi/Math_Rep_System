@@ -607,3 +607,122 @@ def test_pde_evolution_gif_download_works():
     _click(at, "heat_button")
     next(b for b in at.button if b.key == "gif_heat_d_anim").click().run()
     assert _exceptions(at) == [] and not _render_errors(at)
+
+
+# ================================================================== solve-order replay, chain flow, motion upgrades
+
+def _annotation_text(spec):
+    notes = spec.get("layout", {}).get("annotations") or [{}]
+    return notes[0].get("text", "")
+
+
+def _motion_spec(at):
+    return next(s for s in _specs(at) if _annotation_text(s).startswith("motion"))
+
+
+def test_dependency_graph_can_be_replayed_in_solve_order():
+    at = _app()
+    _seed_solved_kinematics(at)
+    at.run()
+    assert _exceptions(at) == []
+    replay = next(s for s in _specs(at) if _title(s).startswith("Givens:"))
+    assert _title(replay) == "Givens: t, u, v"
+    assert len(replay["frames"]) == 3                                    # the givens, then one frame per equation
+    assert replay["frames"][1]["layout"]["title"]["text"].startswith("Step 1 of 2: solve a from final velocity equation")
+    assert replay["frames"][2]["layout"]["title"]["text"].startswith("Step 2 of 2: solve d from displacement equation")
+    text = "\n".join(m.value for m in at.markdown)
+    assert "1. solve a from final velocity equation (needs t, u, v)" in text
+    assert "2. solve d from displacement equation (needs a, t, u)" in text
+    assert any("dependencies" in c.value and "rather than a trace" in c.value for c in at.caption)
+
+
+def test_solve_order_gif_download_works():
+    at = _app()
+    _seed_solved_kinematics(at)
+    at.run()
+    next(b for b in at.button if b.key == "gif_solve_order").click().run()
+    assert _exceptions(at) == [] and not _render_errors(at)
+
+
+def _two_step_chain():
+    import modules.chains as chains_module
+    from modules.chains import InputBinding
+    from tests.test_chains import _downstream_model, _kinematics_model
+    cid = chains_module.create_chain("kinematics")
+    chains_module.add_step(cid, "car accelerates", _kinematics_model(), "a")
+    chains_module.add_step(cid, "then cruises", _downstream_model(), "d",
+                           bindings=[InputBinding("a", "upstream", None, 0, "a")])
+    chains_module.resolve_chain(cid)
+    return cid
+
+
+def _chains_page(cid):
+    at = _app()
+    at.session_state["app_mode"] = next(m for m in MODE_LABELS if "chain" in m.lower())
+    at.session_state["active_chain_id"] = cid
+    at.run()
+    assert _exceptions(at) == []
+    return at
+
+
+def test_chain_page_shows_the_value_flow_between_steps():
+    at = _chains_page(_two_step_chain())
+    assert "🌊 Value flow through the chain" in _expander_labels(at)
+    flow = next(s for s in _specs(at) if "Step 1 receives" in _title(s))
+    assert len(flow["frames"]) == 2
+    assert flow["frames"][1]["layout"]["title"]["text"] == "Step 2 receives a = 2 from step 1; result: d = 20."
+    link_labels = flow["frames"][1]["data"][2]["text"]
+    assert list(link_labels) == ["a = 2"]                                # the value that travelled, written on the link
+    text = "\n".join(m.value for m in at.markdown)
+    assert "- Step 1 receives no overridden inputs; result: a = 2." in text
+
+
+def test_chain_flow_gif_download_works():
+    cid = _two_step_chain()
+    at = _chains_page(cid)
+    next(b for b in at.button if b.key == f"gif_chain_flow_{cid}").click().run()
+    assert _exceptions(at) == [] and not _render_errors(at)
+
+
+def test_a_one_step_chain_has_no_value_flow():
+    import modules.chains as chains_module
+    from tests.test_chains import _kinematics_model
+    cid = chains_module.create_chain("solo")
+    chains_module.add_step(cid, "car accelerates", _kinematics_model(), "a")
+    assert "🌊 Value flow through the chain" not in _expander_labels(_chains_page(cid))
+
+
+def test_motion_diagram_shows_acceleration_and_a_strobe_trail_by_default():
+    at = _app()
+    _seed_solved_kinematics(at)
+    at.run()
+    assert _exceptions(at) == []
+    motion = _motion_spec(at)
+    assert _annotation_text(motion) == "motion \u2014 red: velocity, green: acceleration (each scaled separately)"
+    assert len(motion["data"]) == 9                                      # 5 original + acceleration + ghosts + 2 ghost arrows
+    ghosts_by_frame = [len(f["data"][6]["x"]) for f in motion["frames"]]
+    assert ghosts_by_frame == sorted(ghosts_by_frame) and ghosts_by_frame[-1] == 8     # default of 8 strobe positions
+
+
+def test_motion_diagram_controls_switch_the_upgrades_off_and_on():
+    at = _app()
+    _seed_solved_kinematics(at)
+    at.run()
+    _set(at, "checkbox", "motion_show_a", False)
+    motion = _motion_spec(at)
+    assert "acceleration" not in _annotation_text(motion) and len(motion["data"]) == 7     # strobes remain, no accel arrows
+    _set(at, "checkbox", "motion_show_strobes", False)
+    motion = _motion_spec(at)
+    assert _annotation_text(motion) == "motion" and len(motion["data"]) == 5               # back to the original diagram
+    assert next(s for s in at.slider if s.key == "motion_strobe_n").disabled is True
+    _set(at, "checkbox", "motion_show_strobes", True)
+    _set(at, "slider", "motion_strobe_n", 3)
+    assert [len(f["data"][5]["x"]) for f in _motion_spec(at)["frames"]][-1] == 3
+
+
+def test_motion_diagram_gif_download_works_with_the_upgrades():
+    at = _app()
+    _seed_solved_kinematics(at)
+    at.run()
+    next(b for b in at.button if b.key == "gif_motion_diagram").click().run()
+    assert _exceptions(at) == [] and not _render_errors(at)

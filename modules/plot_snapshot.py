@@ -548,11 +548,14 @@ def snapshot_rotating_surface_gif(eq: Equation, x_symbol: str, y_symbol: str,
 
 def snapshot_motion_diagram_gif(t_values, x_values, v_values, x_label: str = "position",
                                    x_unit: str = "", t_unit: str = "",
-                                   n_frames: int = 40, fps: int = 15) -> bytes:
+                                   n_frames: int = 40, fps: int = 15, a_values=None,
+                                   n_strobes: int = 0) -> bytes:
     """The animated counterpart to modules.plotter.build_motion_diagram():
     a dot moving along a track with a velocity arrow, synced to a
     position-vs-time trace underneath, as a GIF for a report rather than
-    only interactive on-screen."""
+    only interactive on-screen. `a_values` adds an acceleration arrow and
+    `n_strobes` leaves faint ghost positions behind, each with its own
+    velocity (and acceleration) arrow -- see build_motion_diagram."""
     t_values = np.asarray(t_values, dtype=float)
     x_values = np.asarray(x_values, dtype=float)
     v_values = np.asarray(v_values, dtype=float)
@@ -564,8 +567,18 @@ def snapshot_motion_diagram_gif(t_values, x_values, v_values, x_label: str = "po
     v_scale = 0.12 * max(x_max - x_min, 1.0) / v_max
     x_unit_sfx = f" ({x_unit})" if x_unit else ""
     t_unit_sfx = f" ({t_unit})" if t_unit else ""
+    show_a = a_values is not None
+    a_arr = np.asarray(a_values, dtype=float) if show_a else None
+    a_scale = (0.12 * max(x_max - x_min, 1.0) / max(float(np.max(np.abs(a_arr))), 1e-9)) if a_arr is not None else 0.0
+    strobes = [int(j) for j in (np.unique(np.linspace(0, n - 1, min(n_strobes, n)).astype(int))
+                                if n_strobes > 0 else [])]
+    offset = 0.42            # arrow height above/below the track (the track axis runs -1..1)
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.5, 6), gridspec_kw={"height_ratios": [1, 3]})
+
+    def arrow(ax, x0, value, scale, y, colour, width=2):
+        ax.annotate("", xy=(x0 + value * scale, y), xytext=(x0, y),
+                     arrowprops=dict(arrowstyle="-|>", color=colour, linewidth=width))
 
     def update(k):
         i = int(idx[k])
@@ -573,13 +586,24 @@ def snapshot_motion_diagram_gif(t_values, x_values, v_values, x_label: str = "po
         ax2.clear()
         xi, vi = float(x_values[i]), float(v_values[i])
         ax1.axhline(0, color="lightgray", linewidth=2)
+        for j in strobes:
+            if j <= i:
+                xj = float(x_values[j])
+                ax1.plot(xj, 0, "o", color="#2E5EAA", alpha=0.3, markersize=12, zorder=2)
+                arrow(ax1, xj, float(v_values[j]), v_scale, offset, "#C0392B", 1.4)
+                if a_arr is not None:
+                    arrow(ax1, xj, float(a_arr[j]), a_scale, -offset, "#1E7E34", 1.4)
         ax1.plot(xi, 0, "o", color="#2E5EAA", markersize=16, zorder=3)
-        ax1.annotate("", xy=(xi + vi * v_scale, 0), xytext=(xi, 0),
-                      arrowprops=dict(arrowstyle="-|>", color="#C0392B", linewidth=2))
+        arrow(ax1, xi, vi, v_scale, 0, "#C0392B")
+        if a_arr is not None:
+            arrow(ax1, xi, float(a_arr[i]), a_scale, -offset, "#1E7E34", 2.4)
         ax1.set_xlim(x_min - pad, x_max + pad)
         ax1.set_ylim(-1, 1)
         ax1.set_yticks([])
         ax1.set_xlabel(f"position{x_unit_sfx}")
+        if show_a or strobes:
+            ax1.set_title("red: velocity" + (", green: acceleration" if show_a else "")
+                           + "  (each scaled separately)", fontsize=8)
 
         ax2.plot(t_values[: i + 1], x_values[: i + 1], color="#2E5EAA", linewidth=2)
         ax2.plot(t_values[i], x_values[i], "o", color="#C0392B", markersize=9, zorder=3)
@@ -919,3 +943,94 @@ def snapshot_space_time_gif(field, y_label: str = "u", n_frames: int = 40, fps: 
                        f"\u222b{y_label} dx = {field.integral[i]:.4g}", fontsize=9)
 
     return _finish_gif(fig, update, len(picks), fps)
+
+
+# ---------------------------------------------------------------------------
+# Solve-order replay and chain value flow (matplotlib GIFs)
+# ---------------------------------------------------------------------------
+_CURRENT_RING = "#F39C12"      # the stage being shown (matches plotter._CURRENT_RING)
+_BLOCKED_RING = "#C0392B"
+
+
+def snapshot_solve_order_gif(nodes, edges, frames, fps: int = 1) -> bytes:
+    """GIF of plotter.build_solve_order_replay: the dependency graph lit up
+    stage by stage in the order its quantities get determined."""
+    from matplotlib.colors import to_rgba
+    if not frames:
+        raise ValueError("Nothing to replay.")
+    base = {"known": "#1E7E34", "unknown": "#C0392B", "equation": "#2E5EAA"}
+    alpha = {"known": 1.0, "done": 1.0, "current": 1.0, "pending": 0.16, "blocked": 0.45}
+    by_id = {n.id: n for n in nodes}
+    fig, ax = plt.subplots(figsize=(7, max(3.4, 0.9 * max((n.y for n in nodes), default=0) + 2.2)))
+
+    def update(k):
+        frame = frames[k]
+        ax.clear()
+        for e in edges:
+            a, b = by_id[e.source], by_id[e.target]
+            ax.plot([a.x, b.x], [a.y, b.y], color="0.8", linewidth=1.2, zorder=1)
+        for s, t in frame.active_edges:
+            ax.plot([by_id[s].x, by_id[t].x], [by_id[s].y, by_id[t].y], color=_CURRENT_RING, linewidth=4.5, zorder=2)
+        for n in nodes:
+            state = frame.states[n.id]
+            ring = _CURRENT_RING if state == "current" else _BLOCKED_RING if state == "blocked" else "white"
+            ax.scatter([n.x], [n.y], s=1500 if state == "current" else 1000,
+                        color=to_rgba(base[n.kind], alpha[state]), edgecolors=ring,
+                        linewidths=3.5 if state in ("current", "blocked") else 1, zorder=3)
+            ax.annotate(n.label, (n.x, n.y), ha="center", va="center", color="white", fontsize=9, zorder=4)
+        ax.set_xlim(-0.5, 2.5)
+        ax.invert_yaxis()
+        ax.axis("off")
+        ax.set_title(frame.title, fontsize=9, wrap=True)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, len(frames), fps)
+
+
+def snapshot_chain_flow_gif(flow, fps: int = 1) -> bytes:
+    """GIF of plotter.build_chain_flow_plot: the chain's steps appearing one
+    at a time with the values they carry forward."""
+    from modules.chain_flow import step_caption
+    if not flow.steps:
+        raise ValueError("This chain has no steps.")
+    pos = {s.position: s for s in flow.steps}
+    order = sorted(pos)
+    colour = {"ok": "#2E5EAA", "error": "#C0392B", "stale": "#8A8F98"}
+    xs = [s.x for s in flow.steps]
+    ys = [s.y for s in flow.steps] + [lit.y for lit in flow.literals]
+    fig, ax = plt.subplots(figsize=(max(6.0, 1.9 * len(order)), 4.4))
+
+    def update(i):
+        k = order[i]
+        ax.clear()
+        for e in flow.edges:
+            if e.target > k or e.source not in pos:
+                continue
+            a, b = pos[e.source], pos[e.target]
+            ax.annotate("", xy=(b.x, b.y), xytext=(a.x, a.y), zorder=1,
+                         arrowprops=dict(arrowstyle="-|>", color="#C0392B" if e.broken else "#2E5EAA",
+                                         linewidth=2.6, linestyle="--" if e.broken else "-", shrinkA=26, shrinkB=26))
+            ax.text((a.x + b.x) / 2, (a.y + b.y) / 2 + 0.22,
+                    f"{e.symbol}: {e.reason}" if e.broken else f"{e.symbol} = {e.carried:.4g}",
+                    ha="center", fontsize=8, color="#1B2A41")
+        for lit in flow.literals:
+            if lit.step <= k:
+                s = pos[lit.step]
+                ax.plot([lit.x, s.x], [lit.y, s.y], color="0.7", linewidth=1.2, zorder=1)
+                ax.scatter([lit.x], [lit.y], marker="s", s=70, color="#8A8F98", zorder=2)
+                ax.text(lit.x, lit.y + 0.12, f"{lit.symbol} = {lit.value:.4g}", ha="center", fontsize=8)
+        for s in flow.steps:
+            if s.position <= k:
+                ring = _CURRENT_RING if s.position == k else "white"
+                ax.scatter([s.x], [s.y], s=2800, color=colour.get(s.status, "#8A8F98"), edgecolors=ring,
+                            linewidths=4 if s.position == k else 1, zorder=3)
+                text = f"Step {s.position + 1}\n" + (f"{s.symbol} = {s.value:.4g}"
+                                                      if s.status == "ok" and s.value is not None else s.symbol)
+                ax.annotate(text, (s.x, s.y), ha="center", va="center", color="white", fontsize=8, zorder=4)
+        ax.set_xlim(min(xs) - 1.4, max(xs) + 1.4)
+        ax.set_ylim(min(ys) - 0.9, max(ys) + 0.9)
+        ax.axis("off")
+        ax.set_title(step_caption(flow, k), fontsize=8, wrap=True)
+        fig.tight_layout()
+
+    return _finish_gif(fig, update, len(order), fps)

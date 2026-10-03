@@ -6,11 +6,12 @@ import numpy as np
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import extract_model, target_kind
 from modules.verifier import verify
-from modules.plotter import build_chain_sweep_plot
-from modules.plot_snapshot import snapshot_chain_sweep_plot
+from modules.chain_flow import build_chain_flow, step_caption
+from modules.plotter import build_chain_sweep_plot, build_chain_flow_plot
+from modules.plot_snapshot import snapshot_chain_sweep_plot, snapshot_chain_flow_gif
 from modules import chains
 from modules.chains import InputBinding
-from ui.common import format_download_button
+from ui.common import format_download_button, gif_download_button
 
 
 def render_chains_tab(client: LMStudioClient):
@@ -142,6 +143,18 @@ def render_chains_tab(client: LMStudioClient):
                 if st.button("Remove this step", key=f"remove_step_{step.position}"):
                     chains.remove_step(chosen_id, step.position)
                     st.rerun()
+
+    if len(chain.steps) >= 2:
+        flow = build_chain_flow(chain)
+        with st.expander("🌊 Value flow through the chain"):
+            st.caption("Each step as a node, with the value it handed to later steps written on the link, and "
+                        "inputs typed in by hand shown as small squares above their step. Press Play to watch "
+                        "the chain resolve one step at a time.")
+            st.plotly_chart(build_chain_flow_plot(flow), width="stretch", key=f"chain_flow_{chosen_id}")
+            for s in flow.steps:
+                st.write(f"- {step_caption(flow, s.position)}")
+            gif_download_button(key=f"chain_flow_{chosen_id}", file_stem="chain_flow",
+                                 render_fn=lambda f=flow: snapshot_chain_flow_gif(f))
 
     st.write("### Add a step")
     step_text = st.text_area("New problem text", key="chain_new_step_text", height=100,

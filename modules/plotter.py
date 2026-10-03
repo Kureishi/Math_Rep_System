@@ -687,9 +687,39 @@ def build_descent_path_plot(f, path: list[tuple[float, float]], x_range: tuple[f
     return fig
 
 
+_VEL_COLOR, _ACC_COLOR = "#C0392B", "#1E7E34"
+_ARROW_OFFSET = 0.32           # vertical distance of the velocity/acceleration arrows of a strobe ghost from its track
+
+
+def _arrow_segments(xs: list[float], values: list[float], scale: float, y: float
+                     ) -> tuple[list[float | None], list[float | None], list[int], list[str]]:
+    """Plotly line segments for a batch of horizontal arrows, one per (x, value):
+    each runs from x to x + value*scale at height y, ending in a triangle that
+    points the way `value` points. Segments are separated by None gaps."""
+    px: list[float | None] = []
+    py: list[float | None] = []
+    sizes: list[int] = []
+    symbols: list[str] = []
+    for x, value in zip(xs, values):
+        px += [x, x + value * scale, None]
+        py += [y, y, None]
+        sizes += [0, 9, 0]
+        symbols += ["circle", "triangle-right" if value >= 0 else "triangle-left", "circle"]
+    return px, py, sizes, symbols
+
+
+def _strobe_indices(n: int, n_strobes: int) -> np.ndarray:
+    """`n_strobes` evenly spaced sample indices (including the first), for
+    the ghost positions a stroboscopic motion diagram leaves behind."""
+    if n_strobes <= 0:
+        return np.empty(0, dtype=int)
+    return np.unique(np.linspace(0, n - 1, min(n_strobes, n)).astype(int))
+
+
 def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: np.ndarray,
                            x_label: str = "position", x_unit: str = "", t_unit: str = "",
-                           n_frames: int = 50) -> go.Figure:
+                           n_frames: int = 50, a_values: np.ndarray | None = None,
+                           n_strobes: int = 0) -> go.Figure:
     """A classic kinematics motion diagram: a dot moving along a 1D track
     with a velocity vector attached (top panel), synced to the same dot
     tracing out position-vs-time underneath (bottom panel). Built from a
@@ -700,6 +730,19 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
     already produce for any two related quantities) doesn't by itself show
     the intro-physics idea of "an object moving through space with a
     velocity" nearly as directly as watching a dot move along a line does.
+
+    Two optional upgrades, both off by default (so the figure is the same
+    five traces as before when neither is given):
+      * `a_values` adds a green ACCELERATION arrow under the moving object,
+        next to the red velocity arrow.
+      * `n_strobes` > 0 leaves faint ghost dots behind at that many evenly
+        spaced instants -- the classic stroboscopic motion diagram -- each
+        with its own velocity arrow above it (and acceleration arrow below,
+        if `a_values` is given), so how the arrows change from frame to
+        frame can be read straight off the picture.
+    Velocity and acceleration arrows are scaled independently (they are in
+    different units), each so its longest arrow is a fixed fraction of the
+    track.
     """
     from plotly.subplots import make_subplots
 
@@ -711,9 +754,44 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
     v_scale = 0.12 * max(x_max - x_min, 1.0) / v_max
     x_unit_sfx = f" ({x_unit})" if x_unit else ""
     t_unit_sfx = f" ({t_unit})" if t_unit else ""
+    show_a = a_values is not None
+    a_arr = np.asarray(a_values, dtype=float) if a_values is not None else None
+    strobes = _strobe_indices(n, n_strobes)
+    extras = show_a or len(strobes) > 0
+    a_scale = (0.12 * max(x_max - x_min, 1.0) / max(float(np.max(np.abs(a_arr))), 1e-9)) if a_arr is not None else 0.0
+    motion_title = "motion" if not extras else (
+        "motion \u2014 " + "red: velocity" + (", green: acceleration" if show_a else "")
+        + " (each scaled separately)")
 
     fig = make_subplots(rows=2, cols=1, row_heights=[0.28, 0.72], vertical_spacing=0.16,
-                          subplot_titles=("motion", f"{x_label}{x_unit_sfx} vs. time{t_unit_sfx}"))
+                          subplot_titles=(motion_title, f"{x_label}{x_unit_sfx} vs. time{t_unit_sfx}"))
+
+    def extra_traces(i: int):
+        out = []
+        x = float(x_values[i])
+        if a_arr is not None:
+            ax_, ay_, asz, asym = _arrow_segments([x], [float(a_arr[i])], a_scale, -_ARROW_OFFSET)
+            out.append(go.Scatter(x=ax_, y=ay_, mode="lines+markers", name="acceleration", showlegend=False,
+                                   line=dict(color=_ACC_COLOR, width=3), hoverinfo="skip",
+                                   marker=dict(size=asz, symbol=asym, color=_ACC_COLOR)))
+        if len(strobes):
+            seen = [int(j) for j in strobes if j <= i]
+            gx = [float(x_values[j]) for j in seen]
+            out.append(go.Scatter(x=gx, y=[0] * len(gx), mode="markers", name="earlier positions",
+                                   showlegend=False, hoverinfo="skip",
+                                   marker=dict(size=13, color="rgba(46,94,170,0.30)",
+                                               line=dict(color="rgba(46,94,170,0.6)", width=1))))
+            vx, vy, vsz, vsym = _arrow_segments(gx, [float(v_values[j]) for j in seen], v_scale, _ARROW_OFFSET)
+            out.append(go.Scatter(x=vx, y=vy, mode="lines+markers", name="velocity at earlier positions",
+                                   showlegend=False, hoverinfo="skip", line=dict(color=_VEL_COLOR, width=2),
+                                   marker=dict(size=vsz, symbol=vsym, color=_VEL_COLOR)))
+            if a_arr is not None:
+                bx, by, bsz, bsym = _arrow_segments(gx, [float(a_arr[j]) for j in seen], a_scale,
+                                                     -_ARROW_OFFSET)
+                out.append(go.Scatter(x=bx, y=by, mode="lines+markers", name="acceleration at earlier positions",
+                                       showlegend=False, hoverinfo="skip", line=dict(color=_ACC_COLOR, width=2),
+                                       marker=dict(size=bsz, symbol=bsym, color=_ACC_COLOR)))
+        return out
 
     def frame_traces(i: int):
         x, v = float(x_values[i]), float(v_values[i])
@@ -733,7 +811,7 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
                         line=dict(color="#2E5EAA", width=2), showlegend=False, hoverinfo="skip"),
             go.Scatter(x=[t_values[i]], y=[x], mode="markers", marker=dict(size=11, color="#C0392B"),
                         showlegend=False),
-        ]
+        ] + extra_traces(i)
 
     base = frame_traces(0)
     fig.add_trace(base[0], row=1, col=1)
@@ -741,8 +819,10 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
     fig.add_trace(base[2], row=1, col=1)
     fig.add_trace(base[3], row=2, col=1)
     fig.add_trace(base[4], row=2, col=1)
+    for extra in base[5:]:
+        fig.add_trace(extra, row=1, col=1)
 
-    frames = [go.Frame(data=frame_traces(int(i)), traces=[0, 1, 2, 3, 4], name=f"{int(i)}") for i in idx]
+    frames = [go.Frame(data=frame_traces(int(i)), traces=list(range(len(base))), name=f"{int(i)}") for i in idx]
     fig.update_layout(
         height=520, margin=dict(t=60, b=40),
         updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.14, buttons=[
@@ -758,6 +838,8 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
                   label=f"{t_values[int(i)]:.2g}") for i in idx])],
     )
     fig.update_yaxes(visible=False, row=1, col=1)
+    if extras:
+        fig.update_yaxes(range=[-0.75, 0.75], row=1, col=1)       # room for the arrows above and below the track
     fig.update_xaxes(title=f"position{x_unit_sfx}", row=1, col=1)
     fig.update_xaxes(title=f"time{t_unit_sfx}", row=2, col=1)
     fig.update_yaxes(title=f"{x_label}{x_unit_sfx}", row=2, col=1)
@@ -1193,4 +1275,150 @@ def build_space_time_view(field, y_label: str = "u") -> go.Figure:
     fig.update_xaxes(title_text="x", row=2, col=1)
     fig.update_layout(title=title(idx[0]), height=620,
                         **_play_layout([f"{ts[i]:.3g}" for i in idx], "t = ", duration_ms=90))
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Solve-order replay and chain value flow
+# ---------------------------------------------------------------------------
+_STATE_ALPHA = {"known": 1.0, "done": 1.0, "current": 1.0, "pending": 0.16, "blocked": 0.45}
+_CURRENT_RING = "#F39C12"
+_BLOCKED_RING = "#C0392B"
+
+
+def build_solve_order_replay(nodes, edges, frames) -> go.Figure:
+    """The dependency graph (see build_dependency_graph_plot) played back in
+    the order its quantities get determined: the givens lit first, then one
+    stage per frame -- the equations that run (ringed in orange), the
+    variables they newly determine, and the edges they read and write along
+    (thick orange). What is already determined stays lit; what is still to
+    come is faint. `frames` come from modules.dependency_graph.replay_frames."""
+    if not frames:
+        raise ValueError("Nothing to replay.")
+    by_id = {n.id: n for n in nodes}
+
+    fig = go.Figure()
+    for kind, label in (("known", "Known"), ("equation", "Equation"), ("unknown", "Unknown")):
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=label,
+                                   marker=dict(size=14, color=_DEP_GRAPH_COLORS[kind])))
+    gap_x: list[float | None] = []
+    gap_y: list[float | None] = []
+    for e in edges:
+        a, b = by_id[e.source], by_id[e.target]
+        gap_x += [a.x, b.x, None]
+        gap_y += [a.y, b.y, None]
+    fig.add_trace(go.Scatter(x=gap_x, y=gap_y, mode="lines", showlegend=False, hoverinfo="skip",
+                               line=dict(color="rgba(120,120,120,0.35)", width=1.5)))
+
+    def active_trace(frame) -> go.Scatter:
+        ex: list[float | None] = []
+        ey: list[float | None] = []
+        for s, t in frame.active_edges:
+            ex += [by_id[s].x, by_id[t].x, None]
+            ey += [by_id[s].y, by_id[t].y, None]
+        return go.Scatter(x=ex, y=ey, mode="lines", showlegend=False, hoverinfo="skip",
+                           line=dict(color=_CURRENT_RING, width=5))
+
+    def node_trace(frame) -> go.Scatter:
+        colours, sizes, ring_colours, ring_widths = [], [], [], []
+        for n in nodes:
+            state = frame.states[n.id]
+            colours.append(_rgba(_DEP_GRAPH_COLORS[n.kind], _STATE_ALPHA[state]))
+            sizes.append(46 if state == "current" else 36)
+            ring_colours.append(_CURRENT_RING if state == "current" else
+                                _BLOCKED_RING if state == "blocked" else "white")
+            ring_widths.append(4 if state in ("current", "blocked") else 1)
+        return go.Scatter(x=[n.x for n in nodes], y=[n.y for n in nodes], mode="markers+text",
+                           text=[n.label for n in nodes], textposition="middle center", showlegend=False,
+                           textfont=dict(color="white", size=11), hoverinfo="text",
+                           marker=dict(size=sizes, color=colours, line=dict(color=ring_colours, width=ring_widths)))
+
+    first = len(fig.data)
+    fig.add_trace(active_trace(frames[0]))
+    fig.add_trace(node_trace(frames[0]))
+    fig.frames = [go.Frame(data=[active_trace(f), node_trace(f)], traces=[first, first + 1], name=str(k),
+                             layout=go.Layout(title_text=f.title)) for k, f in enumerate(frames)]
+    fig.update_layout(title=frames[0].title, xaxis=dict(visible=False, range=[-0.5, 2.5]),
+                        yaxis=dict(visible=False, autorange="reversed"), showlegend=True,
+                        **_play_layout(["givens"] + [str(f.index) for f in frames[1:]], "", duration_ms=1400))
+    return fig
+
+
+def build_chain_flow_plot(flow) -> go.Figure:
+    """A modules.chain_flow.ChainFlow as a cascade, revealed one step at a
+    time: each step a node reading "Step n, symbol = value", links between
+    steps labelled with the value they carried, and the inputs typed in by
+    hand as small nodes above their step. The current step is ringed; steps
+    that failed are red, steps not yet solved grey."""
+    if not flow.steps:
+        raise ValueError("This chain has no steps.")
+    from modules.chain_flow import step_caption
+    pos = {s.position: s for s in flow.steps}
+    status_colour = {"ok": "#2E5EAA", "error": "#C0392B", "stale": "#8A8F98"}
+
+    def shown(k: int):
+        steps = [s for s in flow.steps if s.position <= k]
+        edges = [e for e in flow.edges if e.target <= k and e.source in pos]
+        literals = [lit for lit in flow.literals if lit.step <= k]
+        return steps, edges, literals
+
+    def dynamic(k: int) -> list[go.Scatter]:
+        steps, edges, literals = shown(k)
+        ok_x: list[float | None] = []
+        ok_y: list[float | None] = []
+        bad_x: list[float | None] = []
+        bad_y: list[float | None] = []
+        mid_x, mid_y, mid_t = [], [], []
+        for e in edges:
+            a, b = pos[e.source], pos[e.target]
+            xs, ys = ([ok_x, ok_y] if not e.broken else [bad_x, bad_y])
+            xs += [a.x, b.x, None]
+            ys += [a.y, b.y, None]
+            mid_x.append((a.x + b.x) / 2)
+            mid_y.append((a.y + b.y) / 2 + 0.18)
+            mid_t.append(f"{e.symbol} = {e.carried:.4g}" if not e.broken else f"{e.symbol}: {e.reason}")
+        lit_x: list[float | None] = []
+        lit_y: list[float | None] = []
+        for lit in literals:
+            s = pos[lit.step]
+            lit_x += [lit.x, s.x, None]
+            lit_y += [lit.y, s.y, None]
+        current = pos[k]
+        return [
+            go.Scatter(x=ok_x, y=ok_y, mode="lines", showlegend=False, hoverinfo="skip",
+                        line=dict(color="rgba(46,94,170,0.7)", width=4)),
+            go.Scatter(x=bad_x, y=bad_y, mode="lines", showlegend=False, hoverinfo="skip",
+                        line=dict(color="#C0392B", width=3, dash="dash")),
+            go.Scatter(x=mid_x, y=mid_y, mode="text", text=mid_t, showlegend=False, hoverinfo="skip",
+                        textfont=dict(size=12, color="#1B2A41")),
+            go.Scatter(x=lit_x, y=lit_y, mode="lines", showlegend=False, hoverinfo="skip",
+                        line=dict(color="rgba(120,120,120,0.5)", width=1.5)),
+            go.Scatter(x=[lit.x for lit in literals], y=[lit.y for lit in literals], mode="markers+text",
+                        text=[f"{lit.symbol} = {lit.value:.4g}" for lit in literals], textposition="top center",
+                        showlegend=False, hoverinfo="skip",
+                        marker=dict(size=12, color="#8A8F98", symbol="square")),
+            go.Scatter(x=[s.x for s in steps], y=[s.y for s in steps], mode="markers+text", showlegend=False,
+                        text=[f"Step {s.position + 1}<br>" + (f"{s.symbol} = {s.value:.4g}"
+                                                              if s.status == "ok" and s.value is not None
+                                                              else s.symbol) for s in steps],
+                        textfont=dict(color="white", size=11), textposition="middle center", hoverinfo="skip",
+                        marker=dict(size=70, color=[status_colour.get(s.status, "#8A8F98") for s in steps],
+                                    line=dict(width=[5 if s.position == k else 1 for s in steps],
+                                              color=[_CURRENT_RING if s.position == k else "white"
+                                                     for s in steps]))),
+            go.Scatter(x=[current.x], y=[current.y], mode="markers", showlegend=False, hoverinfo="skip",
+                        marker=dict(size=92, color="rgba(0,0,0,0)", line=dict(width=3, color=_CURRENT_RING))),
+        ]
+
+    last = max(pos)
+    fig = go.Figure(dynamic(0))
+    fig.frames = [go.Frame(data=dynamic(k), traces=list(range(7)), name=str(i),
+                             layout=go.Layout(title_text=step_caption(flow, k)))
+                  for i, k in enumerate(sorted(pos))]
+    xs = [s.x for s in flow.steps]
+    ys = [s.y for s in flow.steps] + [lit.y for lit in flow.literals]
+    fig.update_layout(title=step_caption(flow, min(pos)), showlegend=False, height=420 + 60 * min(last, 6),
+                        xaxis=dict(visible=False, range=[min(xs) - 1.4, max(xs) + 1.4]),
+                        yaxis=dict(visible=False, range=[min(ys) - 0.9, max(ys) + 0.9]),
+                        **_play_layout([f"step {k + 1}" for k in sorted(pos)], "", duration_ms=1400))
     return fig
