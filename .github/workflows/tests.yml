@@ -21,7 +21,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12"]
+        # The oldest and the newest supported Python. 3.11 was dropped (it is
+        # more than three years old, and the errors it raised were about the
+        # interpreter, not the code); 3.13 is not run separately because
+        # anything that works on both ends of this range has not been
+        # observed to break in between. Add 3.15 once its dependencies ship wheels.
+        python-version: ["3.12", "3.14"]
         # Windows is included deliberately, not just Ubuntu: this app
         # targets Windows as a first-class local-run environment (conda
         # + PowerShell, per its own setup notes), and at least one

@@ -14,6 +14,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from modules.db_util import ClosingConnection
 from modules.equation_engine import ProblemModel, build_model
 from modules.verifier import VerificationReport, CheckResult
 from modules.solver import SolutionStep
@@ -97,7 +98,7 @@ _MIGRATIONS = [_migration_001_initial_schema, _migration_002_add_equation_shapes
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, factory=ClosingConnection)
     # WAL (write-ahead log) instead of the default rollback-journal mode:
     # a crash or kill mid-write is much less likely to leave the file in
     # a bad state, and it tolerates a second reader/writer (e.g. two

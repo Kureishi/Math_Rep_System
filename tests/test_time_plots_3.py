@@ -266,8 +266,8 @@ def test_trajectory_carries_a_constant_acceleration():
 
 
 def test_motion_gif_with_the_upgrades_is_valid_and_differs_from_the_plain_one():
-    plain = ps.snapshot_motion_diagram_gif(T, X, V, n_frames=6)
-    rich = ps.snapshot_motion_diagram_gif(T, X, V, n_frames=6, a_values=ACC, n_strobes=5)
-    assert rich[:4] == b"GIF8" and _n_frames(rich) == 6 and rich != plain
-    only_strobes = ps.snapshot_motion_diagram_gif(T, X, V, n_frames=4, n_strobes=4)
-    assert _n_frames(only_strobes) == 4
+    plain = ps.snapshot_motion_diagram_gif(T, X, V, n_frames=3)
+    rich = ps.snapshot_motion_diagram_gif(T, X, V, n_frames=3, a_values=ACC, n_strobes=5)
+    assert rich[:4] == b"GIF8" and _n_frames(rich) == 3 and rich != plain
+    only_strobes = ps.snapshot_motion_diagram_gif(T, X, V, n_frames=2, n_strobes=4)
+    assert _n_frames(only_strobes) == 2

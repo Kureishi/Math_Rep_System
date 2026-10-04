@@ -110,7 +110,7 @@ math-rep-system/
 ├── requirements-dev.txt      # + pytest, pre-commit (dev/test only)
 ├── requirements-api.txt      # + fastapi/uvicorn, for api_server.py only
 ├── .github/workflows/tests.yml  # CI -- runs the suite on every push/PR,
-│                              #   ubuntu-latest AND windows-latest x Python 3.11/3.12
+│                              #   ubuntu-latest AND windows-latest x Python 3.12/3.14
 ├── .pre-commit-config.yaml   # optional local hook: runs the suite before each commit
 ├── .streamlit/config.toml    # server.maxUploadSize=500 (MB) -- committed despite
 │                              #   .streamlit/ being gitignored (a narrow exception
@@ -178,6 +178,8 @@ math-rep-system/
     ├── ode_utils.py             # shared dsolve()/dsolve_system() helper (solver.py +
     │                            #   verifier.py both need it; lives here to avoid a
     │                            #   circular import)
+    ├── db_util.py                 # ClosingConnection: `with _connect() as conn:` commits AND closes
+    │                              #   (used by history, chains, templates, settings_profiles)
     ├── chain_flow.py              # a problem chain as a cascade: what each step received and carried on
     ├── time_uncertainty.py        # fan chart: sample uncertain parameters/initial values
     │                              #   through the symbolic solution + interval-arithmetic envelope

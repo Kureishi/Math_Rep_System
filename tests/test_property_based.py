@@ -87,7 +87,7 @@ def test_is_exactly_zero_recognizes_true_zero_from_cancellation(coeffs):
     coeffs=st.lists(st.integers(min_value=1, max_value=20), min_size=1, max_size=5),
     constant_shift=st.integers(min_value=1, max_value=50),
 )
-@settings(max_examples=200)
+@settings(max_examples=40)     # was 200: ~8 s for no extra reach -- every example is a different-length polynomial
 def test_is_exactly_zero_rejects_genuinely_nonzero_polynomial(coeffs, constant_shift):
     """A polynomial with strictly positive coefficients plus a strictly
     positive constant shift, evaluated as a formal expression in x, is

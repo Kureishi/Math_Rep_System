@@ -1,6 +1,7 @@
 -r requirements.txt
 pytest>=7.4
 pytest-cov>=4.1
+coverage>=7.9   # for [tool.coverage.run] core = "sysmon" -- see pyproject.toml
 mypy>=1.10
 hypothesis>=6.100
 fastapi==0.141.1

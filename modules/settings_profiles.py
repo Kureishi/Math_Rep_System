@@ -14,6 +14,8 @@ sessions -- unlike the live Settings object itself, this module's whole
 purpose is to NOT reset when the browser tab closes.
 """
 import sqlite3
+
+from modules.db_util import ClosingConnection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,7 +44,7 @@ class SettingsProfile:
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, factory=ClosingConnection)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS settings_profiles (

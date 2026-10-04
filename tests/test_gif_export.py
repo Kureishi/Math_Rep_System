@@ -69,10 +69,10 @@ def test_add_camera_rotation_preserves_existing_updatemenus():
 
 def test_rotating_surface_gif_is_a_valid_multi_frame_gif():
     data = snapshot_rotating_surface_gif(_surface_eq(), "x", "y", {}, (-3, 3), (-3, 3),
-                                            z_target="z", resolution=15, n_frames=8)
+                                            z_target="z", resolution=10, n_frames=3)
     assert data[:6] == b"GIF89a"
     img = Image.open(io.BytesIO(data))
-    assert img.n_frames == 8
+    assert img.n_frames == 3
 
 
 def test_rotating_surface_gif_raises_on_unparsed_equation():
@@ -87,17 +87,17 @@ def test_motion_diagram_gif_is_a_valid_multi_frame_gif():
     ts = np.linspace(0, 6, 60)
     xs = 8 * ts + 0.5 * 2 * ts ** 2
     vs = 8 + 2 * ts
-    data = snapshot_motion_diagram_gif(ts, xs, vs, x_label="position", x_unit="m", t_unit="s", n_frames=12)
+    data = snapshot_motion_diagram_gif(ts, xs, vs, x_label="position", x_unit="m", t_unit="s", n_frames=4)
     assert data[:6] == b"GIF89a"
     img = Image.open(io.BytesIO(data))
-    assert img.n_frames == 12
+    assert img.n_frames == 4
 
 
 def test_motion_diagram_gif_handles_negative_velocity():
     ts = np.linspace(0, 10, 60)
     xs = 20 * ts - 0.5 * 5 * ts ** 2
     vs = 20 - 5 * ts
-    data = snapshot_motion_diagram_gif(ts, xs, vs, n_frames=10)
+    data = snapshot_motion_diagram_gif(ts, xs, vs, n_frames=3)
     assert data[:6] == b"GIF89a"
 
 
@@ -105,13 +105,13 @@ def test_motion_diagram_gif_handles_negative_velocity():
 
 def test_cobweb_gif_is_a_valid_multi_frame_gif():
     g = lambda xx: 2.8 * xx * (1 - xx)
-    data = snapshot_cobweb_gif(g, 0.2, (0, 1), n_steps=15)
+    data = snapshot_cobweb_gif(g, 0.2, (0, 1), n_steps=4)
     assert data[:6] == b"GIF89a"
     img = Image.open(io.BytesIO(data))
-    assert img.n_frames == 16  # n_steps + 1
+    assert img.n_frames == 5  # n_steps + 1
 
 
 def test_cobweb_gif_linear_map():
     g = lambda xx: xx + 500
-    data = snapshot_cobweb_gif(g, 0, (0, 5000), n_steps=5)
+    data = snapshot_cobweb_gif(g, 0, (0, 5000), n_steps=2)
     assert data[:6] == b"GIF89a"

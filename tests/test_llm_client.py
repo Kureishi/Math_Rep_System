@@ -184,6 +184,7 @@ import socket
 import time
 
 import config
+import modules.llm_client as llm_client
 from modules.llm_client import LMStudioClient, _server_reachable
 
 
@@ -261,7 +262,10 @@ def test_is_available_bounded_when_port_accepts_but_never_responds(monkeypatch):
     """A port that accepts the TCP connection (so the fast pre-check alone
     wouldn't catch this) but the process behind it never sends an HTTP
     response -- the probe client's own short timeout must still bound
-    this, not the SDK's much longer default."""
+    this, not the SDK's much longer default. (The probe timeout is shortened for the test: what is being checked
+    is that it BOUNDS the call, which it does just as well at 0.5 s as at the real 5 s -- the SDK default it
+    replaces is minutes.)"""
+    monkeypatch.setattr(llm_client, "_HTTP_PROBE_TIMEOUT_S", 0.5)
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
@@ -273,6 +277,6 @@ def test_is_available_bounded_when_port_accepts_but_never_responds(monkeypatch):
         ok, msg = client.is_available()
         elapsed = time.monotonic() - start
         assert ok is False
-        assert elapsed < 8.0
+        assert elapsed < 3.0
     finally:
         listener.close()

@@ -1,8 +1,8 @@
 # Optional: complements the GitHub Actions workflow (.github/workflows/tests.yml)
 # with immediate LOCAL feedback before a commit even happens, rather than
-# only finding out a test broke after pushing. NOTE the full suite is well
-# over a thousand tests and takes a few minutes, so running it on every
-# commit is a noticeable wait -- to run it on `git push` instead, add
+# only finding out a test broke after pushing. NOTE the full suite is over
+# sixteen hundred tests and takes about two minutes, so running it on every
+# commit is still a noticeable wait -- to run it on `git push` instead, add
 # `stages: [pre-push]` to the hook below and install with
 # `pre-commit install --hook-type pre-push`.
 #

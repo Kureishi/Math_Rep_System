@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from modules.db_util import ClosingConnection
 from modules.db_migrations import apply_migrations
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "templates.db"
@@ -59,7 +60,7 @@ _MIGRATIONS = [_migration_001_initial_schema]
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, factory=ClosingConnection)
     conn.execute("PRAGMA journal_mode=WAL")
     apply_migrations(conn, _MIGRATIONS)
     conn.commit()

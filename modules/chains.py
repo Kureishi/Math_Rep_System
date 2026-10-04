@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from modules.db_util import ClosingConnection
 from modules.equation_engine import ProblemModel, build_model, target_kind
 from modules.verifier import _solve_sympy
 
@@ -76,7 +77,7 @@ class Chain:
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, factory=ClosingConnection)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")

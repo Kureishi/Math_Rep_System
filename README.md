@@ -1509,7 +1509,7 @@ sample payloads and fixtures if you want to add more.
 
 - **CI** (`.github/workflows/tests.yml`): the full suite runs automatically
   on every push and pull request, on a matrix of **ubuntu-latest AND
-  windows-latest** × Python 3.11/3.12. Windows is included deliberately,
+  windows-latest** × Python 3.12/3.14 (the oldest and the newest supported). Windows is included deliberately,
   not just as a formality -- this app targets Windows as a first-class
   local-run environment, and at least one module
   (`modules/timeout_utils.py`) exists specifically because a naive
@@ -1523,10 +1523,10 @@ sample payloads and fixtures if you want to add more.
   tab any time via `workflow_dispatch`.
 - **Optional local pre-commit hook** (`.pre-commit-config.yaml`): runs
   the same suite before each commit, for immediate feedback rather than
-  finding out something broke only after pushing. The full suite is well
-  over a thousand tests and takes a few minutes (roughly 2-5, depending on
-  the machine), so this IS a noticeable wait on every commit -- opt in only
-  if you want that trade, or run it on `git push` instead by adding
+  finding out something broke only after pushing. The full suite is over
+  sixteen hundred tests and takes about two minutes, so this is still a
+  noticeable wait on every commit -- opt in only if you want that trade,
+  or run it on `git push` instead by adding
   `stages: [pre-push]` to the hook and installing with
   `pre-commit install --hook-type pre-push`. Opt in with:
   ```bash
@@ -1557,7 +1557,30 @@ sample payloads and fixtures if you want to add more.
   found. The app's four SQLite databases are redirected to a temp dir, so
   running the suite never touches your real history, chains, templates or
   settings (only the log file, `data/app.log`, is created by importing the
-  app, same as it always was).
+  app, same as it always was). Booting a page costs several seconds (nearly
+  all of it building Plotly figures), so the tests are written to pay it
+  sparingly: checks that only READ a page share one boot (`_shared_*_page`,
+  which must never be touched with a widget), a page's controls are
+  exercised in one test rather than one test each, and the "press the GIF
+  button" tests use the `gif_stub` fixture -- a recorder standing in for the
+  matplotlib renderer, so the test asserts what the button is HANDED instead
+  of spending 5-15 seconds rendering 40 frames. The renderers themselves are
+  tested for real (valid GIF, right frame count) in `test_gif_export.py` and
+  `test_time_plots*.py`, and one GIF button per page is still clicked
+  end-to-end.
+- **Coverage is measured with `sys.monitoring`** (`[tool.coverage.run] core =
+  "sysmon"` in `pyproject.toml`, needs `coverage>=7.9`). It reports the same
+  covered lines as the default C tracer -- checked across the whole suite --
+  but with roughly a third of the overhead; the default tracer made the suite
+  about 2.5x slower than running it with no coverage at all.
+- **SQLite connections are closed** (`modules/db_util.py`). `with
+  sqlite3.connect(...) as conn:` commits but does not close, so each of the
+  app's four small databases leaked a connection per call: harmless on
+  Python 3.12, a `ResourceWarning` per connection on 3.13+ (hundreds per test
+  run on 3.14), and a locked `-wal`/`-shm` file on Windows. The `_connect()`
+  helpers now return a connection that commits (or rolls back) *and* closes
+  when the `with` block ends; `tests/test_db_util.py` checks all four, with
+  `ResourceWarning` promoted to an error.
 - **Hypothesis deadlines are disabled suite-wide** (`tests/conftest.py`).
   Nearly every property test drives SymPy, whose first call on a fresh
   expression shape warms internal caches (a cold call can take several

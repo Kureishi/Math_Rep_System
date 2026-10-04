@@ -26,7 +26,7 @@ testpaths = ["tests"]
 # Durbin-Watson compared to a float, a best-fit result with no R-squared
 # being sorted). Those fail only on the unlucky input, not "immediately",
 # which is exactly what a type checker is for.
-python_version = "3.11"
+python_version = "3.12"   # the oldest Python this project supports
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_redundant_casts = true
@@ -35,6 +35,12 @@ no_implicit_optional = true
 
 [tool.coverage.run]
 source = ["modules"]
+# Measure with sys.monitoring instead of coverage.py's default C tracer. It reports the same covered lines
+# (checked: identical results across the whole suite) at roughly a third of the overhead -- the default tracer
+# made the suite ~2.5x slower than running it without coverage. Needs coverage >= 7.9 and Python >= 3.12 for LINE
+# coverage (branch coverage would need 3.14); this project only measures lines. On Python 3.14 it is the default
+# anyway.
+core = "sysmon"
 
 [tool.coverage.report]
 # 90%, a few points under the ~94% baseline measured after the last
