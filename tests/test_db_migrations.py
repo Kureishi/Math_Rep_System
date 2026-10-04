@@ -2,20 +2,27 @@
 framework."""
 import sqlite3
 
+import pytest
+
 from modules.db_migrations import current_version, apply_migrations
 
 
-def _fresh_conn():
-    return sqlite3.connect(":memory:")
+@pytest.fixture
+def fresh_conn():
+    """An empty in-memory database, closed when the test ends (an unclosed connection is a ResourceWarning
+    on Python 3.13+, reported against whichever test happens to trigger the garbage collection)."""
+    conn = sqlite3.connect(":memory:")
+    yield conn
+    conn.close()
 
 
-def test_current_version_starts_at_zero_for_fresh_database():
-    conn = _fresh_conn()
+def test_current_version_starts_at_zero_for_fresh_database(fresh_conn):
+    conn = fresh_conn
     assert current_version(conn) == 0
 
 
-def test_apply_migrations_runs_each_migration_exactly_once():
-    conn = _fresh_conn()
+def test_apply_migrations_runs_each_migration_exactly_once(fresh_conn):
+    conn = fresh_conn
     calls = []
     migrations = [lambda c: calls.append(1), lambda c: calls.append(2), lambda c: calls.append(3)]
     version = apply_migrations(conn, migrations)
@@ -23,13 +30,13 @@ def test_apply_migrations_runs_each_migration_exactly_once():
     assert calls == [1, 2, 3]
 
 
-def test_apply_migrations_is_idempotent_across_separate_calls():
+def test_apply_migrations_is_idempotent_across_separate_calls(fresh_conn):
     """The core guarantee: calling apply_migrations again (e.g. the next
     time the app connects) with the SAME migration list must not re-run
     anything already applied -- this is what makes it safe to call on
     every connection, the same way the old ALTER-TABLE-and-swallow
     pattern was."""
-    conn = _fresh_conn()
+    conn = fresh_conn
     calls = []
     migrations = [lambda c: calls.append("a"), lambda c: calls.append("b")]
     apply_migrations(conn, migrations)
@@ -37,11 +44,11 @@ def test_apply_migrations_is_idempotent_across_separate_calls():
     assert calls == ["a", "b"]  # each ran exactly once, not twice
 
 
-def test_apply_migrations_only_runs_new_ones_after_a_list_grows():
+def test_apply_migrations_only_runs_new_ones_after_a_list_grows(fresh_conn):
     """The realistic upgrade scenario: a database migrated under an
     OLDER, shorter migrations list, then the app adds a new migration
     -- only the new one should run, not the whole list from scratch."""
-    conn = _fresh_conn()
+    conn = fresh_conn
     calls = []
     first_round = [lambda c: calls.append("a"), lambda c: calls.append("b")]
     apply_migrations(conn, first_round)
@@ -52,8 +59,8 @@ def test_apply_migrations_only_runs_new_ones_after_a_list_grows():
     assert calls == ["a", "b", "c"]
 
 
-def test_apply_migrations_actually_changes_the_schema():
-    conn = _fresh_conn()
+def test_apply_migrations_actually_changes_the_schema(fresh_conn):
+    conn = fresh_conn
     migrations = [lambda c: c.execute("CREATE TABLE widgets (id INTEGER)")]
     apply_migrations(conn, migrations)
     conn.execute("INSERT INTO widgets (id) VALUES (1)")  # doesn't raise -- table exists
@@ -70,3 +77,4 @@ def test_current_version_persists_across_reconnection_to_the_same_file(tmp_path)
 
     conn2 = sqlite3.connect(db_path)
     assert current_version(conn2) == 1
+    conn2.close()

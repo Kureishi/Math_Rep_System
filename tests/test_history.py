@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 
 import modules.history as history_module
@@ -155,7 +156,7 @@ def test_migration_adds_equation_shapes_column_to_pre_existing_db(tmp_path, monk
 
     # calling _connect() again (as any subsequent operation would) should
     # also not raise, even though the column now already exists
-    history_module._connect()
+    history_module._connect().close()
 
 
 def test_find_similar_skips_rows_with_null_equation_shapes(tmp_path, monkeypatch, fake_client_factory):
@@ -164,7 +165,7 @@ def test_find_similar_skips_rows_with_null_equation_shapes(tmp_path, monkeypatch
     monkeypatch.setattr(history_module, "DB_PATH", db_path)
     # trigger table creation + migration
     history_module._connect().close()
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:        # `with sqlite3.connect() as c` commits but never closes
         conn.execute("INSERT INTO problems (timestamp, problem_text, domain, passed, payload, equation_shapes) "
                      "VALUES ('2020-01-01', 'legacy problem', 'x', 1, '{}', NULL)")
 
@@ -291,7 +292,7 @@ def test_summarize_error_patterns_respects_lookback_window(tmp_path, monkeypatch
     db_path = tmp_path / "pattern_window_test.db"
     history_module._connect().close()  # ensure table exists
     old_ts = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         for _ in range(5):
             conn.execute(
                 "INSERT INTO grading_records (timestamp, target, domain, category, subtype, detail) "
