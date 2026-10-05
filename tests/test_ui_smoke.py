@@ -739,3 +739,74 @@ def test_motion_diagram_controls_switch_the_upgrades_off_and_on():
     assert [len(f["data"][5]["x"]) for f in _motion_spec(at)["frames"]][-1] == 3
 
 
+
+
+# ================================================================== reruns reuse unchanged work (ui/cache.py)
+
+def _counting(monkeypatch, module, name):
+    """Wraps module.name so every call is recorded; returns the list of calls. The real function still runs."""
+    import importlib
+    mod = importlib.import_module(module)
+    real = getattr(mod, name)
+    calls: list = []
+
+    def wrapper(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(mod, name, wrapper)
+    return calls
+
+
+def test_an_unrelated_widget_does_not_rebuild_what_it_has_nothing_to_do_with(monkeypatch):
+    """Streamlit re-runs the whole script on every widget change. Moving the fan's sample slider used to rebuild the
+    phase portrait, the flow animation, the linked view and the error plot and re-solve the ODE (about 2 s). Now only
+    the fan -- whose input actually changed -- is rebuilt, and a control that feeds one figure rebuilds only that one."""
+    solve = _counting(monkeypatch, "ui.results.solutions", "solve_ode")
+    symbolic_solve = _counting(monkeypatch, "ui.results.time_views", "solve_ode")
+    portrait = _counting(monkeypatch, "ui.results.solutions", "build_phase_portrait")
+    trail = _counting(monkeypatch, "ui.results.solutions", "build_phase_trail_animation")
+    linked = _counting(monkeypatch, "ui.results.solutions", "build_time_linked_view")
+    error = _counting(monkeypatch, "ui.results.solutions", "build_ode_error_plot")
+    fan = _counting(monkeypatch, "ui.results.time_views", "build_uncertainty_fan")
+    morph = _counting(monkeypatch, "ui.results.time_views", "build_parameter_morph")
+
+    at = _ode_page("spiral")
+    built = lambda: (len(solve), len(symbolic_solve), len(portrait), len(trail), len(linked), len(error), len(fan), len(morph))
+    assert built() == (1, 1, 1, 1, 1, 1, 1, 1)
+
+    _set(at, "slider", "fan_n_x, y", 900)                         # only the fan depends on its own sample count
+    assert built() == (1, 1, 1, 1, 1, 1, 2, 1)
+    assert "900 samples" in _title(_chart(at, "Uncertainty over time"))
+
+    _set(at, "slider", "phase_extra_x_y", 3)                      # feeds the flow animation, not the portrait or the linked view
+    assert built() == (1, 1, 1, 2, 1, 1, 2, 1)
+    flow = next(s for s in _specs(at) if _title(s).startswith("Phase portrait flow"))
+    assert len(flow["frames"][2]["data"][1]["x"]) == 4            # the solved path + 3 extra: the figure really changed
+
+    _set(at, "number_input", "fan_seed_x, y", 99)                 # and the seed, only the fan
+    assert built() == (1, 1, 1, 2, 1, 1, 3, 1) and "seed 99" in _title(_chart(at, "Uncertainty over time"))
+
+
+def test_changing_the_model_re_solves_instead_of_showing_the_old_solution():
+    """The cache is keyed by the model's content, so an equal model reuses the solution and a different one does not."""
+
+    def script():
+        import streamlit as st
+        from modules.workspace import Workspace
+        from ui.results.solutions import render_ode_solution
+        import tests.test_ode_trajectories as models
+
+        for key, default in [("plot_snapshots", {}), ("pdf_bytes", None), ("problem_text", "")]:
+            st.session_state.setdefault(key, default)
+        initial = st.session_state.get("initial_value", 100.0)
+        render_ode_solution(Workspace(st.session_state), models.decay_model(ics=(("N(0)", initial),)))
+
+    at = AppTest.from_function(script, default_timeout=TIMEOUT).run()
+    assert _exceptions(at) == []
+    shown = lambda: " ".join(l.value for l in at.latex)
+    assert "100.0" in shown() and "50.0" not in shown()
+
+    at.session_state["initial_value"] = 50.0
+    at.run()
+    assert _exceptions(at) == []
+    assert "50.0" in shown() and "100.0" not in shown()           # a different model: solved afresh, not served from the cache

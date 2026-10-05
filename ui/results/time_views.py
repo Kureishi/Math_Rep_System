@@ -18,6 +18,7 @@ from modules.plot_snapshot import (
 from modules.plotter import build_bifurcation_plot, build_cobweb_plot, build_parameter_morph, build_uncertainty_fan
 from modules.recurrence_utils import extract_step_map, solve_recurrence
 from modules.time_uncertainty import candidate_parameters, ode_uncertainty_fan
+from ui.cache import cached, cached_by_model
 from ui.common import gif_download_button, snapshot_button
 
 
@@ -26,14 +27,7 @@ def _symbolic_solutions(model: ProblemModel) -> dict[str, sp.Eq]:
     solve_ode(symbolic_initial_conditions=True)), cached for the session:
     a Streamlit rerun happens on every widget touch, and re-solving the
     differential equation each time would make the sliders crawl."""
-    signature = repr(([(e.name, e.raw_expression) for e in model.equations if e.kind == "ode"],
-                      [(ic.raw_expression, ic.value) for ic in model.initial_conditions]))
-    cache = st.session_state.setdefault("_symbolic_ode_solutions", {})
-    if signature not in cache:
-        if len(cache) >= 8:
-            cache.clear()
-        cache[signature] = solve_ode(model, symbolic_initial_conditions=True)
-    return cache[signature]
+    return cached_by_model("solve_ode_symbolic", model, lambda: solve_ode(model, symbolic_initial_conditions=True))
 
 
 def _initial_time(model: ProblemModel, group) -> float:
@@ -111,7 +105,8 @@ def _render_fan(model, group, symbolic, params, label, t0) -> None:
         if not fan.applicable:
             st.warning(fan.reason)
             return
-        st.plotly_chart(build_uncertainty_fan(fan), width="stretch", key=f"fan_{label}")
+        st.plotly_chart(cached(f"fan:{label}", (fan,), lambda: build_uncertainty_fan(fan)),
+                         width="stretch", key=f"fan_{label}")
         for i, name in enumerate(fan.names):
             st.write(f"**{name}** at t = {fan.t[-1]:g}: nominal {fan.nominal[i][-1]:.4g}, 90% of samples in "
                       f"[{fan.p5[i][-1]:.4g}, {fan.p95[i][-1]:.4g}]")
@@ -154,7 +149,8 @@ def _render_morph(symbolic, params, names, label, t0, t_sym) -> None:
         if not morph.applicable:
             st.warning(morph.reason)
             return
-        st.plotly_chart(build_parameter_morph(morph), width="stretch", key=f"morph_{label}_{chosen}")
+        st.plotly_chart(cached(f"morph:{label}", (morph,), lambda: build_parameter_morph(morph)),
+                         width="stretch", key=f"morph_{label}_{chosen}")
         change = first_regime_change(morph)
         if change is None:
             st.caption(f"The shape doesn't change character across this range "
@@ -173,7 +169,7 @@ def render_map_views(model: ProblemModel) -> None:
     a(n+1) = g(a(n)) in the model."""
     funcs = sorted({f for e in model.equations if e.kind == "recurrence" and e.sympy_eq is not None
                     for f in _funcs_used(e.sympy_eq)})
-    has_closed_form = set(solve_recurrence(model))
+    has_closed_form = set(cached_by_model("solve_recurrence", model, lambda: solve_recurrence(model)))
     for func_name in funcs:
         step_map = extract_step_map(model, func_name)
         if step_map is None:
@@ -242,7 +238,9 @@ def _render_bifurcation(model, func_name, g_expr, g_var, free, known) -> None:
             st.warning(result.reason)
             return
         marker = current if current is not None else None
-        st.plotly_chart(build_bifurcation_plot(result, marker=marker), width="stretch", key=f"bif_{func_name}")
+        st.plotly_chart(cached(f"bifurcation:{func_name}", (result, marker),
+                                lambda: build_bifurcation_plot(result, marker=marker)),
+                         width="stretch", key=f"bif_{func_name}")
         if result.transitions:
             shown = [f"{chosen} \u2248 {p:.4g}: " + (f"period {k}" if k else "no short cycle")
                      for p, k in result.transitions[:8]]

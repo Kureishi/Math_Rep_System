@@ -15,6 +15,7 @@ from modules.series_asymptotics import taylor_series, asymptotic_expansion
 from modules.series_animation import taylor_partial_sums, fourier_partial_sums
 from modules.plotter import build_partial_sum_animation
 from modules.plot_snapshot import snapshot_partial_sum_gif
+from ui.cache import cached
 from ui.common import (
     live_parse_preview, persist_on_click, restore_from_query_param, sync_query_param, gif_download_button,
 )
@@ -167,7 +168,8 @@ def _render_taylor_animation(result):
             st.caption(frames.error)
             return
         title = sp.sstr(result.input_expr)
-        st.plotly_chart(build_partial_sum_animation(frames, title=title), width="stretch", key="series_anim")
+        st.plotly_chart(cached("series_anim", (frames, title), lambda: build_partial_sum_animation(frames, title=title)),
+                         width="stretch", key="series_anim")
         gif_download_button(key="series_anim", file_stem="taylor_partial_sums",
                              render_fn=lambda: snapshot_partial_sum_gif(frames, title))
 
@@ -182,7 +184,8 @@ def _render_fourier_series_result(result, expr_str):
     else:
         st.warning("The RMS error INCREASED when a harmonic was added, which a correct Fourier series "
                     "can't do -- treat these coefficients with suspicion.")
-    st.plotly_chart(build_partial_sum_animation(result, title=expr_str), width="stretch", key="fseries_anim")
+    st.plotly_chart(cached("fseries_anim", (result, expr_str), lambda: build_partial_sum_animation(result, title=expr_str)),
+                     width="stretch", key="fseries_anim")
     gif_download_button(key="fseries_anim", file_stem="fourier_partial_sums",
                          render_fn=lambda: snapshot_partial_sum_gif(result, expr_str))
     with st.expander("Coefficients"):

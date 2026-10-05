@@ -179,3 +179,186 @@ def test_proof_build_returns_none_when_equivalence_check_timed_out(monkeypatch):
     monkeypatch.setattr(settings, "computation_timeout_seconds", 0.0)
     result = check_equivalence("sin(x)**2 + cos(x)**2", "1")
     assert build_proof(result) is None
+
+
+# ---------------------------------------------------------------- one thread per call; bounded, explicit pile-up
+import subprocess
+import sys
+import textwrap
+import threading
+
+import modules.timeout_utils as tu
+from modules.timeout_utils import ComputationBusyError, abandoned_computations
+
+
+def _wait_until_nothing_is_abandoned(limit: float = 6.0) -> None:
+    deadline = time.time() + limit
+    while abandoned_computations() and time.time() < deadline:
+        time.sleep(0.02)
+
+
+@pytest.fixture
+def hang():
+    """A computation that stays 'stuck' until released -- a stand-in for a SymPy call that never returns."""
+    _wait_until_nothing_is_abandoned()           # other tests' sleeping threads must not count against this one
+    release = threading.Event()
+
+    def stuck():
+        release.wait(30)
+
+    yield stuck
+    release.set()
+    _wait_until_nothing_is_abandoned()
+
+
+def test_hung_computations_do_not_make_later_ones_time_out(hang):
+    """The failure this design replaced: four hung computations filled a shared pool of four workers, and from then
+    on a trivial `1 + 1` was reported as 'timed out' too, until the hung work happened to finish."""
+    for i in range(5):                                           # more than the old pool's four workers
+        with pytest.raises(ComputationTimeoutError):
+            run_with_timeout(hang, timeout=0.05, label=f"stuck-{i}")
+    assert abandoned_computations() == 5
+
+    started = time.time()
+    assert run_with_timeout(lambda: 1 + 1, timeout=1.0) == 2
+    assert time.time() - started < 0.5                           # answered at once, not after the full timeout
+
+
+def test_abandoned_computations_are_counted_and_forgotten_once_they_finish(hang):
+    assert abandoned_computations() == 0
+    with pytest.raises(ComputationTimeoutError):
+        run_with_timeout(hang, timeout=0.05)
+    assert abandoned_computations() == 1
+
+
+def test_count_drops_back_when_the_abandoned_work_ends():
+    release = threading.Event()
+    _wait_until_nothing_is_abandoned()
+    with pytest.raises(ComputationTimeoutError):
+        run_with_timeout(lambda: release.wait(30), timeout=0.05)
+    assert abandoned_computations() == 1
+    release.set()
+    _wait_until_nothing_is_abandoned()
+    assert abandoned_computations() == 0
+
+
+def test_new_work_is_refused_at_once_once_too_many_are_still_running(hang, monkeypatch):
+    monkeypatch.setattr(tu, "MAX_ABANDONED", 3)
+    for _ in range(3):
+        with pytest.raises(ComputationTimeoutError):
+            run_with_timeout(hang, timeout=0.05)
+
+    started = time.time()
+    with pytest.raises(ComputationBusyError) as refused:
+        run_with_timeout(lambda: 1 + 1, timeout=5.0, label="innocent bystander")
+    assert time.time() - started < 0.5                           # refused immediately, not after waiting out its timeout
+    message = str(refused.value)
+    assert "3 earlier computations" in message and "innocent bystander" in message and "restart" in message
+    assert isinstance(refused.value, ComputationTimeoutError)    # so every existing `except ComputationTimeoutError` copes
+    assert refused.value.abandoned == 3 and refused.value.label == "innocent bystander"
+
+
+def test_work_is_accepted_again_as_soon_as_the_backlog_clears(monkeypatch):
+    monkeypatch.setattr(tu, "MAX_ABANDONED", 2)
+    _wait_until_nothing_is_abandoned()
+    release = threading.Event()
+    for _ in range(2):
+        with pytest.raises(ComputationTimeoutError):
+            run_with_timeout(lambda: release.wait(30), timeout=0.05)
+    with pytest.raises(ComputationBusyError):
+        run_with_timeout(lambda: 1, timeout=1.0)
+    release.set()
+    _wait_until_nothing_is_abandoned()
+    assert run_with_timeout(lambda: 1, timeout=1.0) == 1
+
+
+def test_a_refused_call_is_logged(hang, monkeypatch, caplog):
+    monkeypatch.setattr(tu, "MAX_ABANDONED", 1)
+    with pytest.raises(ComputationTimeoutError):
+        run_with_timeout(hang, timeout=0.05)
+    seen = []
+    monkeypatch.setattr(tu.logger, "warning", lambda msg, *a: seen.append(msg % a))
+    with pytest.raises(ComputationBusyError):
+        run_with_timeout(lambda: 1, timeout=1.0, label="queued")
+    assert any("Refusing to start (queued)" in m and "1 timed-out" in m for m in seen)
+
+
+def test_the_functions_own_timeout_error_is_not_mistaken_for_a_computation_timeout():
+    """A socket timeout, say, raised BY the computation is a real error from the function, not 'this took too long'.
+    (concurrent.futures.TimeoutError is the builtin TimeoutError on Python 3.11+, so the old
+    `except futures.TimeoutError` could not tell them apart.)"""
+    def raises_builtin_timeout():
+        raise TimeoutError("the socket timed out")
+
+    with pytest.raises(TimeoutError, match="the socket timed out") as caught:
+        run_with_timeout(raises_builtin_timeout, timeout=5.0)
+    assert not isinstance(caught.value, ComputationTimeoutError)
+
+
+def test_keyboard_interrupt_style_base_exceptions_reach_the_caller():
+    class Stop(BaseException):
+        pass
+
+    def stops():
+        raise Stop("halt")
+
+    with pytest.raises(Stop, match="halt"):
+        run_with_timeout(stops, timeout=5.0)
+
+
+def test_calls_from_many_threads_run_side_by_side_not_four_at_a_time():
+    """With the old shared pool of four workers, twelve 0.3 s calls took at least three rounds (0.9 s)."""
+    results, errors = [], []
+
+    def caller(i):
+        try:
+            results.append(run_with_timeout(lambda: (time.sleep(0.3), i)[1], timeout=5.0))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    callers = [threading.Thread(target=caller, args=(i,)) for i in range(12)]
+    started = time.time()
+    for t in callers:
+        t.start()
+    for t in callers:
+        t.join()
+    elapsed = time.time() - started
+    assert not errors and sorted(results) == list(range(12))
+    assert elapsed < 0.8
+
+
+def test_worker_threads_are_daemons_named_for_the_app():
+    seen = {}
+
+    def peek():
+        t = threading.current_thread()
+        seen["daemon"], seen["name"] = t.daemon, t.name
+
+    run_with_timeout(peek, timeout=5.0)
+    assert seen == {"daemon": True, "name": "mrs-computation"}
+
+
+def test_a_hung_computation_does_not_keep_the_process_from_exiting():
+    """A ThreadPoolExecutor's workers are joined at interpreter shutdown, so one stuck SymPy call would have made
+    the app impossible to quit. Daemon threads are not."""
+    script = textwrap.dedent("""
+        import sys, time
+        sys.path.insert(0, ".")
+        from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
+        try:
+            run_with_timeout(lambda: time.sleep(60), timeout=0.1)
+        except ComputationTimeoutError:
+            print("timed out, now exiting", flush=True)
+    """)
+    started = time.time()
+    proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0 and "timed out, now exiting" in proc.stdout
+    assert time.time() - started < 20                            # not the 60 s the stuck thread would hold it for
+
+
+def test_zero_timeout_still_returns_a_result_if_the_function_was_instant():
+    # the suite relies on timeout=0 meaning "it may or may not squeak in": neither outcome may crash
+    try:
+        assert run_with_timeout(lambda: 7, timeout=0.0) == 7
+    except ComputationTimeoutError:
+        pass

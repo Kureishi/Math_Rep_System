@@ -17,6 +17,7 @@ from modules.plotter import build_vector_plot, build_descent_path_plot, build_mo
 from modules.plot_snapshot import snapshot_vector_plot, snapshot_motion_diagram_gif
 from modules import history, chains
 from modules.exporter import build_markdown, build_pdf_bytes
+from ui.cache import cached
 from ui.common import snapshot_button, gif_download_button
 from ui.theme import badge_row
 
@@ -123,9 +124,11 @@ def render_motion_diagram(model: ProblemModel, report: VerificationReport):
                                       disabled=not show_strobes)
         a_values = trajectory.a_values if show_acceleration else None
         n_strobes = int(strobe_count) if show_strobes else 0
-        fig = build_motion_diagram(trajectory.t_values, trajectory.x_values, trajectory.v_values,
-                                     x_label=trajectory.x_label, x_unit=trajectory.x_unit,
-                                     t_unit=trajectory.t_unit, a_values=a_values, n_strobes=n_strobes)
+        fig = cached(
+            "motion_diagram", (trajectory, a_values, n_strobes),
+            lambda: build_motion_diagram(trajectory.t_values, trajectory.x_values, trajectory.v_values,
+                                         x_label=trajectory.x_label, x_unit=trajectory.x_unit,
+                                         t_unit=trajectory.t_unit, a_values=a_values, n_strobes=n_strobes))
         st.plotly_chart(fig, width="stretch", key="word_problem_motion_diagram")
         gif_download_button(
             key="motion_diagram",

@@ -130,6 +130,8 @@ math-rep-system/
 │   │                          #   with tests/test_app_modes.py enforcing the two can't drift
 │   ├── common.py                # helpers shared by several pages (upload-size guard,
 │   │                          #   snapshot/download buttons, query-param syncing, ...)
+│   ├── cache.py                 # per-session cache keyed by the CONTENT of a result's inputs, so
+│   │                          #   a rerun rebuilds only what its widget changed (figures, ODE solves)
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
 │   │                          #   badges, button/spacing polish -- called once from app.py),
 │   │                          #   render_hero(), badge()/badge_row(), and dark_mode_css()
@@ -281,9 +283,10 @@ math-rep-system/
     ├── proof.py                      # symbolic proof mode -- renders the actual sequence of
     │                              #   SymPy simplification passes that prove an equivalence,
     │                              #   not just the final True/False
-    ├── timeout_utils.py              # configurable timeout wrapper (ThreadPoolExecutor-based,
+    ├── timeout_utils.py              # configurable timeout wrapper (a daemon thread per call,
     │                              #   Windows-safe -- no signal.alarm) around every SymPy-heavy
-    │                              #   call, so pathological input can't hang the session
+    │                              #   call, so pathological input can't hang the session; at most
+    │                              #   MAX_ABANDONED timed-out computations may still be running
     ├── app_logging.py                # rotating WARNING+ log file (data/app.log) -- wired in at
     │                              #   3 gateway points (chat(), extract_json(), run_with_timeout())
     │                              #   for near-complete failure coverage without touching every

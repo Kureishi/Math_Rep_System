@@ -11,6 +11,7 @@ from modules.plotter import build_chain_sweep_plot, build_chain_flow_plot
 from modules.plot_snapshot import snapshot_chain_sweep_plot, snapshot_chain_flow_gif
 from modules import chains
 from modules.chains import InputBinding
+from ui.cache import cached
 from ui.common import format_download_button, gif_download_button
 
 
@@ -150,7 +151,8 @@ def render_chains_tab(client: LMStudioClient):
             st.caption("Each step as a node, with the value it handed to later steps written on the link, and "
                         "inputs typed in by hand shown as small squares above their step. Press Play to watch "
                         "the chain resolve one step at a time.")
-            st.plotly_chart(build_chain_flow_plot(flow), width="stretch", key=f"chain_flow_{chosen_id}")
+            st.plotly_chart(cached(f"chain_flow:{chosen_id}", (flow,), lambda: build_chain_flow_plot(flow)),
+                             width="stretch", key=f"chain_flow_{chosen_id}")
             for s in flow.steps:
                 st.write(f"- {step_caption(flow, s.position)}")
             gif_download_button(key=f"chain_flow_{chosen_id}", file_stem="chain_flow",

@@ -31,6 +31,7 @@ from modules.plot_snapshot import (
     snapshot_sweep_heatmap,
     snapshot_rotating_surface_gif,
 )
+from ui.cache import cached
 from ui.common import format_download_button, snapshot_button, gif_download_button
 
 
@@ -75,7 +76,8 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                                 "implied by the dependencies -- the earliest each quantity can be found "
                                 "from the givens -- rather than a trace of the solver's own internal steps.")
                     frames = replay_frames(dep_nodes, dep_edges, stages)
-                    st.plotly_chart(build_solve_order_replay(dep_nodes, dep_edges, frames),
+                    st.plotly_chart(cached("solve_order_replay", (dep_nodes, dep_edges, frames),
+                                           lambda: build_solve_order_replay(dep_nodes, dep_edges, frames)),
                                      width="stretch", key="solve_order_replay")
                     st.markdown("\n".join(f"{i}. {describe_stage(s, dep_nodes)}" for i, s in enumerate(stages, 1)))
                     gif_download_button(

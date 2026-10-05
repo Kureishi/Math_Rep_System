@@ -19,6 +19,7 @@ from modules.pde_utils import (
 from modules.pde_field import evaluate_field
 from modules.plot_snapshot import snapshot_space_time_gif
 from modules.plotter import build_space_time_view
+from ui.cache import cached
 from ui.common import gif_download_button, live_parse_preview, persist_on_click
 
 
@@ -38,7 +39,9 @@ def _render_pde_time_animation(solution_expr, length: float, t_max: float, key_p
     if field.error:
         st.caption(f"Could not build an animated view: {field.error}")
         return
-    st.plotly_chart(build_space_time_view(field, y_label=y_label), width="stretch", key=f"{key_prefix}_anim")
+    st.plotly_chart(cached(f"space_time:{key_prefix}", (field, y_label),
+                           lambda: build_space_time_view(field, y_label=y_label)),
+                     width="stretch", key=f"{key_prefix}_anim")
     gif_download_button(key=f"{key_prefix}_anim", file_stem=f"{key_prefix}_evolution",
                          render_fn=lambda: snapshot_space_time_gif(field, y_label=y_label))
 

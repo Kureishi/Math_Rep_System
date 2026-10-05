@@ -516,17 +516,28 @@ See `ARCHITECTURE.md` for the full design. In short:
     configurable time bound (`config.settings.computation_timeout_seconds`,
     default 10s -- adjustable live from "⚙️ Advanced settings", no
     restart needed) instead of being able to hang the session
-    indefinitely on pathological input. Built on
-    `concurrent.futures.ThreadPoolExecutor`, deliberately NOT
-    `signal.alarm`: this app targets Windows as a first-class
-    environment, and `SIGALRM` doesn't exist there -- a signal-based
-    timeout would silently do nothing on the platform it's most meant
-    to protect. The honest tradeoff, stated rather than glossed over:
+    indefinitely on pathological input. Built on a worker thread per
+    call, deliberately NOT `signal.alarm`: this app targets Windows as a
+    first-class environment, and `SIGALRM` doesn't exist there -- a
+    signal-based timeout would silently do nothing on the platform it's
+    most meant to protect. The honest tradeoff, stated rather than
+    glossed over:
     Python can't forcibly kill a running thread, so a genuinely hung
     computation's worker thread keeps running in the background
     (consuming CPU) even after the app has moved on and shown a timeout
     message -- this protects the UI from LOOKING hung, it doesn't
-    reclaim the CPU from truly runaway work. A multiprocessing-based
+    reclaim the CPU from truly runaway work. That abandoned work is
+    bounded and visible rather than silent: at most
+    `timeout_utils.MAX_ABANDONED` (8) timed-out computations may still be
+    running (`abandoned_computations()` says how many); beyond that new
+    calls are refused immediately with `ComputationBusyError` -- a
+    `ComputationTimeoutError`, so existing handlers cope -- whose message
+    says why. (This used to be a shared pool of four workers: four hangs
+    filled it, and from then on every later call, even `1 + 1`, was
+    reported as timed out until the hung work happened to finish.) The
+    workers are daemon threads, so a stuck one can't keep the app from
+    quitting, and the function's own `TimeoutError` (a socket timeout,
+    say) is no longer mistaken for a computation timeout. A multiprocessing-based
     approach could forcibly terminate it, at the cost of process-spawn
     overhead on every single call including the overwhelming majority
     that finish in milliseconds -- not the right tradeoff for an
@@ -1581,6 +1592,25 @@ sample payloads and fixtures if you want to add more.
   helpers now return a connection that commits (or rolls back) *and* closes
   when the `with` block ends; `tests/test_db_util.py` checks all four, with
   `ResourceWarning` promoted to an error.
+- **Reruns reuse unchanged work** (`ui/cache.py`). Streamlit re-executes the
+  whole script on every widget interaction, so moving one slider used to rebuild
+  every figure and re-solve every differential equation on the page: about two
+  seconds on an ODE page, almost all of it for things the slider had nothing to
+  do with (an animated Plotly figure with 60 frames takes a second or more to
+  construct). `cached(key, parts, compute)` returns the previous result unless
+  `parts` -- every input it depends on -- changed; ODE and recurrence solves are
+  cached by the model's content (`cached_by_model`). Staleness is prevented by
+  what is hashed: inputs are fingerprinted by CONTENT (array bytes and shape,
+  expression structure, dataclass fields), never by identity or `repr`, and
+  anything that can't be hashed that way makes the call recompute -- slower,
+  never wrong. One entry is kept per call site, 64 at most. Measured on the
+  spiral ODE example, a rerun after moving an unrelated slider went from about
+  2.0 s to 0.2 s; the page the slider belongs to still rebuilds only the figure
+  it feeds. Cached figures are shared between reruns, so they are passed straight
+  to `st.plotly_chart` and never modified. (`st.fragment` was considered and
+  deliberately NOT used: a fragment re-runs alone, so state it changes -- the
+  "include in report" toggles, say -- would not update the sections outside it
+  until the next full run, and the test harness can't reproduce partial reruns.)
 - **Hypothesis deadlines are disabled suite-wide** (`tests/conftest.py`).
   Nearly every property test drives SymPy, whose first call on a fresh
   expression shape warms internal caches (a cold call can take several

@@ -20,6 +20,7 @@ from modules.plotter import (
     build_phase_portrait, build_cobweb_plot, build_ode_error_plot, build_phase_trail_animation,
     build_time_linked_view,
 )
+from ui.cache import cached, cached_by_model
 from ui.common import snapshot_button, gif_download_button
 from modules.workspace import Workspace
 
@@ -27,7 +28,7 @@ from modules.workspace import Workspace
 def render_ode_solution(ws: Workspace, model: ProblemModel):
     """ODE solution: plot + evaluate-at-a-point."""
     # ---- ODE solution: plot + evaluate-at-a-point
-    ode_solutions = solve_ode(model)
+    ode_solutions = cached_by_model("solve_ode", model, lambda: solve_ode(model))
     if ode_solutions:
         st.markdown("### Differential equation solution")
         for func_name, sol in ode_solutions.items():
@@ -109,7 +110,8 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
             if not cmp_.applicable:
                 st.caption(f"Couldn't compare over that range: {cmp_.reason}")
             else:
-                st.plotly_chart(build_ode_error_plot(cmp_), width="stretch", key=f"odeerr_{label}")
+                st.plotly_chart(cached(f"odeerr:{label}", (cmp_,), lambda: build_ode_error_plot(cmp_)),
+                                 width="stretch", key=f"odeerr_{label}")
                 if cmp_.ok:
                     st.success(f"Agreement everywhere shown (max relative error {cmp_.max_rel_error:.2e}).")
                 else:
@@ -175,11 +177,15 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                 tys = np.real(np.array([complex(fy(tv)) for tv in ts]))
                 pad_x = 0.2 * max(float(txs.max() - txs.min()), 1.0)
                 pad_y = 0.2 * max(float(tys.max() - tys.min()), 1.0)
-                phase_fig = build_phase_portrait(
-                    dx_f, dy_f,
-                    (float(txs.min() - pad_x), float(txs.max() + pad_x)),
-                    (float(tys.min() - pad_y), float(tys.max() + pad_y)),
-                    x_label=fname_x, y_label=fname_y, trajectory=(txs, tys))
+                phase_fig = cached(
+                    f"phase:{fname_x}:{fname_y}",
+                    (dx_expr, dy_expr, float(txs.min() - pad_x), float(txs.max() + pad_x),
+                     float(tys.min() - pad_y), float(tys.max() + pad_y), fname_x, fname_y, txs, tys),
+                    lambda: build_phase_portrait(
+                        dx_f, dy_f,
+                        (float(txs.min() - pad_x), float(txs.max() + pad_x)),
+                        (float(tys.min() - pad_y), float(tys.max() + pad_y)),
+                        x_label=fname_x, y_label=fname_y, trajectory=(txs, tys)))
                 st.plotly_chart(phase_fig, width="stretch", key=f"phase_{fname_x}_{fname_y}")
 
                 # ---- the same system as a MOVIE: points flowing along the field, trailing behind them
@@ -191,11 +197,15 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                                            "real initial condition, to show the flow around the solved "
                                            "trajectory (blue) rather than only along it.")
                 starts = ring_of_starts((float(txs[0]), float(tys[0])), x_rng, y_rng, n_extra)
-                paths = [(txs, tys)] + phase_flow(dx_f, dy_f, starts, float(ts[-1] - ts[0]), n_points=len(ts))
-                st.plotly_chart(
-                    build_phase_trail_animation(dx_f, dy_f, x_rng, y_rng, paths, ts, x_label=fname_x,
-                                                  y_label=fname_y),
-                    width="stretch", key=f"phase_trail_{fname_x}_{fname_y}")
+                paths = cached(f"phase_paths:{fname_x}:{fname_y}",
+                               (dx_expr, dy_expr, starts, ts, txs, tys),
+                               lambda: [(txs, tys)] + phase_flow(dx_f, dy_f, starts, float(ts[-1] - ts[0]),
+                                                                  n_points=len(ts)))
+                trail_fig = cached(
+                    f"phase_trail:{fname_x}:{fname_y}", (dx_expr, dy_expr, x_rng, y_rng, paths, ts, fname_x, fname_y),
+                    lambda: build_phase_trail_animation(dx_f, dy_f, x_rng, y_rng, paths, ts, x_label=fname_x,
+                                                          y_label=fname_y))
+                st.plotly_chart(trail_fig, width="stretch", key=f"phase_trail_{fname_x}_{fname_y}")
                 gif_download_button(
                     key=f"phase_trail_{fname_x}_{fname_y}", file_stem=f"phase_flow_{fname_x}_{fname_y}",
                     render_fn=lambda pa=paths, xr=x_rng, yr=y_rng, fx_=fname_x, fy_=fname_y, tt=ts:
@@ -205,9 +215,10 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                 st.markdown("**Time-linked view**")
                 st.caption("Drag the slider (or press Play): the cursor on the time series and the marker on "
                             "the phase plane are the same instant.")
-                st.plotly_chart(
-                    build_time_linked_view(ts, [(fname_x, txs), (fname_y, tys)], field=(dx_f, dy_f)),
-                    width="stretch", key=f"phase_linked_{fname_x}_{fname_y}")
+                linked_fig = cached(
+                    f"phase_linked:{fname_x}:{fname_y}", (dx_expr, dy_expr, ts, fname_x, fname_y, txs, tys),
+                    lambda: build_time_linked_view(ts, [(fname_x, txs), (fname_y, tys)], field=(dx_f, dy_f)))
+                st.plotly_chart(linked_fig, width="stretch", key=f"phase_linked_{fname_x}_{fname_y}")
                 gif_download_button(
                     key=f"phase_linked_{fname_x}_{fname_y}", file_stem=f"time_linked_{fname_x}_{fname_y}",
                     render_fn=lambda fx_=fname_x, fy_=fname_y, xs_=txs, ys_=tys, tt=ts:
@@ -219,7 +230,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
 def render_recurrence_solution(ws: Workspace, model: ProblemModel):
     """Recurrence solution: discrete plot + evaluate-at-a-point."""
     # ---- recurrence solution: discrete plot + evaluate-at-a-point
-    recurrence_solutions = solve_recurrence(model)
+    recurrence_solutions = cached_by_model("solve_recurrence", model, lambda: solve_recurrence(model))
     if recurrence_solutions:
         st.markdown("### Recurrence (sequence) solution")
         for func_name, closed_form in recurrence_solutions.items():
