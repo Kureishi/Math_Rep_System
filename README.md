@@ -50,1571 +50,215 @@ math, plotting) runs locally -- nothing leaves your machine.
 
 ## How it works
 
-See `ARCHITECTURE.md` for the full design. In short:
+The LLM translates and narrates; SymPy does and checks the math. The full design
+is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-1. **Extraction** -- your problem text (or LLM-transcribed image) is sent to
-   the reasoning model with a strict JSON schema, producing variables and
-   relations, plus an optional **objective** for optimization problems.
-   Each relation is tagged as a plain **equation** (which may use
-   `Piecewise` for tiered/conditional formulas like tax brackets, with no
-   separate kind needed), an **inequality** (a constraint like `v <= 25`),
-   an **ODE** (a differential equation for a declared function like
-   `y(t)`), or a **recurrence** (a difference equation like `a(n+1) =
-   a(n) + 5`) -- each kind is parsed, verified, and solved differently.
-2. **Verification** -- SymPy independently checks that relations parse,
-   balance numerically against known values (equations -- Piecewise-aware,
-   selecting the correct branch), are actually satisfied by the given
-   numbers (inequalities), or symbolically satisfy the original
-   differential/difference equation(s) -- via `sp.checkodesol` for a
-   standalone ODE, substituting every function's solution into every
-   equation simultaneously for a coupled ODE system, or substituting a
-   recurrence's closed form back into itself (numeric-sampling fallback
-   when the exact symbolic residual doesn't land on zero due to floating-
-   point noise, e.g. Fibonacci-style solutions mixing `sqrt(5)` with float
-   initial conditions). Optimization problems get their own two-part check:
-   the gradient is confirmed to actually be zero at the claimed critical
-   point, and the min/max classification (via the second-derivative test
-   or the Hessian's eigenvalue signs) is confirmed to match what was
-   requested -- plus an honest feasibility check against any inequality
-   constraints, since finding the true constrained optimum against
-   inequalities (not just equalities) is out of scope (full KKT analysis)
-   and the app says so rather than silently presenting an unconstrained
-   answer as the constrained one. Plus a physical-unit consistency check
-   via `sympy.physics.units` for equations, inequalities, and ODEs (the
-   dimension of d^n(f)/dx^n is dim(f)/dim(x)^n; Piecewise equations get
-   each branch checked separately and required to agree, since sympy's own
-   dimension machinery silently mishandles a Piecewise as a whole). Every
-   passing check also reports *how close* it came to its own tolerance
-   (`essentially exact` vs `borderline`), not just pass/fail -- a residual
-   of 1e-9 and one that barely cleared the bar look different in the UI.
-   For algebraic equations, a *second*, independent LLM call re-solves the
-   original word problem from scratch; if its numeric answer disagrees
-   with SymPy's solve by more than ~2%, the derivation is considered
-   flawed and automatically retried (up to `max_verification_retries`
-   times) with the discrepancy fed back to the model.
-3. **Step-by-step** -- SymPy computes the actual steps (substitute -> isolate
-   -> simplify for equations; `reduce_inequalities` for constraints;
-   `dsolve`/`dsolve_system` general solution -> apply initial conditions
-   for ODEs, coupled or standalone; `rsolve` for recurrences; direct
-   calculus or Lagrange multipliers for optimization, showing any
-   constraint-elimination substitution as its own step); the LLM only
-   narrates those already-verified steps in plain language, rather than
-   being trusted to invent
-   the math live.
-4. **Alternative scenarios** -- a separate, low-stakes LLM call suggests
-   other real-world contexts with the same mathematical structure.
-5. **Optimization** -- given an objective to minimize/maximize, critical
-   points are found via direct calculus (unconstrained) or Lagrange
-   multipliers (equality-constrained, when the constraint can't be cleanly
-   substituted away), classified min/max/saddle via the second-derivative
-   test or the Hessian's eigenvalue signs, and checked against any
-   inequality constraints for feasibility. Equality constraints are never
-   silently dropped: each is either used to eliminate a variable (and then
-   substituted out of every other constraint too), found redundant, or --
-   if sympy can't isolate a variable from it, or it pins the last variable
-   that has to stay free -- the whole problem falls back to Lagrange
-   multipliers instead. An unsolvable Lagrange system is reported as an
-   error, never as an answer that ignores the constraint.
-6. **Workspace & plotting** -- solved values can be pushed into a session
-   workspace for reuse in later calculations (reference them by name in a
-   new problem statement -- the model is automatically told their value).
-   Any equation with one free parameter gets a live 2D line plot; with two
-   free parameters, a live 3D surface plot. Multiple inequality constraints
-   sharing two free variables get a shaded feasible-region plot (every
-   constraint satisfied simultaneously). ODE solutions get their own plot
-   of the solution curve plus an "evaluate at a specific point" control
-   (e.g. population after 10 years); recurrence solutions get the discrete
-   analog -- a stem/marker plot rather than a connected line, since a
-   sequence is only defined at integer indices.
-7. **Dimensional checking** -- alongside numeric-balance checking, each
-   equation, inequality, ODE, and recurrence is independently checked for
-   physical-unit consistency via `sympy.physics.units`, catching errors a
-   numeric check can't (e.g. equating a distance to a velocity, or giving
-   a decay-rate constant in the wrong dimension -- both could pass
-   numerically by pure coincidence but never pass dimensionally).
-8. **History** -- every solved problem is saved to a local SQLite file
-   (`data/history.db`, gitignored) and listed in the sidebar. Loading a
-   past problem restores everything -- equations, verification, steps,
-   scenarios -- with no new LLM calls.
-9. **Export** -- download any solved problem as Markdown (LaTeX equations
-   included) or a typeset PDF (equations rendered via matplotlib's
-   mathtext -- no system LaTeX install needed). Any plot (2D line, 3D
-   surface, feasible region, ODE solution curve, or recurrence sequence)
-   has a "📸 Include this plot in the report" button -- the interactive
-   version only lives in the browser session, so this opts a specific view
-   (with whatever parameter values were selected at the time) into the
-   exported document, with a caption spelling out exactly which values
-   were used. Static images are re-rendered via matplotlib rather than a
-   screenshot of the Plotly figure, deliberately avoiding `kaleido`: as of
-   Plotly's current
-   release, `kaleido>=1.0` requires a separately-installed Chrome browser,
-   which conflicts with this app's "pip install and go" portability goal
-   the same way requiring a system LaTeX install would have.
+1. **Extraction.** The reasoning model turns the problem text (or a photo) into
+   JSON, validated against a pydantic schema: variables, relations, and an
+   optional objective. Each relation is an **equation** (`Piecewise` allowed),
+   **inequality**, **ODE** or **recurrence**, and each kind is parsed, verified
+   and solved differently.
+2. **Verification.** SymPy checks every relation independently, and each check
+   reports how close it came to its tolerance (*essentially exact* vs
+   *borderline*), not just pass/fail:
+   - equations balance numerically; inequalities hold for the given numbers;
+   - ODE and recurrence solutions satisfy the original equation (coupled
+     systems are solved together);
+   - optimisation results have zero gradient and the right min/max/saddle
+     classification, plus a feasibility check against inequality constraints
+     (full KKT analysis is out of scope, and the app says so);
+   - every relation passes a physical-unit consistency check;
+   - for algebraic equations, a second, independent LLM call re-solves the
+     problem from scratch. If it disagrees with SymPy by more than about 2%, the
+     derivation is retried (up to `max_verification_retries`) with the
+     discrepancy fed back to the model.
+3. **Solution steps.** SymPy computes the steps (substitute, isolate, simplify;
+   `dsolve` plus initial conditions; `rsolve`; calculus or Lagrange multipliers),
+   and the LLM only narrates them. If `sp.solve` finds no closed form, a clearly
+   labelled numerical fallback is used instead.
+4. **Scenarios.** A separate, low-stakes LLM call suggests other real-world
+   contexts with the same mathematical structure.
 
-10. **Matrix systems** -- whenever the algebraic part of a problem is a
-    genuine linear system (two or more `equation`-kind relations sharing
-    two or more unknowns -- circuits, coupled springs, Markov chains,
-    input-output economic models), it's additionally represented
-    explicitly as `A x = b` (`modules/matrix_utils.py`), not just handed
-    to `sp.solve()` as an opaque list. The app shows the coefficient
-    matrix itself, its determinant and eigenvalues when square (useful
-    for stability/vibration problems), and classifies the system via
-    rank comparison (`rank(A)` vs `rank([A|b])`) as having a unique
-    solution, infinitely many solutions, or being outright inconsistent
-    -- rather than `sp.solve()`'s opaque "found nothing" for the latter
-    two cases. This is purely an additional structural VIEW alongside
-    the existing scalar solve path; the numeric answer for each target
-    is unchanged. "Genuine system" specifically excludes anything
-    sequentially solvable by plain substitution -- e.g. `a = (v_f-v_i)/t`
-    followed by `d = 0.5*a*t^2 + t*v_i` merely shares the model with two
-    unknowns (`a`, `d`), but the first equation determines `a` completely
-    on its own, so no matrix view is shown for it. Only equations that
-    genuinely can't be resolved one unknown at a time (checked via
-    `matrix_utils._is_sequentially_solvable`, e.g. `2x+3y=8, x-y=1`,
-    where neither equation alone isolates either variable) get the A x=b
-    treatment.
-11. **Vectors and basic geometry** -- a variable can be declared
-    `"is_vector": true` with a `"components"` list (e.g. a force `F`
-    with components `Fx`, `Fy`), and used directly in equations via
-    `dot()`, `cross()`, `magnitude()`/`norm()`, `unit()`,
-    `angle_between()`/`angle_between_deg()`, `distance()`, and `Point()`
-    (`modules/vector_utils.py`) -- backed by a genuine SymPy column
-    `Matrix`, not a scalar the LLM had to pre-decompose by hand. A
-    force/displacement/velocity stays a real vector object all the way
-    up to the point a dot/cross product collapses it to the scalar the
-    equation actually needs (e.g. `Eq(W, dot(F, d))` for work, or
-    `Eq(tau, cross(r, F))` for 2D torque) -- so it flows through the
-    existing equation/verification/solving pipeline unchanged; no new
-    equation kind was needed. The app shows each declared vector's
-    numeric components, magnitude, and direction once its components
-    are filled in.
-12. **Curve/data fitting** (`modules/curve_fitting.py`) -- a genuinely
-    different pipeline, reachable via the "📈 Curve fitting" mode at the
-    top of the app: input is a table of (x, y) numbers (pasted or
-    uploaded as a 2-column CSV), not an LLM-extracted word problem, and
-    the output is a fitted symbolic model plus fit-quality metrics
-    (R², RMSE, per-point residuals) rather than a verified derivation --
-    there's no independent-derivation cross-check to run against a
-    curve fit, so the metrics themselves are the honesty check. Built-in
-    families (linear, polynomial, exponential, power, logarithmic) are
-    all solved via `numpy.polyfit` after linearizing (e.g. exponential
-    fits `ln(y)` against `x`) -- exact, non-iterative, and deliberately
-    avoids adding scipy as a dependency. A "custom" family lets you fit
-    any expression that's linear in its named parameters (e.g.
-    `a*sin(x) + b*x + c`) via plain linear least squares
-    (`numpy.linalg.lstsq`) -- genuinely nonlinear custom models (e.g.
-    `a*sin(b*x)`) are explicitly rejected with a specific explanation
-    rather than silently attempted or requiring scipy; that's a
-    conscious portability tradeoff, not a hidden limitation.
-13. **Equivalence/simplification checking** (`modules/equivalence.py`)
-    -- "are these two expressions the same" as a standalone utility
-    (reachable via "🔁 Check equivalence"), not a new representation
-    capability. Built on `sp.Expr.equals()`, which tries symbolic
-    simplification first and falls back to numeric sampling; when that's
-    still inconclusive (e.g. `sqrt(x**2)` vs `x`, which is only equal
-    for `x >= 0`), this module does its own targeted sampling and
-    reports *which* tested points agreed and disagreed rather than a
-    bare "undetermined."
-14. **Uncertainty/error propagation** (`modules/uncertainty.py`) -- a
-    variable can carry an optional `"uncertainty"` field (an absolute
-    +/- tolerance -- see the extraction prompt's rules for converting a
-    stated percentage into one). For an algebraic target that depends on
-    such a variable, the solve steps get one extra "Propagate
-    measurement uncertainty" step: standard first-order error
-    propagation, `sigma_f^2 = sum_i (df/dxi)^2 * sigma_xi^2`, computed by
-    re-solving the UN-substituted system symbolically (see
-    `solve_symbolic_for_target`) so there's a formula left to
-    differentiate against each known. Reports not just the combined
-    uncertainty but which input dominates it (`dominant_source`) --
-    useful for knowing which measurement to tighten if the answer needs
-    to be more precise. Deliberately scoped to algebraic targets only,
-    same as the matrix-system detection: ODE/recurrence/optimization
-    solutions don't have an equally clean closed form to differentiate
-    in general.
-15. **Domain-of-validity tracking** (`modules/domain_utils.py`) -- walks
-    each derived equation's expression tree once, structurally
-    identifying where it's undefined (denominators that must not be
-    zero, even roots requiring a nonnegative argument, logs requiring a
-    positive argument, inverse sine/cosine requiring an argument in
-    [-1, 1]), then checks those conditions against the SPECIFIC known
-    values given in the problem. An actively-violated restriction (e.g.
-    dividing by a variable that happens to be 0) is reported as a
-    genuine verification FAILURE via `_domain_checks` in `verifier.py`
-    -- not a silent NaN three steps later. A restriction that's
-    satisfied, or can't yet be checked (involves a still-unknown
-    symbol), is still surfaced as an informational note in a dedicated
-    "Domain of validity" panel, since knowing a formula's boundary of
-    validity is useful even when today's inputs don't cross it.
-    Deliberately limited to these four structural sources rather than a
-    full domain solve (`sp.calculus.util.continuous_domain` only handles
-    one free variable at a time, and most formulas here have several) --
-    and deliberately excludes `tan()`-style infinitely-repeating
-    singularities, which would be more noise than signal for word
-    problems.
-16. **Confidence report** (`VerificationReport.confidence_report()` in
-    `modules/verifier.py`) -- aggregates the (often 10-20+) individual
-    checks that already run into one category-grouped view: a 0-1
-    overall score, a pass count per category (structural, dimensional,
-    independent cross-check, domain validity, matrix/system consistency,
-    and any ODE/recurrence/optimization/inequality-specific checks that
-    ran), and an explicit list of critical failures -- rather than
-    making a person scan a flat list of 15 checks to get a sense of "how
-    much should I trust this." The score is 1.0 only when every
-    margin-bearing check passed with an essentially-exact margin, and is
-    capped below 0.5 the moment ANY check fails outright, regardless of
-    how many others passed. Categories are inferred from each check's
-    existing label text (`_infer_category`) rather than requiring every
-    `report.add(...)` call site across the codebase to be updated with
-    an explicit category -- a lighter-touch way to get the aggregation
-    without an invasive refactor.
-17. **Runnable code export** (`modules/code_export.py`) -- "get this as
-    Python" for any algebraic, ODE-closed-form, or recurrence-closed-
-    form target: renders the derived formula as actual Python SOURCE
-    TEXT via `sp.pycode` (not `sp.lambdify`, which builds a live
-    compiled closure that can't be saved to a file or read by a
-    person). Reuses `uncertainty.solve_symbolic_for_target` to get a
-    formula purely in terms of named inputs (re-solving the
-    UN-substituted system, since by the time the ordinary step trace
-    calls `sp.solve()` the knowns are already plain numbers with no
-    symbolic trace left). A coupled target (e.g. displacement depending
-    on an also-unknown acceleration) exports correctly reduced to only
-    the genuinely-known inputs, since the whole system is solved
-    together. "Get all formulas as one Python file" bundles every
-    target into one module with a demo `__main__` block calling each
-    function with the problem's own known values. Deliberately excludes
-    optimization results (a single numeric critical point isn't a
-    general-purpose formula to export).
-18. **Physical-validity filtering** (`modules/physical_validity.py`) --
-    when `sp.solve()` returns more than one root (a quadratic
-    time-of-flight equation is the textbook case), the raw result has no
-    notion of which branch is physically meaningful; the solver used to
-    always take branch `[0]` unconditionally, which for the classic
-    `-4.9*t**2 + 20*t + 1.5 = 0` genuinely returns a NEGATIVE time
-    first. A variable can now be declared with a `"domain"` field
-    (`"nonnegative"`, `"positive"`, `"nonpositive"`, `"negative"`); when
-    a target has multiple roots, each is checked against every declared
-    domain, non-conforming roots are discarded with an explicit reason
-    shown as a solve step ("Discard a non-physical root"), and the
-    remaining (physically valid) root is used as the answer. If no
-    domain is declared, behavior is unchanged from before this feature
-    existed -- this is opt-in, matching how vectors/uncertainty are
-    opt-in, not a silent behavior change for every existing problem.
-19. **Unit conversion sweep** (`modules/unit_conversion.py`) -- once an
-    answer's unit is known, offers it in a handful of common alternate
-    units for the same dimension (m/s <-> km/h <-> mph <-> ft/s, m <->
-    ft <-> mi <-> km, kg <-> lb <-> g, etc.), shown in an "Also equals
-    ..." expander and included in exported reports. Built entirely on
-    `units_checker.py`'s existing unit-parsing/dimension
-    infrastructure (`parse_unit`, `dimension_of`, `dims_equivalent`) --
-    no second unit-string format to keep in sync. Deliberately excludes
-    Celsius/Fahrenheit/Kelvin conversions: those are AFFINE (value *
-    scale + offset), not pure multiplicative scale factors, and
-    `sympy.physics.units.convert_to()` only handles the multiplicative
-    case -- silently applying it would produce a wrong number that
-    looks plausible, so temperature-scale conversion is left out rather
-    than faked.
-20. **"Grade my work"** (`modules/grading.py`) -- a student (or teacher)
-    pastes their own attempted work for an algebraic target, one step
-    per line, and gets back three separate diagnoses instead of just a
-    right/wrong verdict: a FORMULA check (is their starting equation
-    mathematically equivalent to one of the problem's own verified
-    relations -- solved both for the target symbol and compared via
-    equivalence.py's tested logic, so a correctly *rearranged* equation
-    like `a*t = v_f - v_i` instead of `a = (v_f-v_i)/t` is recognized as
-    the same formula, not flagged as different), an ARITHMETIC check per
-    line (does each side agree numerically once known values are
-    substituted), and a FINAL-ANSWER check against the system's own
-    verified value. Deliberately not a literal step-by-step diff against
-    the system's own derivation -- two valid derivations of the same
-    formula can look completely different, so diffing them directly
-    would flag correct-but-differently-ordered work as wrong. Caught two
-    real bugs during development: SymPy auto-evaluates `Eq()` of two
-    pure numbers straight to a bare `True`/`False` rather than staying
-    an `Eq` object (so `Eq(12/6, 3)` needed its own detection path, not
-    just an `isinstance(Eq)` check), and a line whose left side is just
-    the (still-unknown) target symbol itself was wrongly being marked
-    "not checkable" before that got fixed.
-21. **Reverse generation / worksheet variants** (`modules/worksheet.py`)
-    -- "Generate worksheet variants" asks the LLM to write NEW word
-    problem TEXT sharing the current problem's own verified equation
-    structure, with different numbers and a different story --
-    inverting `scenarios.py`'s "where else does this apply" into "give
-    me a fresh problem to hand a student." Deliberately does NOT ask the
-    LLM for the new problem's answer or equations too -- an LLM's own
-    stated numeric answer for a problem it just invented isn't
-    trustworthy on its own, which is this whole app's premise. Instead
-    each generated problem is meant to be pasted right back into the
-    main text input and solved through the exact same extract/verify
-    pipeline as any other problem, so a generated worksheet problem gets
-    verified by the same standard as everything else.
-22. **Multiple-method toggle** (`alternate_method_steps()` in
-    `solver.py`) -- an explicit "show me another way" per algebraic
-    target, shown only on request (never part of the default step
-    list). Always includes a back-substitution check: plug the already-
-    solved answer into the original equation(s) and confirm both sides
-    agree. When the target is part of a square coupled linear system, it
-    ALSO shows Cramer's rule (`x_i = det(A_i)/det(A)`) -- even if the
-    default view used plain substitution because that was the simplest
-    path for THAT target (see point 10's sequential-solvability note).
-    Required adding a `force=True` option to
-    `matrix_utils.build_linear_system`/`linear_system_view` so this
-    toggle can get at the coefficient matrix regardless of what the
-    default-view heuristic decided -- "show me a second way, on
-    request" is a different question from "what should the default
-    view be," so it gets its own bypass rather than fighting the
-    heuristic.
-23. **Worksheet/batch mode** (`modules/batch_solver.py`, "📚 Batch
-    solver") -- solve a whole problem set (pasted, separated by a blank
-    line or a `---` line) in one pass instead of running each problem
-    through the app individually and reassembling the results by hand.
-    Mirrors (rather than imports) the exact extract -> verify -> retry
-    -> compute_steps pipeline the single-problem flow uses, since that
-    flow is inline Streamlit script code, not an importable function --
-    mirroring it keeps batch mode from risking any change to the
-    already-working single-problem path. Narration/scenario generation
-    are off by default (each is an extra LLM round trip per problem,
-    and neither changes whether the math is right) but toggleable. One
-    bad problem in a batch of 20 doesn't take the other 19 down with it
-    -- every failure mode is caught per-problem. Produces a combined
-    Markdown report or a combined PDF (merged via `pypdf`, a new
-    dependency -- byte-concatenating separately-generated PDFs produces
-    a corrupt file; a real page-level merge is required).
-24. **"Find similar past problems"** (`modules/similarity.py` +
-    `history.find_similar()`) -- structural similarity based on
-    equation SHAPE, not problem-text wording: `a = (v_f-v_i)/t` and
-    `r = (p-q)/s` are recognized as the same underlying formula (used
-    with different variable names/domains) via `canonicalize_equation()`
-    replacing every plain `Symbol` with an anonymous placeholder while
-    leaving numeric coefficients and operator structure untouched, then
-    comparing problems by the Jaccard similarity of their canonicalized
-    equation-shape sets. A plain text/keyword search wouldn't catch a
-    car-acceleration problem and a chemistry-rate problem sharing the
-    same math; a literal equation-string match wouldn't either
-    (different variable names -> different strings). Every solved
-    problem's shape fingerprint is stored alongside it in SQLite (a new
-    `equation_shapes` column, added via a safe `ALTER TABLE` migration
-    so an existing local `history.db` from before this feature existed
-    doesn't break), and a "similar past problems" panel surfaces matches
-    for whatever's currently being solved. Scoped to plain-Symbol
-    equation/ode/recurrence relations -- ODE/recurrence FUNCTION names
-    (the "T" in `T(t)`) aren't themselves canonicalized, only symbols
-    appearing as plain `Symbol` nodes are, so two ODEs with the same
-    structure but different function names won't match quite as
-    strongly. Documented as a scope limitation, not a silent gap.
-25. **Sensitivity / what-if analysis** (`modules/sensitivity.py`) --
-    reuses `uncertainty.py`'s trick of re-solving the un-substituted
-    system symbolically to get the target as a formula in the knowns,
-    then sweeps ONE input across a range (default ±20%, holding every
-    other input fixed) to see how the answer moves.
-    `tornado_analysis()` ranks every input by how much it swings the
-    answer across its own range -- the classic "which input matters
-    most" tornado-chart view -- and a per-input sweep chart shows the
-    full curve, not just the two endpoints. Distinct from `uncertainty.py`'s
-    error propagation: that asks "how much does the answer move given
-    each input's STATED measurement error"; this asks "if I could
-    deliberately change this input, how much would the answer move,"
-    independent of whether any input carries a stated uncertainty at
-    all. Scoped to algebraic targets, same as `uncertainty.py`.
-26. **Algebra-rule tagging** (`modules/algebra_rules.py`) -- names which
-    algebraic TECHNIQUE was needed to isolate a target (linear,
-    quadratic, root, reciprocal, an inverse function, or "target on both
-    sides") as a "Technique" solve step. `sp.solve()` doesn't expose an
-    internal trace of the moves it makes, so rather than fabricate a
-    step sequence it never actually took, this does a structural
-    classification of the equation's shape instead -- honest about
-    being a classification, not a derivation, while still naming the
-    technique the way a textbook section heading would.
-27. **PDF/document batch import** (`extract_text_from_pdf()` +
-    numbered-list detection in `split_batch_text()`, both in
-    `batch_solver.py`) -- upload a PDF worksheet instead of retyping
-    every problem; text is pulled out via `pypdf` (already a
-    dependency -- no OCR, so a scanned/image-only PDF with no text
-    layer comes back empty rather than raising). Splitting now tries a
-    numbered-list pattern first ("1.", "2)", "Problem 3:") before
-    falling back to the `---`/blank-line delimiters, since PDF-extracted
-    text often loses blank-line spacing between problems even when the
-    original document had it, and worksheets are conventionally
-    numbered anyway. Verified the pattern doesn't false-positive on a
-    problem that happens to start with a decimal number ("3.5 kg of
-    ice...").
-28. **Dependency graph visualization** (`modules/dependency_graph.py`)
-    -- a diagram of which known/unknown variables feed into which
-    equations, useful once a problem has enough equations that it's not
-    obvious at a glance which pieces depend on which (a matrix system, a
-    coupled ODE pair, a chain of substitutions). Fixed three-column
-    layout (known inputs -> equations -> unknowns) rather than a
-    generic force-directed graph, since that's literally the
-    information flow the solving pipeline follows, and it avoids a
-    graph-layout dependency (e.g. networkx) for graphs that are always
-    small and naturally three-tiered. Uses each equation's LHS shape
-    (`Eq(single_symbol, expr)`) to distinguish a variable an equation
-    PRODUCES from one it merely DEPENDS ON -- important for a variable
-    used in more than one equation (e.g. an acceleration computed by one
-    equation and then consumed by a displacement formula), so it doesn't
-    misleadingly appear to be "produced" by every equation that
-    references it.
-29. **Grounded follow-up Q&A** (`modules/followup.py`) -- ask a question
-    about an already-solved problem via "Ask a follow-up question."
-    Splits "compute something" from "explain something," since this
-    app's whole premise is that LLM arithmetic isn't trustworthy on its
-    own: a numeric "what if" question ("what if t doubles?") is
-    classified via one small LLM call into a STRUCTURED intent (which
-    known symbol, which operation -- multiply/add/set, what operand) --
-    the LLM only extracts intent from natural language, the actual
-    arithmetic (applying that operation, then re-evaluating the
-    verified formula via `uncertainty.solve_symbolic_for_target`, the
-    same machinery `sensitivity.py` uses) is done by SymPy, so a
-    what-if answer is exactly as verified as the original solve. A
-    conceptual question ("why this formula", "what does v_i mean")
-    gets an LLM answer grounded in the problem's actual equations/known
-    values/solved answers via the system prompt, with an explicit
-    instruction to say so rather than invent a fact that isn't given --
-    though the prose explanation itself isn't independently
-    re-verified the way a numeric answer is, an honest limitation of
-    natural-language explanation this module doesn't claim to solve.
-30. **Multi-model cross-verification / "paranoid mode"**
-    (`modules/paranoid.py`) -- the existing independent cross-check in
-    `verifier.py` re-asks an LLM to solve the problem from scratch, but
-    by default with the SAME model as extraction; a model can be wrong
-    in a way that's entirely self-consistent (it misreads the problem
-    the same way whether asked to extract equations or asked to just
-    "give a number"), which single-model verification can't
-    structurally catch. Setting `config.settings.secondary_reasoning_model`
-    to a second loaded model enables a "🕵️ Paranoid mode" panel that
-    re-runs the FULL extraction pipeline through that second model and
-    compares the two derivations two ways: structural equation-shape
-    similarity (reusing `similarity.py`'s canonicalization -- the same
-    trick "find similar past problems" uses, just comparing two live
-    derivations against each other instead of one against history) and
-    numeric-answer agreement within the normal cross-check tolerance.
-    Off by default -- it doubles the extraction cost of a problem, so
-    it's opt-in, not something every solve pays for.
-31. **Symbolic proof mode** (`modules/proof.py`) -- for an equivalence
-    check that comes back symbolically confirmed True, "📐 Show proof"
-    renders the ACTUAL sequence of SymPy simplification passes (expand,
-    combine into a fraction, apply trig identities, combine powers,
-    combine logs, simplify radicals, factor, general simplification)
-    that reduce the difference of the two expressions to zero -- the
-    real transformation SymPy applies at each stage, not a fabricated
-    derivation, just reported incrementally instead of only the final
-    True the way `equivalence.py` does on its own. Required adding a
-    `raw_difference` field to `EquivalenceResult`: the existing
-    `difference_simplified` field is already FULLY reduced by
-    `equivalence.py` itself before `proof.py` ever sees it, which would
-    make every "proof" trivially one step long with nothing to show --
-    caught during development by actually running the proof builder
-    against real identities rather than assuming the design worked.
-    Scoped to symbolically-confirmed equivalences only; there's no
-    proof to walk through for something only confirmed by numeric-
-    sampling evidence (see `equivalence.py`'s own docstring on why
-    that's evidence, not proof) or that isn't equivalent at all.
-32. **Configurable computation timeouts** (`modules/timeout_utils.py`)
-    -- every genuinely SymPy-heavy call in the app (algebraic solve,
-    matrix determinant/eigenvalues/linsolve, ODE `dsolve`, recurrence
-    `rsolve`, optimization critical points, equivalence checking, and
-    each pass of `proof.py`'s simplification chain) runs under a
-    configurable time bound (`config.settings.computation_timeout_seconds`,
-    default 10s -- adjustable live from "⚙️ Advanced settings", no
-    restart needed) instead of being able to hang the session
-    indefinitely on pathological input. Built on a worker thread per
-    call, deliberately NOT `signal.alarm`: this app targets Windows as a
-    first-class environment, and `SIGALRM` doesn't exist there -- a
-    signal-based timeout would silently do nothing on the platform it's
-    most meant to protect. The honest tradeoff, stated rather than
-    glossed over:
-    Python can't forcibly kill a running thread, so a genuinely hung
-    computation's worker thread keeps running in the background
-    (consuming CPU) even after the app has moved on and shown a timeout
-    message -- this protects the UI from LOOKING hung, it doesn't
-    reclaim the CPU from truly runaway work. That abandoned work is
-    bounded and visible rather than silent: at most
-    `timeout_utils.MAX_ABANDONED` (8) timed-out computations may still be
-    running (`abandoned_computations()` says how many); beyond that new
-    calls are refused immediately with `ComputationBusyError` -- a
-    `ComputationTimeoutError`, so existing handlers cope -- whose message
-    says why. (This used to be a shared pool of four workers: four hangs
-    filled it, and from then on every later call, even `1 + 1`, was
-    reported as timed out until the hung work happened to finish.) The
-    workers are daemon threads, so a stuck one can't keep the app from
-    quitting, and the function's own `TimeoutError` (a socket timeout,
-    say) is no longer mistaken for a computation timeout. A multiprocessing-based
-    approach could forcibly terminate it, at the cost of process-spawn
-    overhead on every single call including the overwhelming majority
-    that finish in milliseconds -- not the right tradeoff for an
-    interactive app. Degradation is calibrated per call site: the
-    primary algebraic solve and matrix analysis report a timeout as an
-    explicit, visible failure (verifier.py's "Symbolic solve" check, or
-    a "Computation timed out" solve step) rather than silently looking
-    like "no answer found"; secondary/bonus features (uncertainty
-    propagation, the "show me another way" alternate method, constraint
-    elimination in `optimization_utils.py`) degrade silently to
-    "unavailable," matching how those features already handle any other
-    failure. `matrix_utils.MatrixSystemResult` gained a
-    `computation_notes` field specifically so a timeout on, say,
-    eigenvalues alone doesn't lose the still-fast rank-based
-    classification -- genuine partial degradation, not all-or-nothing.
-33. **Pinned dependencies** (`requirements.txt`) -- every package is
-    pinned to the exact version this project's full test suite has
-    actually been run against (`streamlit==1.62.0`, `sympy==1.14.0`,
-    etc.), not an open-ended `>=` range. An unpinned range looks
-    convenient but means a fresh install months from now could silently
-    pull in a breaking release of any dependency and fail in ways that
-    have never been seen or tested here. Upgrade deliberately: bump one
-    line, run `pytest` (or push and let CI run it across both platforms),
-    and only commit once it's green.
-34. **SQLite hardening** (`modules/history.py`) -- `_connect()` now sets
-    `PRAGMA journal_mode=WAL` (a crash or kill mid-write is far less
-    likely to leave the file in a bad state, and it tolerates a second
-    reader/writer -- e.g. two browser tabs on the same session --
-    without immediately hitting "database is locked"), paired with
-    `synchronous=NORMAL` (the standard safe pairing with WAL) and a
-    5-second `busy_timeout` (retries briefly instead of raising an error
-    the moment two connections briefly overlap). Every `save()` also
-    prunes the table down to the `MAX_HISTORY_RECORDS` most recent rows
-    (100 by default) -- keeps `history.db` from growing unbounded over
-    months of use, and keeps `list_recent()`/`find_similar()`'s
-    full-table scans bounded, without needing a separate maintenance
-    step someone has to remember to run.
-35. **Upload size limits** -- every `st.file_uploader` (CSV for curve
-    fitting, PDF for batch worksheet import, problem photos) is capped
-    at 500 MB, enforced twice: `.streamlit/config.toml` sets
-    `server.maxUploadSize = 500` so Streamlit rejects an over-limit
-    upload server-side before it's even fully received, and
-    `check_upload_size()` in `ui/common.py` re-checks the file's own
-    `.size` as a second, defense-in-depth layer with a clearer,
-    upload-specific error message than Streamlit's generic rejection.
-    `.streamlit/` is otherwise gitignored (it can hold a local
-    `secrets.toml`); `.gitignore` carries a narrow `!.streamlit/config.toml`
-    exception so this one file -- which holds no secrets -- is still
-    tracked and ships with the project.
-36. **Basic logging** (`modules/app_logging.py`) -- a small rotating log
-    file (`data/app.log`, 5 MB × 3 backups, WARNING level and above
-    only -- not a full request/access log, which would be noisy and
-    mostly pointless overhead for a personal local tool) so a recurring
-    failure is visible after the fact instead of only ever showing up
-    as a message in the UI that's gone the moment the page reruns.
-    Directly motivated by an earlier incident in this project where
-    telling "a rare one-off" apart from "this keeps happening" for an
-    LM Studio engine error required manually digging back through the
-    conversation rather than checking a log. Wired in at just three
-    gateway points essentially every failure of its class already
-    funnels through, rather than touching every individual try/except
-    scattered across the app: `LMStudioClient.chat()` (every LLM call,
-    whichever module made it), `extract_json()` (every JSON-parsing
-    failure), and `timeout_utils.run_with_timeout()` (every symbolic
-    computation timeout, across matrix analysis, ODEs, recurrences,
-    optimization, equivalence checking, and proof mode alike). Three
-    edits, near-complete coverage. `logging.getLogger()`'s process-wide
-    singleton-by-name behavior is what keeps Streamlit's constant script
-    reruns from re-adding a handler (and duplicating every log line) on
-    every interaction -- guarded explicitly rather than assumed.
-37. **Config/connection validation** (`LMStudioClient.validate_model()`
-    in `modules/llm_client.py`) -- distinguishes two genuinely different
-    failure modes that would otherwise both just look like a similar
-    raw API error the moment a call is attempted: LM Studio isn't
-    reachable at all, versus it IS reachable but the specific model
-    requested isn't one it currently has loaded (a typo, or a model
-    unloaded since it was configured). The primary/vision models are
-    already implicitly validated by construction -- their selectors in
-    the sidebar are populated FROM `list_models()`, so nothing outside
-    that list can be chosen -- but "paranoid mode"'s secondary model
-    (set via `config.py`/an env var, no dropdown) had no such guarantee.
-    The "🕵️ Paranoid mode" panel now validates it up front and shows a
-    specific, actionable message before attempting the (more expensive)
-    cross-check, rather than launching into an extraction call destined
-    to fail confusingly.
-38. **Numerical fallback** (`modules/numerical_fallback.py`) -- when
-    `sp.solve()` can't find a closed form (common for equations mixing
-    polynomial and transcendental terms, e.g. `x + sin(x) = 5` or
-    `x*exp(x) = 10` -- both ordinary physics/engineering "solve for x"
-    problems that SymPy's symbolic solver genuinely can't handle, not
-    edge cases), falls back to numerical root-finding via
-    `mpmath.findroot` -- already a SymPy dependency, so no new one
-    added -- tried from several starting points to catch multiple
-    distinct roots. Unmistakably labeled as an approximation the whole
-    way through (`is_numerical=True` on every result, a distinct
-    "No exact symbolic solution -- numerical approximation" step rather
-    than blending in with exact answers): this app's whole premise is
-    verification-first, so a numerical fallback that looked identical to
-    a verified symbolic answer would undermine that. Deliberately scoped
-    to a single equation in a single remaining unknown -- coupled
-    numerical solving across several unknowns simultaneously is a much
-    less reliable problem and isn't attempted. Currently surfaced in the
-    step-by-step solve trace only; it isn't yet threaded back into
-    `verifier.py`'s independent-cross-check/confidence-report pipeline,
-    which stays scoped to exact symbolic answers for now -- a known,
-    stated limitation rather than a silent gap.
-39. **Self-consistency check** (`modules/self_consistency.py`, "🔁
-    Self-consistency check") -- re-runs extraction on the SAME model
-    2-5 times and compares the derivations via `similarity.py`'s
-    equation-shape canonicalization, the same trick "find similar past
-    problems" and "paranoid mode" both use. A genuinely different
-    signal from paranoid mode's cross-MODEL check: two different models
-    disagreeing suggests one of them is specifically wrong, but the SAME
-    model disagreeing with ITSELF across repeated runs of the identical
-    prompt usually means the PROBLEM STATEMENT is ambiguous or
-    underspecified enough that even one model can't parse it the same
-    way twice -- a property of the input, not of any one model's
-    competence, worth surfacing regardless of which derivation ends up
-    being used.
-40. **Jupyter notebook export** (`modules/notebook_export.py`, "⬇️ Get
-    as Jupyter notebook") -- bundles the step-by-step narrative (as
-    markdown cells) with the runnable Python formula(s) (as executable
-    code cells, reusing `code_export.py`'s exact same `sp.pycode`-
-    rendered functions) into a single `.ipynb` -- a more natural
-    deliverable than a bare `.py` script for further work in a notebook
-    environment. Built by hand-constructing the nbformat v4 JSON
-    structure directly rather than adding a dependency on the
-    `nbformat` package: the schema needed here (a flat list of
-    markdown/code cells, no stored outputs) is small and stable enough
-    that a new dependency for it isn't worth it. Verified the exported
-    notebook is genuinely runnable, not just well-formed JSON -- its
-    code cells were executed in sequence exactly as Jupyter would, and
-    produce the correct numeric answer.
-41. **Physical plausibility check** (`modules/plausibility.py`,
-    "⚠️ Physical plausibility check") -- a softer, advisory-only cousin
-    of Domain of validity above. `domain_utils.py` catches values that
-    are mathematically *undefined* (a division by zero, a negative
-    even-root argument); this catches values that are mathematically
-    fine but land far outside what's normal for the kind of quantity
-    involved -- a car's acceleration coming out to 500 m/s², a computed
-    mass that's negative even though nothing declared a domain
-    restriction on it. A small curated table of typical magnitude
-    ranges per domain category (kinematics, mechanics, finance,
-    thermodynamics, electricity), inferred from the problem's own
-    `problem_domain` label, plus an independent meaning-based
-    heuristic ("mass", "distance", "age", ... shouldn't be negative)
-    for variables with no declared domain at all. Deliberately never
-    affects `report.passed` -- an out-of-range magnitude isn't proof
-    the math is wrong (a problem CAN legitimately be about a rocket
-    sled), only worth a second look.
-42. **Personalized error-pattern tracking** (`modules/grading.py`'s
-    `classify_mistake`, `history.py`'s `grading_records` table +
-    `summarize_error_patterns`, wired into "📝 Grade my work" and "📄
-    Generate worksheet variants") -- connects three already-built
-    pieces into an actual learning loop. Every "Grade my work"
-    submission gets classified (correct / wrong formula / arithmetic
-    slip, with a best-effort subtype like sign error, subtraction,
-    division) and persisted alongside history.py's existing records.
-    When a (category, subtype) pair recurs 3+ times within the last
-    week, it surfaces as a plain-English pattern ("You've made a sign
-    error 3 times this week") right in the grading panel, and the
-    worksheet generator gets a "🎯 Target my recent mistake pattern(s)"
-    option that biases new practice problems toward exercising exactly
-    that step -- turning generic worksheet variants into targeted
-    practice.
-43. **Multi-problem dependency chains** (`modules/chains.py`, "🔗
-    Problem chains" mode) -- formalizes the ad-hoc "extract to
-    workspace" flow into a NAMED, PERSISTENT sequence of problems where
-    a downstream step's input is wired directly to an upstream step's
-    solved output: change an upstream value (or edit a fixed input on
-    an early step) and everything downstream automatically re-solves,
-    the way a spreadsheet cell ripples through formulas that reference
-    it. Distinct from `dependency_graph.py`, which only diagrams
-    structure WITHIN a single already-extracted problem -- this spans
-    MULTIPLE separately-extracted problems and actually performs the
-    re-solve, not just visualizes it. Deliberately re-solves with plain
-    SymPy only (`verifier._solve_sympy`), skipping the LLM independent
-    cross-check that the normal `verify()` pipeline does -- a chain step
-    can be re-solved many times as inputs change, and an LLM round trip
-    on every edit isn't something this should require. A step is only
-    ever added to a chain from an already-extracted-and-verified
-    `ProblemModel` in the first place, so full verification still
-    happens once, upstream of this feature.
-44. **Log/log-log axis toggle** (`plotter.build_plot`/`build_fit_plot`,
-    "Log X-axis"/"Log Y-axis" checkboxes on the main interactive plot
-    and the curve-fitting tab) -- a power-law relationship renders as a
-    straight line on log-log axes, an exponential one as a straight
-    line with only the Y-axis logged, which is usually a clearer visual
-    sanity check of a fit or trend than the default linear view. A log
-    axis uses a geometric (not linear) sweep grid, floored just above
-    zero.
-45. **Contour plots** (`plotter.build_contour_plot`, "Contour" plot type
-    alongside "2D line"/"3D surface" whenever a plottable equation has 2+
-    free symbols) -- the flat, labeled-level-lines counterpart of the
-    existing 3D surface plot: the same (x, y) → z evaluation, but
-    without a viewing angle to fight with, and usually easier to read
-    exact values off of.
-46. **Overlay/comparison plots** (`plotter.build_overlay_plot`, used in
-    the curve-fitting tab's "📊 Compare every candidate fit on one plot")
-    -- a generic multi-series plot for putting several curves on the
-    same axes at once, rather than only ever seeing one result at a
-    time. `best_fit()` already tries every built-in family; this makes
-    it possible to actually SEE why one family won, not just read its
-    higher R² in a list.
-47. **Vector plot export** (`plot_snapshot.py`'s `fmt` parameter --
-    `"png"`/`"svg"`/`"pdf"` -- threaded through every snapshot function,
-    surfaced as a Format dropdown + download button next to the main
-    interactive plots and the curve-fit plot) -- PNG is fine for the
-    exported Markdown/PDF report, but a figure headed into a paper or
-    slide deck usually wants a vector format that doesn't pixelate when
-    scaled up. Comes for free from matplotlib's own `savefig()` -- no
-    new dependency.
-48. **Chain-driven parameter sweeps** (`chains.sweep_step_binding`,
-    `plotter.build_chain_sweep_plot`, "📊 Sweep `<symbol>` across a
-    range" inside a chain step's fixed-input editor) -- sweeps ONE fixed
-    input on one chain step across a range, cascading the WHOLE chain at
-    every swept value, and plots every downstream step's output as its
-    own line against the swept value. The natural next step once
-    `chains.py` existed: rather than testing "what if this input were
-    different" one value at a time by hand, sweep it and see the whole
-    curve. Restores the step's original binding when the sweep finishes
-    -- a sweep is exploratory, not a change to the chain's real state.
-49. **Monte Carlo uncertainty propagation** (`modules/monte_carlo.py`,
-    "🎲 Uncertainty propagation for `<target>`") -- give one or more known
-    inputs a measurement uncertainty (mean ± std) and see the resulting
-    SPREAD in the target, sampled JOINTLY across every uncertain input
-    at once. Distinct from the existing sensitivity/tornado analysis,
-    which varies ONE input at a time deterministically (a
-    partial-derivative-flavored "which input matters most" view) rather
-    than propagating a joint distribution (a "given these measurement
-    uncertainties, how uncertain is my final answer" view) -- the two
-    are complementary. Solves the system SYMBOLICALLY ONLY ONCE
-    (substituting every fixed known value, leaving the uncertain
-    variables as free symbols) and evaluates that one closed-form
-    expression vectorized across every sample via NumPy, rather than
-    calling `verifier._solve_sympy()` per sample -- an earlier version
-    did the latter and, because `_known_substitutions()` runs every
-    known value through `sp.nsimplify()` looking for an exact form, hit
-    sympy's occasionally very slow algebraic-number-reconstruction path
-    on arbitrary sampled floats (100 samples took 14+ seconds). The
-    symbolic-once/numeric-after rewrite runs 5,000 samples in well
-    under a second.
-50. **Self-consistency numeric spread** (`self_consistency.numeric_answer_spread`,
-    `plotter.build_spread_plot`, shown inside the existing "🔁
-    Self-consistency check" expander) -- self-consistency's own
-    `shapes_match` score is a STRUCTURAL similarity between repeated
-    re-extractions; it says nothing about whether they land on the same
-    NUMBER. Two runs can score a near-perfect shapes_match and still
-    disagree numerically if, say, one run's extraction assigned a
-    different known value to some variable. This solves each usable
-    run's own re-derived model for a chosen target and plots the actual
-    numeric answers as a box-and-strip spread, making that kind of
-    disagreement directly visible rather than only inferable from a
-    similarity percentage.
+Solved problems are saved to a local SQLite history and can be exported as
+Markdown, PDF, Python, or a Jupyter notebook.
 
-## Additional modes and platform features
+### What else it does
 
-Items 51-63 -- the standalone solver modes (geometry, PDE, tensor calculus,
-transforms & series) and the platform/infrastructure layer around them
-(templates, command palette, schema validation, REST API, migrations).
+**Solving and checking**
+- **Matrix systems** (`matrix_utils.py`): a genuine linear system is also shown
+  as `A x = b`, with its determinant, eigenvalues, and a rank-based verdict
+  (unique, infinitely many, or inconsistent).
+- **Vectors** (`vector_utils.py`): variables can be vectors, used through `dot`,
+  `cross`, `magnitude`, `unit`, `angle_between`, `distance` and `Point`.
+- **Numerical fallback** (`numerical_fallback.py`): approximate roots for
+  equations with no closed form, labelled as approximations. One equation, one
+  unknown.
+- **Physical-validity filtering** (`physical_validity.py`): a variable can declare
+  a domain (`nonnegative`, `positive`, ...), and non-physical roots are discarded
+  with a visible step. Opt-in.
+- **Domain of validity** (`domain_utils.py`): finds where a formula is undefined
+  (denominators, even roots, logs, `asin`/`acos`) and fails verification if the
+  given values hit one.
+- **Advisory checks**: physical plausibility (`plausibility.py`) and
+  significant-figure discipline (`sig_figs.py`) flag results worth a second look.
+  They never fail verification.
+- **Confidence report**: all individual checks aggregated into a category-grouped
+  score, capped below 0.5 as soon as any check fails outright.
+- **Paranoid mode** (`paranoid.py`): re-runs extraction through a second model
+  (`secondary_reasoning_model`) and compares the two derivations. Off by default.
+- **Self-consistency** (`self_consistency.py`): re-extracts with the same model
+  2-5 times, comparing equation shapes and the numeric answers. Disagreement
+  usually means the problem statement is ambiguous.
+- **Other aids**: unit-conversion sweep (`unit_conversion.py`), algebra-technique
+  tagging, a "show me another way" method (back-substitution, Cramer's rule),
+  named-formula recognition, and Python/Jupyter code export.
 
-51. **Geometry mode** (`modules/geometry_solver.py`, "📐 Geometry") --
-    triangle solving (SSS, SAS, ASA, AAS, and the genuinely ambiguous
-    SSA case, which returns both valid triangles rather than silently
-    picking one) with a labeled schematic. Also reachable directly from
-    a word problem: if extraction detects a triangle
-    (`ProblemModel.geometry`), the same schematic renders inline in the
-    result alongside the algebraic derivation, not just in the
-    standalone mode.
-52. **PDE solver mode** (`modules/pde_utils.py`, "🌡️ PDE solver") --
-    first-order PDEs solved directly; heat and wave equations with
-    Dirichlet, Neumann, or Robin boundary conditions; Laplace's equation
-    on a rectangle; and, when no closed form exists, numerical
-    finite-difference fallbacks for both the 1D and 2D heat equation --
-    explicitly labeled as numerical rather than blended in with exact
-    solutions, the same convention `numerical_fallback.py` uses.
-53. **Tensor calculus mode** (`modules/tensor_calculus.py`, "🧮 Tensor
-    calculus") -- classical (index-based) tensor calculus on a
-    Riemannian manifold given a metric: Christoffel symbols, curvature,
-    covariant derivatives, and index raising/lowering.
-54. **Transforms & series mode** (`modules/transforms.py`,
-    `modules/series_asymptotics.py`, "🔄 Transforms & series") -- Laplace
-    and Fourier transforms (and their inverses), plus Taylor/Maclaurin,
-    Laurent, and asymptotic series expansions, each independently
-    verified rather than trusted as raw LLM/SymPy output.
-55. **Statistical inference on fitted models** (`modules/statistical_inference.py`)
-    -- the statistics layer on top of curve fitting: parameter
-    confidence intervals, hypothesis tests, and related inference for a
-    fitted model, surfaced alongside curve fitting's existing R²/RMSE.
-56. **Tutor mode** (`modules/tutor_mode.py`) -- turns a solved problem's
-    already-verified step-by-step derivation into a Socratic,
-    one-question-at-a-time walkthrough, toggled per target in the
-    step-by-step section rather than being a separate mode of its own.
-57. **Templates** (`modules/templates.py`) -- named, savable/loadable
-    presets of a mode's INPUT fields (SQLite-backed, the same pattern
-    `history.py` uses), so a recurring problem shape doesn't need
-    retyping every time.
-58. **Command palette** (`modules/command_palette.py`) -- fuzzy search
-    over the app's navigable targets (modes, recent history, templates),
-    for jumping around without scanning the sidebar by eye. Also the
-    single source of truth for the sidebar's mode list itself
-    (`MODE_LABELS`) -- see [Extending it](#extending-it).
-59. **Schema-validated extraction** (`modules/llm_schema.py`) --
-    pydantic validation of the LLM's extraction JSON at the exact
-    boundary before `equation_engine.build_model()` ever sees it, so a
-    malformed response is caught with a specific field-level error
-    rather than failing confusingly deeper in the pipeline.
-60. **Concept index** (`modules/concept_index.py`) -- tags a solved
-    problem by the named CONCEPTS it touches (e.g. "conservation of
-    energy"), for browsing history by concept rather than only by
-    domain or keyword.
-61. **Research journal mode** (`modules/research_journal.py`, "📔
-    Research journal") -- stitches a chosen set of history entries into
-    ONE running Markdown document, for building up a worked-examples
-    write-up across multiple sessions instead of exporting each problem
-    separately.
-62. **REST API** (`api_server.py`) -- a FastAPI surface over `/solve`,
-    `/fit`, `/equivalence`, and `/dimensional-analysis`, for scripted or
-    external access to the same verification-first pipeline without the
-    Streamlit UI. Deliberately doesn't cover every one of the app's
-    modes -- see the module's own docstring for which and why.
-63. **Schema migrations framework** (`modules/db_migrations.py`) -- a
-    lightweight, dependency-free, numbered/idempotent migration list,
-    applied at startup to every SQLite-backed module (`history.py`,
-    `templates.py`, `settings_profiles.py`, `chains.py`) so a schema
-    change ships safely against an existing `data/*.db` file from a
-    previous version rather than requiring a manual reset.
+**Uncertainty and sensitivity**
+- **Sensitivity / tornado** (`sensitivity.py`), first-order **error propagation**
+  (`uncertainty.py`, `error_propagation.py`), **Monte Carlo** (`monte_carlo.py`,
+  seeded and reproducible), **interval arithmetic** (`interval_arithmetic.py`,
+  guaranteed bounds), and **goal seek** (`goal_seek.py`, the inverse solve).
+- **Bulk analysis**: N-dimensional parameter sweeps (`parameter_sweep.py`) and
+  Monte Carlo across every target at once. These solve symbolically once and
+  evaluate vectorised.
 
-## Time-resolved views
+**Modes** (chosen in the sidebar; `Ctrl/Cmd+K` is a command palette)
+- **Word problem solver**, **Quick start** (example gallery), and **Batch solver**
+  (pasted or PDF problem sets; results as Markdown, PDF, CSV or Excel).
+- **Curve fitting** (`curve_fitting.py`, `statistical_inference.py`): linear,
+  polynomial, exponential, power, logarithmic and custom linear-in-parameters
+  models, with R², RMSE, residuals, confidence intervals and hypothesis tests.
+- **Check equivalence** (`equivalence.py`, `proof.py`): symbolic equivalence with
+  sampled evidence when inconclusive, and the actual simplification passes as a
+  proof.
+- **Problem chains** (`chains.py`): named, persistent sequences where one step's
+  output feeds the next and everything downstream re-solves, like spreadsheet
+  cells. Includes sweeps across a chain.
+- **Geometry**, **PDE solver** (heat, wave, Laplace, first-order), **Tensor
+  calculus**, **Transforms & series** (Laplace, Fourier, Taylor, Laurent,
+  asymptotic, Fourier series), **Dimensional analysis** (Buckingham-Pi-style
+  exploration from units alone), **Extraction diff**, and **Research journal**.
 
-Four views that show a solution changing over time (or a series
-converging term by term) instead of a single static curve. Each has an
-interactive Plotly version with Play/Pause and a slider, plus a matplotlib
-export (a PNG for the first, an animated GIF for the rest) -- no kaleido or
-ffmpeg needed, same as the existing GIFs.
+**Plots and animations**
+- Interactive 2D line, 3D surface, contour, feasible-region, ODE, recurrence and
+  curve-fit plots, with log axes. Plot target selectors solve the equation for the
+  chosen variable.
+- Time-resolved views, each with Play/Pause and a GIF or PNG export:
 
-- **Closed form vs. numerical integration, over time** (an expander under
-  any first-order ODE solution with initial conditions and known
-  parameters). `numerical_cross_check` already integrates the original
-  equation and compares it to the symbolic solution, but as one pass/fail
-  at five sample points. This draws the same comparison as curves: the
-  closed form and the integration overlaid, and underneath their relative
-  disagreement on a log axis against the verifier's tolerance
-  (`modules/ode_trajectories.compare_trajectories`, which shares its setup
-  with the verifier via `ode_utils.prepare_ivp`, so the two cannot disagree
-  about what the problem is). A slider extends the window beyond the
-  automatic one. The PNG can be included in the exported report.
-- **Animated phase-portrait flow** (inside the phase-portrait expander of a
-  coupled two-function system). Points move along their paths over the
-  direction field, each dragging a fading trail: the real solved trajectory
-  in blue, plus a ring of extra starting points (a slider, default 6) in
-  amber to show the flow around it. Paths that blow up in finite time are
-  cut off and the rest left blank rather than dropped.
-- **Time-linked view** (same expander). One time slider drives a vertical
-  cursor across the time series and a marker on the phase plane at the same
-  instant, with the values read out in the title.
-- **Series partial-sum animation**, in Transforms & series. A Taylor/Laurent
-  result gets a "Watch the approximation converge" expander: the function
-  with its partial sums added one nonzero term at a time (so `sin` animates
-  x, x - x^3/6, ... rather than repeating a frame for each zero
-  coefficient), with the plot window adjustable to show where the
-  polynomial breaks down. A new **Fourier series** tab does the same for a
-  function on [-L, L] by harmonic -- square and sawtooth waves included,
-  with the Gibbs overshoot at a jump. Coefficients come from numerical
-  quadrature, so a piecewise function costs nothing and can't time out. The
-  check shown is a real property of Fourier partial sums: the RMS error over
-  a period never rises as a harmonic is added (each partial sum is the best
-  trigonometric fit of its degree), so a rise would mean wrong coefficients.
-  Axes are fixed from the true function so a diverging polynomial runs off
-  the plot instead of rescaling it.
+  | View | Shows |
+  |---|---|
+  | Closed form vs numerical integration | the ODE solution and an independent integration over time, with relative error against the verifier's tolerance |
+  | Phase-portrait flow, time-linked view | points flowing along the direction field with trails; one time cursor driving the series and the phase plane |
+  | Uncertainty fan | median and percentile bands from sampled parameters or initial values, plus a guaranteed interval-arithmetic envelope |
+  | Parameter morph | the whole solution family as one parameter varies, with visible turning points counted |
+  | Bifurcation diagram, cobweb | long-run values of a one-parameter map (no closed form needed) |
+  | PDE evolution | the profile u(x, t) beside a heatmap of the whole evolution |
+  | Series convergence | Taylor and Fourier partial sums added term by term |
+  | Solve-order replay | the dependency graph lit up in the order quantities become determined |
+  | Chain value flow | each chain step and the value it passed on |
+  | Motion diagram | velocity and acceleration arrows, with a strobe trail |
 
-### Uncertainty, parameter families, bifurcations and PDE evolution
+  The solve-order replay shows the order implied by the *dependencies*, not a
+  trace of the solver's own internal steps.
 
-Four more views, built on the same Play/Pause + slider mechanism, each with a
-matplotlib export (PNG for the static ones, GIF for the animated ones).
+**Learning and practice**
+- **Grade my work** (`grading.py`): checks a student's formula, arithmetic and
+  final answer separately, from typed text or a photo, and tracks recurring
+  mistake patterns. **Worksheet variants** (`worksheet.py`) generate new problem
+  text, which is solved through the normal pipeline rather than trusting the LLM's
+  own answer.
+- **Tutor mode**, per-step **"explain just this"**, grounded **follow-up Q&A**
+  (numeric what-ifs are computed by SymPy, not the LLM), **similar past problems**
+  (by equation shape, not wording), and a **concept index**.
 
-- **Uncertainty over time** (ODE solutions whose initial values are all given
-  and parameters all known). Give any parameter *or initial value* a standard
-  deviation; draws are pushed through the symbolic solution at every time
-  (vectorised -- no re-solving, no numerical integration per sample) and drawn
-  as a fan: the median, 25-75% and 5-95% bands, and the nominal curve. Optionally
-  also a **guaranteed envelope** from interval arithmetic -- not "90% of draws
-  fall here" but "the solution cannot leave this band if every input stays
-  within +/- k standard deviations". It is usually wider than the sampled
-  bands, because interval arithmetic treats each appearance of a parameter in
-  the formula as independent. Solutions written with complex exponentials
-  (what `dsolve_system` returns for an oscillator) are rewritten with sin and
-  cos first so the envelope still works. The seed is shown and recorded in the
-  exported figure. (`modules/time_uncertainty.py`; `solve_ode` gained a
-  `symbolic_initial_conditions` option so an uncertain initial value doesn't
-  need a re-solve per draw; interval arithmetic gained exact `sin` and `cos`.)
-- **Parameter morph** (same expander group). Vary one parameter or initial value
-  across a range and watch the whole solution change shape -- every curve faint,
-  the current one bold, your current setting dashed. Each frame is titled with
-  how many *visible* turning points it has, and the page reports where that
-  count first changes (where a solution starts to oscillate). "Visible" is a
-  zigzag filter: a heavily damped oscillator technically keeps turning forever
-  at an amplitude no plot could show, and calling that "six turning points"
-  would be misleading. (`modules/parameter_morph.py`)
-- **Bifurcation diagram** (any first-order map `a(n+1) = g(a(n))` with a
-  parameter). Iterate the map for each parameter value, discard the transient,
-  plot where it settles: fixed point, then 2, 4, 8, ... cycles, then chaos --
-  with the period-doubling points marked and the current parameter value shown.
-  Works from the numeric map alone, so no closed form is needed (the logistic map
-  has none). Checked against the classical values: period doubling at r = 3 and
-  1 + sqrt(6), the period-3 window near 3.83. A **cobweb diagram** is now also
-  shown for maps without a closed form -- previously it only appeared next to one,
-  so it was missing for exactly the nonlinear maps where it is most useful.
-  (`modules/bifurcation.py`)
-- **PDE evolution** (heat and wave). The profile u(x, t) was already animated;
-  it is now paired with a heatmap of the *whole* evolution beneath it (x against
-  t, with a cursor at the current time), a title that reads off max |u| and the
-  integral of u at that instant (total heat, for the heat equation), a diverging
-  colour scale when the solution changes sign, and a GIF export. Evaluation moved
-  into `modules/pde_field.py` and is vectorised over the grid. (The previous
-  version evaluated the formula one point at a time.)
+**Sessions, data and access**
+- **History**, **templates**, **settings profiles** and the **variable workspace**.
+  **Project bundle** export/import moves everything between machines.
+- **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**
+  (`api_server.py`) covers `/solve`, `/fit`, `/equivalence` and
+  `/dimensional-analysis`. Both talk to LM Studio the same way the app does.
+- **Export:** PDF equations are rendered with matplotlib mathtext, and plots go
+  into a report through an explicit "Include this plot" button. Static images
+  deliberately avoid `kaleido`, whose current releases need a separate Chrome
+  install.
 
-### Solve-order replay, chain value flow, and a richer motion diagram
+**Reliability**
+- Every SymPy-heavy call has a configurable timeout (default 10 s). A thread
+  cannot be killed, so a timed-out computation is abandoned rather than stopped,
+  and at most 8 may be running before new calls are refused with a clear message.
+- Dependencies are pinned to the versions the suite has been run against. SQLite
+  runs in WAL mode, prunes history to the latest 100 records, and closes its
+  connections. Uploads are capped at 500 MB. Recurring failures go to a rotating
+  log (`data/app.log`). Details are in
+  [ARCHITECTURE.md](ARCHITECTURE.md#design-notes).
 
-Three more animations, each with a GIF export.
+### Interface
 
-- **Solve-order replay** (the dependency graph's expander in the Explore tab,
-  once there are two or more equations). The graph is played back in the order
-  its quantities get determined: the givens light up first, then each equation
-  in turn once everything feeding into it is known (ringed in orange, with the
-  edges it reads and writes drawn thick), then the unknowns it determines. What
-  is already determined stays lit; what is still to come is faint. A numbered
-  list underneath says the same in words ("solve d from displacement equation
-  (needs a, t, u)"). Equations that share several unknowns are one
-  **simultaneous** stage; an equation whose results are already known is a
-  **check**; one with more unknowns than equations is **underdetermined**; and
-  anything that can never become determined (a cycle, or an input nothing
-  supplies) is shown as **unresolved**, with what it is missing. This is the
-  order implied by the *dependencies* -- the earliest each quantity can be found
-  from the givens -- not a trace of the solver's own internal sequence, which
-  substitutes into each target separately. (`modules/dependency_graph.py`)
-- **Chain value flow** (Problem chains, once a chain has two or more steps). The
-  chain as a cascade: each step a node reading "Step n, symbol = value", each
-  link labelled with the value it carried forward, and inputs typed in by hand
-  shown as small squares above their step. Press Play to watch it resolve one
-  step at a time; a step that failed is red, and a binding that points nowhere
-  useful (a step that doesn't exist, a later step, or one that produced no
-  value) is drawn dashed with the reason. A sentence per step says what it
-  received and what it produced. (`modules/chain_flow.py`)
-- **Motion diagram: strobe trail and acceleration arrows** (kinematics
-  problems). Beside the moving dot and its red velocity arrow there is now a
-  green **acceleration** arrow, and a **strobe trail**: faint ghosts of where the
-  object was at evenly spaced earlier instants, each with its own velocity arrow
-  above it and acceleration arrow below, so how the arrows change from instant
-  to instant can be read straight off the picture -- the classic stroboscopic
-  motion diagram. Velocity and acceleration are in different units, so each is
-  scaled on its own (the longest of each is a fixed fraction of the track).
-  Both are on by default and can be switched off, which gives back exactly the
-  previous diagram.
-
-## Rigor & analysis
-
-Three additions that give a solved problem's uncertainty/sensitivity a
-harder mathematical treatment than the existing Monte Carlo panel alone,
-each shown as its own expander inside a target's per-target analysis
-section:
-
-- **Analytic (closed-form) error propagation**
-  (`modules/error_propagation.py`, "📐 Analytic error propagation for
-  `<target>`") -- the textbook first-order propagation-of-uncertainty
-  formula, `σ_f² = Σ (∂f/∂xᵢ)² σᵢ²`, computed instantly with no
-  sampling. Exact when the target is linear in its uncertain inputs, a
-  good local approximation otherwise -- the standard alternative
-  `monte_carlo.py`'s sampling-based approach, and the one most intro
-  physics/chem courses actually grade against by name. Solves the
-  system symbolically once (the same "solve once, evaluate the closed
-  form" pattern `monte_carlo.py` and `chains.py` both use), then
-  differentiates that one expression with respect to each uncertain
-  input and evaluates every partial at the given central values --
-  shown alongside a tornado-style breakdown of which input's
-  uncertainty actually dominates the total variance.
-- **Interval arithmetic / guaranteed bounds**
-  (`modules/interval_arithmetic.py`, "📏 Guaranteed bounds for
-  `<target>`") -- a genuinely different flavor of "how wrong could this
-  be" than either of the above: given each uncertain input as a hard
-  range (not a probability distribution), computes a range for the
-  target that's PROVABLY guaranteed to contain every possible result --
-  "cannot be outside this band," not "95% likely to be in this band."
-  Implemented as a small, dependency-free `Interval` type with the
-  standard (conservative) interval-arithmetic rules for +, -, *, /, and
-  a few elementary functions; because Python's operator overloading
-  means `sp.lambdify()`'s generated `+`/`-`/`*`/`/`/`**` expression works
-  unmodified against `Interval` operands, the same "solve symbolically
-  once" approach applies here too, just evaluated with different
-  arithmetic underneath. Careful about the well-known interval-
-  arithmetic gotchas: multiplication/division always check all four
-  corner combinations rather than assuming positive operands (wrong
-  whenever a range spans zero), and an even power of a range spanning
-  zero has its minimum AT zero, not at either endpoint.
-- **Goal-seek / inverse solve** (`modules/goal_seek.py`, "🎯 Goal seek:
-  find the input for a target `<target>`") -- the inverse of
-  `chains.sweep_step_binding`'s "vary this input and see what happens":
-  "what value of this input makes the target hit a SPECIFIC number,"
-  solved directly rather than by sweeping a range and reading a chart.
-  Works by substituting the DESIRED value in place of the target's own
-  symbol -- turning "solve for target, given inputs" into "solve for
-  one input, given the desired target" -- and inverting that system.
-  Tries an exact symbolic `sp.solve()` first (and shows the resulting
-  formula, worth seeing as its own small derivation), falling back to
-  `numerical_fallback.py`'s `mpmath.findroot` machinery -- the same
-  fallback `verifier.py` itself uses whenever `sp.solve` can't invert an
-  equation symbolically -- when the system doesn't yield to that
-  (implicit or transcendental relationships, mainly). A declared domain
-  restriction on the variable being sought (see
-  `equation_engine.Variable.domain`) narrows a multi-root result (a
-  quadratic goal, e.g., commonly has two) down to the physically
-  sensible one or ones, without ever filtering the result down to
-  nothing.
-
-## Pedagogy / reference
-
-Three smaller, quieter additions aimed at the learning experience rather
-than at solving power:
-
-- **Named-formula recognizer** (`modules/named_formulas.py`, a "📖
-  Recognized as..." caption under a matching derived equation) -- a
-  small curated table (Newton's second law, Ohm's law, the Pythagorean
-  theorem, compound interest, the ideal gas law, and a dozen more) that
-  recognizes when a derived equation matches a well-known named result
-  and labels it, purely for the credibility/learning-hook value of a
-  name a student may already recognize from a textbook. Matching is
-  structural and variable-name-independent, and covers a formula being
-  solved for any one of its own variables (F=m·a, a=F/m, or m=F/a all
-  recognized) by precomputing every algebraic rearrangement once at
-  first use. Two different named formulas commonly collide on shape
-  alone once canonicalized (F=m·a, p=m·v, and W=F·d, e.g., are ALL
-  "y = a·b") -- resolved using the equation's own variable MEANING
-  strings (far more specific than a broad domain label), falling back
-  to listing every tied candidate honestly when even that doesn't
-  settle it. Building this surfaced a genuine, subtle limitation in
-  `similarity.py`'s existing `canonicalize_equation()`: its placeholder
-  order comes from a single preorder traversal, which turns out NOT to
-  be purely a function of an equation's structure -- sympy's own
-  internal storage order for commutative +/× arguments is partly
-  determined by the actual symbol NAMES involved, so two structurally
-  identical equations with different variable names can occasionally
-  fail to match. Worked around locally with a true permutation-
-  invariant canonicalization (capped at 4 free symbols for performance,
-  falling back to the simpler approach above that) rather than touching
-  the shared `similarity.py` function other features depend on.
-- **Sig-fig discipline check** (`modules/sig_figs.py`, a "🔢" warning
-  under a solved target) -- tracks the precision implied by the
-  problem's own given inputs (`"8"` implies 1 significant figure,
-  `"8.0"` implies 2) and flags a final answer reported with
-  implausibly MORE precision than those inputs support -- a classic
-  thing intro science/engineering grading cares about that nothing else
-  here checks. Counts significant figures on the ORIGINAL TEXT of each
-  known value, not the parsed float, since parsing already erases the
-  "8" vs "8.0" distinction the count depends on -- pulled straight from
-  the model's own `raw_json`, not the already-parsed `Variable.known_
-  value`. Advisory only, with a full digit of slack before flagging
-  anything, the same "worth a second look, not a verdict" posture as
-  `plausibility.py`.
-- **Step-level "explain just this" drill-down** (`modules/step_
-  explainer.py`, a "🔍 Explain just step N" expander under every step)
-  -- a narrower, more surgical sibling of the whole-problem follow-up
-  Q&A further down the page. Grounds the LLM in ONLY that one step's
-  own description/expression/explanation, not the full derivation --
-  the point is a tighter explanation of one specific move, not a
-  second whole-problem summary squeezed into a smaller box. Three
-  scaffolding modes: a plain explanation, a "simpler" more broken-down
-  version for when the first one didn't land, and a "worked example"
-  version illustrating the same operation with small made-up numbers.
-
-## Robustness / QA
-
-Two developer-facing tools aimed at hardening the pipeline itself,
-distinct from every student-facing feature above -- neither cares
-whether an ANSWER looks sensible, both care whether the SYSTEM survives
-what it's handed:
-
-- **Adversarial edge-case generator** (`modules/adversarial_testing.py`,
-  "🧪 Adversarial edge-case testing (developer QA)" in the Verify tab)
-  -- takes an already-solved problem's own known inputs and generates
-  deliberately nasty variants of each one (zero, a flipped sign, an
-  extremely large or extremely small magnitude), then runs every
-  variant through the real solving + plausibility pipeline and reports
-  exactly what happened: solved cleanly, correctly recognized as
-  unsolvable, timed out, or raised an exception. Wrapped in its own
-  short timeout separate from the normal computation timeout, since an
-  extreme magnitude can (through the same `sp.nsimplify()` performance
-  cliff `monte_carlo.py`'s docstring describes hitting and routing
-  around) occasionally make a solve pathologically slow rather than
-  fast-failing -- that slowness is itself a finding worth surfacing, not
-  something this tool should silently wait out. **This immediately
-  found a real bug on first use**: `verifier._solve_sympy()` was calling
-  a bare `float()` on every numeric solution, which raises an unhandled
-  `TypeError` for a target that solves to a complex number (e.g. `sqrt`
-  of a negative input) -- meaning ANY real problem whose given inputs
-  happened to produce a non-real root could crash the whole app around
-  it. Fixed at the source with the same tolerant complex-to-real
-  conversion `monte_carlo.py`/`goal_seek.py` already use, with two
-  regression tests locking it in.
-- **Extraction diff mode** (`modules/extraction_diff.py`, "🔬 Extraction
-  diff" mode) -- paste two DIFFERENT wordings of the same underlying
-  problem and get back a structural, side-by-side diff of their
-  independent extractions: which variables matched, which equations
-  matched (via the same variable-name-independent canonicalization
-  `similarity.py` already uses), and what changed. Distinct from
-  `self_consistency.py`, which re-extracts the SAME wording several
-  times and reports one aggregate similarity score -- this answers the
-  debugging question that raises but doesn't answer: given two SPECIFIC
-  wordings, what EXACTLY differs? Variables are matched by normalized
-  MEANING text, not symbol name, since two independent extractions
-  routinely pick different symbol letters for the same quantity (v_i vs
-  v0) -- matching by name alone would report that mismatch as a
-  "difference" on every single run, drowning out the differences that
-  actually matter.
-
-## Slightly offbeat
-
-Two additions that don't fit neatly into any of the categories above --
-one closes a real usability gap, the other explores a genuinely
-different KIND of problem than anything else in this app:
-
-- **Handwritten "grade my work" via photo**
-  (`LMStudioClient.vision_extract_work` in `modules/llm_client.py`, a
-  "📷 Or upload a photo of your handwritten work" panel inside Grade my
-  work) -- the app already does image-to-text extraction for PROBLEM
-  STATEMENTS (the Image input tab); this points that same underlying
-  vision-model call at a photo of a student's own worked steps instead,
-  with a prompt tailored to transcribing WORKED STEPS line-by-line
-  rather than a problem statement, then feeds the result straight into
-  the existing typed-work flow. Removes what was probably the single
-  biggest piece of everyday friction in actually using Grade my work:
-  retyping steps that already exist on paper. Falls back to the same
-  Tesseract OCR path the Image input tab already offers when no vision
-  model is loaded, with an explicit caveat that OCR is considerably
-  less reliable on handwriting specifically than on printed text.
-- **Dimensional-analysis-only mode** (`modules/dimensional_analysis.py`,
-  "📐 Dimensional analysis" mode) -- given just the UNITS of some
-  candidate input quantities and a desired output unit -- no numbers,
-  no explicit formula -- finds which combinations of exponents could
-  possibly reach it: the Buckingham-Pi-style "what could this even be"
-  exploration physics problems sometimes ask for directly, before any
-  equation is proposed. A genuinely different KIND of problem from
-  everything else in this app, which is otherwise entirely about
-  solving and verifying a STATED equation. Reuses `units_checker.py`'s
-  existing SI unit-parsing (the same machinery `verifier.py`'s own
-  dimensional-consistency pass depends on) and adds only the exponent-
-  solving layer on top: each unit becomes a vector of exponents over
-  the 7 SI base dimensions, and finding a dimensionally-valid
-  combination reduces to solving a linear system for those exponents.
-  When more inputs are given than there are independent dimensions
-  actually involved, the system is genuinely underdetermined -- a
-  bounded search over small rational exponents surfaces several
-  concrete, readable candidate formulas from that family rather than
-  only an abstract particular solution. Correctly reports Coulomb's law
-  as dimensionally infeasible from q₁, q₂, and r alone in SI units (its
-  constant *k* isn't itself dimensionless the way Newton's second law's
-  is) -- a real, deliberate confirmation that the tool doesn't paper
-  over an SI-specific subtlety just because a formula is famous.
-
-## Session / project management
-
-Two additions aimed at work that needs to survive past one browser
-session on one machine:
-
-- **Project bundle export & import** (`modules/project_bundle.py`,
-  "📦 Project" in the sidebar) -- bundles EVERYTHING that otherwise
-  lives tied to one machine (every solved-problem history record, every
-  chain, and the session-only Variable Workspace) into one portable
-  JSON file. Something that can be archived alongside a paper, emailed
-  to a collaborator, or reloaded on a different machine to pick up
-  exactly where a session left off -- none of which currently survives
-  on its own, since `history.db`/`chains.db` are local SQLite files and
-  the workspace lives only in Streamlit's in-memory session state.
-  Reuses `history.py`'s/`chains.py`'s own already-round-trippable
-  storage format directly (the same payload their own
-  `load()`/`load_chain()` already reconstruct a `ProblemModel` from,
-  with no LLM calls needed) rather than inventing a second
-  serialization scheme. Import is strictly ADDITIVE: every record is
-  always inserted as a brand-new row in the importing machine's own
-  database (new ids, no attempt to preserve or collide with the
-  exporting machine's), and a workspace entry whose name collides with
-  one already present is skipped rather than silently overwritten --
-  importing a bundle can never delete or clobber anything already
-  there. A malformed individual record is skipped with its error
-  recorded rather than aborting the rest of an otherwise-good import.
-- **Named settings profiles** (`modules/settings_profiles.py`, inside
-  the sidebar's "⚙️ Advanced settings" expander) -- the verification-
-  tuning sliders (extraction/narration temperature, retry count,
-  numeric and cross-check tolerances, computation timeout) are a single
-  live-tweaked object that resets to `config.py`'s hardcoded defaults
-  every session; this lets a chosen combination be saved under a name
-  ("strict verification," "fast exploratory," ...) and reloaded with
-  one click instead of re-typing every slider by hand each time.
-  Persisted to their own small local SQLite table (alongside
-  `history.db`/`chains.db` in the same `data/` directory) specifically
-  so profiles -- unlike the live settings object itself -- survive
-  across sessions. Deliberately covers only the verification/generation
-  tuning knobs, never connection config (the LM Studio URL, model
-  names) -- a profile is about "how strict should verification be," not
-  "which server to talk to."
-
-## Bulk / tabular analysis
-
-Three additions aimed at the shape a real sensitivity study or batch
-run actually takes -- a spreadsheet of results, a swept grid, one
-combined comparison -- rather than reading one prose report or one
-chart at a time:
-
-- **CSV/Excel export for Batch solver results**
-  (`batch_solver.batch_results_table`, "⬇️ Download results as
-  CSV"/"⬇️ Download results as Excel") -- Batch solver previously only
-  produced a combined Markdown or PDF *report* (prose, meant to be read
-  problem by problem); it now also flattens every solved problem into
-  one row per (problem, target) pair -- the shape a spreadsheet or
-  `pandas.DataFrame` actually wants. A problem with multiple `solve_for`
-  targets gets one row per target; a problem that errored out still
-  gets exactly one row (target/value left blank) so nothing is silently
-  dropped from the table just because it didn't produce a numeric
-  answer.
-- **N-dimensional parameter sweep** (`modules/parameter_sweep.py`, "📊
-  N-dimensional parameter sweep" in the Explore tab) -- grid-sweeps TWO
-  OR MORE of a problem's own inputs at once and returns a results
-  table, plus a heatmap when exactly two variables are swept. Distinct
-  from `chains.sweep_step_binding` (one variable, across a whole chain)
-  and the interactive plot's own single-variable 1D sweep -- this is
-  the actual shape of a real sensitivity study ("how does the answer
-  vary across every combination of these 5 masses and these 5 forces"),
-  not a single line read one point at a time. Solves the target
-  symbolically ONCE (the same "solve once, evaluate the closed form
-  many times" pattern `monte_carlo.py`, `error_propagation.py`, and
-  `interval_arithmetic.py` all use) and evaluates it vectorized across
-  the full grid via `numpy.meshgrid`, so a 10×10 sweep is one lambdify
-  call and one vectorized array evaluation, not 100 separate
-  `sp.solve()` calls.
-- **Bulk uncertainty propagation across all targets** ("🎲 Uncertainty
-  propagation across all targets" in the Explore tab, shown when a
-  problem has 2+ algebraic targets) -- pick which inputs are uncertain
-  ONCE and run Monte Carlo for every target in one pass, rather than
-  repeating the same single-target panel's expander dance once per
-  target. Deliberately reuses the SAME random seed across every target
-  in a run (not a fresh one each time), so every target's samples are
-  drawn from the same underlying joint draws -- a coherent, comparable
-  set of results rather than independently-noisy ones -- with a
-  combined summary table (mean/std/percentiles/seed per target) and a
-  CSV download.
-
-All three per-variable input tables (the sweep's ranges, the bulk
-uncertainty panel's std values) use the same `st.data_editor`-based
-compact table pattern introduced in the mobile-optimization pass above,
-for the same reason: one bounded widget regardless of how many
-variables are involved, rather than one `st.columns()` slot each.
-
-## Reproducibility & scripting
-
-Two additions aimed specifically at researchers and advanced users --
-being able to reproduce a stated result exactly, and being able to run
-this outside a browser at all:
-
-- **Monte Carlo runs are now reproducible.** `run_monte_carlo()` always
-  attaches the actual seed it used to `MonteCarloResult.seed` -- even
-  when the caller didn't pass one, in which case a fresh one is
-  generated and returned rather than being silently thrown away (a
-  result with no way back to its own seed isn't reproducible at all,
-  whatever else about it is deterministic). The Monte Carlo panel in
-  the app shows this seed in an editable field next to a "🎲 New seed"
-  button: the field stays stable across reruns (it's not re-randomized
-  every time the page redraws), the result caption echoes back
-  whichever seed actually produced it, and the downloaded histogram's
-  filename includes it -- so a number worth citing always comes with
-  the seed needed to regenerate it exactly.
-- **`cli.py`: a command-line entry point with no Streamlit dependency
-  at all.** The UI (`app.py` + `ui/`) is really just one consumer of
-  `modules/` --
-  `equation_engine`, `verifier`, `monte_carlo`, and the rest are plain
-  Python with no UI framework baked in. `cli.py` is a second, scriptable
-  front end onto that same pipeline, for the workflows point-and-click
-  can't reasonably serve:
-  - `python cli.py solve problems.json --output results.csv` --
-    extracts, verifies, and solves a whole batch of problems (a JSON
-    array of problem-text strings, or of `{"text": ..., "known_
-    context": ...}` objects for more control) in one run, writing a
-    results table rather than requiring one click-through per problem.
-  - `python cli.py montecarlo problem.txt --target a --uncertain
-    v:1.0 --seed 42 --output samples.csv` -- runs uncertainty
-    propagation on a single problem and writes the raw samples out,
-    for further analysis in a researcher's own pandas/numpy pipeline
-    rather than only ever looking at a histogram in a browser tab.
-
-  Both subcommands still talk to LM Studio the same way the app does
-  (this isn't an offline mode, just a different front end), and both
-  accept `--format csv|json` with the format auto-inferred from
-  `--output`'s extension when given. Genuinely useful for batch-
-  processing dozens of problem variants overnight, wiring this into an
-  existing Python analysis pipeline, or running it as a scripted
-  regression check against a formula library in CI -- none of which is
-  realistic through the browser UI alone.
-
-## Mobile browser optimization
-
-A pass focused specifically on using this app from a phone browser,
-following an assessment of where the existing layout would create
-unnecessary friction on a narrow screen -- no changes to solving or
-verification logic:
-
-- **Camera capture for both photo-upload features.** The problem-
-  statement Image input tab and Grade my work's handwritten-work photo
-  panel both previously only offered `st.file_uploader`, which on a
-  phone means tapping through an OS file-picker sheet even to reach the
-  camera. Both now offer an "📁 Upload a file" / "📷 Take a photo"
-  choice, with `st.camera_input` going straight to the camera when
-  selected. `st.camera_input` returns the same `UploadedFile`-shaped
-  object `st.file_uploader` does, so the extraction code downstream
-  (`vision_extract`/`vision_extract_work`, the Tesseract OCR fallback,
-  the upload-size check) needed no changes regardless of which input
-  method was used.
-- **Dense per-variable widget rows replaced with compact tables.** The
-  Monte Carlo, analytic error propagation, and interval arithmetic
-  panels each let someone select several uncertain inputs and set a
-  value per input -- previously one `st.columns(len(symbols))` slot per
-  selected variable, each containing its own `st.number_input`/
-  `st.slider`. On a narrow screen, Streamlit stacks those into a long
-  scroll of full-width blocks: selecting 4 variables meant 4 separate
-  full-width inputs to scroll past just to run one analysis. All three
-  now use a single `st.data_editor` table instead -- one row per
-  variable, edited in place -- which renders as one compact, bounded
-  widget regardless of row count, on both desktop and mobile. Keyed by
-  the sorted set of currently-selected symbols, so changing the
-  multiselect always produces a fresh, correctly-shaped table rather
-  than stale rows left over from a previous selection.
-- **Sidebar reorganized around what's actually looked at often.** The
-  LM Studio connection block (model selection, connection status) --
-  set once and rarely touched again -- moved into its own collapsed-
-  by-default expander (auto-expanded only when there's actually a
-  connection problem to see), rather than sitting permanently at the
-  top of the sidebar pushing everything else down. The two session-
-  persistent status panels (recent error patterns, the active problem
-  chain) moved up to sit directly under mode navigation instead, since
-  those are the quick-glance items someone actually wants on every
-  visit -- meaningful on a phone's sidebar overlay, where every extra
-  screen of scrolling before reaching what you're looking for is
-  actual friction, not just visual noise.
-- Columns that already capped their count at `min(4, N)` for a
-  variable-length set of sliders (the interactive plot's parameter
-  sliders, sensitivity sweep ranges, and similar) were left as they
-  were -- already a reasonable middle ground, and not the kind of
-  wide-open `len(...)`-sized row that caused the worse mobile scrolling
-  the three panels above did.
-
-## UI streamlining
-
-A few changes aimed purely at making the interface easier to navigate as
-the feature list above has grown, with no changes to the underlying
-solving/verification logic:
-
-- **Secondary panels are grouped into tabs.** Right after the confidence
-  banner, a solved problem now shows three tabs -- **🔎 Verify**
-  (verification detail, domain of validity, physical plausibility,
-  paranoid mode, self-consistency check), **📊 Explore** (dependency
-  graph, the interactive plot/contour/feasible-region section), and
-  **🎯 Practice** (grade my work, generate worksheet variants) -- instead
-  of all of those expanders stacking in one long vertical scroll. The
-  core content everyone always wants (derived equations, variables,
-  step-by-step solution, ODE/recurrence solutions, follow-up Q&A) stays
-  in the main flow below the tabs, always visible.
-- **Mode navigation moved to the sidebar.** The word-problem-solver /
-  curve-fitting / equivalence-checking / batch-solver / problem-chains
-  selector used to be a horizontal radio competing for attention right
-  above the main input box; it's now the first thing in the sidebar, so
-  switching tools doesn't require scrolling past whatever's currently in
-  the main content area.
-- **Recent error patterns and the active chain are now visible in the
-  sidebar at all times**, not just inside the one problem's own tabs/
-  expanders where they'd disappear once you moved to a different
-  problem -- both matter across an entire session, not just the problem
-  currently on screen. The active-chain panel includes an "Open in
-  Problem chains" button that switches modes directly.
-- **A "🔗 Send this result to a chain" shortcut** on every solved
-  problem (right below the confidence banner) creates a new chain -- or
-  adds a step to an existing one -- from the CURRENT solved model in one
-  click, rather than needing to re-paste the problem's text into the
-  separate Problem chains mode.
+- A solved problem shows its secondary panels in three tabs: **Verify**,
+  **Explore** and **Practice**. The core content (equations, steps, ODE and
+  recurrence solutions, follow-up Q&A) stays below them.
+- Mode navigation, the active chain and recent error patterns live in the
+  sidebar. The LM Studio connection block is collapsed unless there is a problem.
+- Phone-friendly: camera capture for both photo inputs, and compact
+  `st.data_editor` tables instead of one widget per variable.
+- Moving a widget only rebuilds what it feeds (`ui/cache.py`), so animated pages
+  stay responsive.
 
 ## Extending it
 
-- **Adding a new sidebar mode**: add one `PaletteEntry` to
-  `modules/command_palette.py`'s `_ENTRIES` (its `mode` field is what
-  `MODE_LABELS` -- and therefore the sidebar radio -- is built from),
-  write the page itself as a new `ui/<name>.py` module (see
-  `ui/__init__.py`'s own docstring for the package layout), and add one
-  entry to `ui/__init__.py`'s `PAGES` dict mapping the label to that
-  page function. `tests/test_app_modes.py` fails if either half is
-  added without the other, so a typo'd label can't silently ship a mode
-  the palette can't find, or a palette entry that jumps to a mode with
-  no page behind it.
-- Swap Streamlit for a desktop shell (e.g. `pywebview` wrapping the same
-  Streamlit app, or a PyQt front end calling the same `modules/`) if you want
-  a native window instead of a browser tab -- the `modules/` package has no
-  Streamlit dependency, so it's reusable as-is.
-- The verification tolerance, retry count, and temperatures are all in
-  `config.py` -- or tune them live from the app's "⚙️ Advanced settings"
-  sidebar expander without restarting (see below).
-- `modules/ode_utils.py` centralizes ODE-solving (used by both
-  `solver.py` and `verifier.py`) specifically to avoid a circular import
-  between those two -- keep that pattern in mind if you add another
-  cross-cutting solve step. It also handles coupled SYSTEMS of ODEs (e.g. a
-  decay chain A -> B): `group_coupled_odes()` groups ode-kind equations by
-  shared function names, and equations that turn out to be coupled are
-  solved together via `dsolve_system` rather than one at a time.
-- **Dimensional checking substitutes fresh placeholder quantities, not the
-  raw parsed unit, per distinct symbol** (`make_dimension_placeholder()` in
-  `units_checker.py`). This mattered in practice: substituting the same
-  canonical unit object (e.g. `u.meter`) for two DIFFERENT symbols that
-  happen to share a unit causes SymPy to treat them as literally
-  interchangeable, so checking something like `a - b` (both in meters)
-  would silently collapse to a bare `0` before the dimension was ever
-  computed -- correctly reporting "dimensionless" instead of "length" and
-  false-failing the check. A coupled ODE system (`k1*A - k2*B`, where both
-  rate constants and both functions happened to share units) hit exactly
-  this during development. Each distinct symbol now gets its own
-  uniquely-named placeholder with the right dimension, so same-dimension
-  terms still validate correctly but don't falsely cancel.
-- `modules/plot_snapshot.py` is the static (matplotlib) counterpart to
-  `plotter.py`'s interactive Plotly figures -- kept as a separate module
-  since they serve different purposes (one for the live browser session,
-  one for exported documents) and deliberately don't share a rendering
-  path, so a change to the interactive figures can't accidentally break
-  what gets embedded in a report, or vice versa.
-- Vector variables' own `known_value` is always null -- only their declared
-  `components` (ordinary scalar variables in their own right) carry numbers.
-  `solve_for` can never name a vector variable directly (`sp.solve` needs a
-  scalar target) -- solve for a component, or for a scalar equation's LHS
-  that's defined via `dot`/`cross`/`magnitude` on the vector instead.
-- Currently unsupported: nonlinear coupled ODE systems (true predator-prey
-  dynamics, for instance) mostly have no closed-form solution even in
-  principle -- `dsolve_system` will fail on those and the app reports it
-  honestly rather than falling back to numeric integration (a further
-  scope decision, not free); and multi-variable inequality regions are
-  only visualized in 2D (pick any two free variables as axes; more than
-  two requires fixing the rest via sliders, same pattern as the 3D surface
-  plot for equations).
+- **A new sidebar mode:** add a `PaletteEntry` to `modules/command_palette.py`'s
+  `_ENTRIES` (it builds `MODE_LABELS`, which the sidebar radio uses), write the
+  page as `ui/<name>.py`, and add it to `ui/__init__.py`'s `PAGES`.
+  `tests/test_app_modes.py` fails if either half is missing.
+- **A different front end:** `modules/` has no Streamlit dependency, so a desktop
+  shell or another UI can call it as-is.
+- **Tuning:** verification tolerance, retry count and temperatures are in
+  `config.py`, or live in the sidebar's "⚙️ Advanced settings".
+- **Known limits:** nonlinear coupled ODE systems (predator-prey, say) mostly have
+  no closed form, so `dsolve_system` fails and the app says so rather than
+  integrating numerically. Inequality regions are only plotted in 2D. A
+  `solve_for` target can't be a vector variable; solve for a component, or for a
+  scalar equation defined with `dot`/`cross`/`magnitude`.
 
 ## Advanced settings (in-app)
 
-The sidebar's "⚙️ Advanced settings" expander exposes the knobs that would
-otherwise only be editable in `config.py`, live, without a restart:
-
-- **Extraction / narration temperature** -- how much freedom the model has
-  when converting text into equations vs. writing step explanations.
-- **Max verification retries** -- how many times to re-prompt with the
-  failure reason before giving up.
-- **Numeric balance tolerance** -- how close a residual must be to zero to
-  count as "balances."
-- **Independent cross-check tolerance** -- how far the derived answer and
-  the independent re-solve can disagree before verification flags it.
-
-A "Reset to defaults" button restores `config.py`'s original values.
-Settings apply to the *next* problem you solve, and persist for the
-lifetime of the running app process (they're not saved back to disk).
+The sidebar's "⚙️ Advanced settings" expander changes these live, without a
+restart, for the *next* problem you solve (they aren't saved to disk, but can be
+saved as a named profile): extraction and narration temperature, maximum
+verification retries, numeric balance tolerance, independent cross-check
+tolerance, and the computation timeout. "Reset to defaults" restores
+`config.py`'s values.
 
 ## Running the tests
-
-A pytest suite covers the extraction/verification/solving core -- the same
-mocked-client pattern (`tests/conftest.py`'s `FakeClient`) used throughout
-development, so no live LM Studio server is needed to run it:
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
 ```
 
-Coverage includes: all three equation kinds (algebraic, inequality, ODE)
-end-to-end through extraction -> verification -> solving -> export;
-the confidence/margin system; the JSON-extraction robustness helpers
-(fenced code blocks, prose-wrapped JSON, truncated/invalid JSON); the
-dimensional-unit checker (including the "unrecognized unit silently
-mis-parsed" bug caught during development); workspace rename validation;
-and the history save/load/delete round trip. `tests/conftest.py` has the
-sample payloads and fixtures if you want to add more.
+The suite (about 1,650 tests, roughly two minutes) uses a mocked LLM client
+(`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
 
-### Automated testing on every change
-
-- **CI** (`.github/workflows/tests.yml`): the full suite runs automatically
-  on every push and pull request, on a matrix of **ubuntu-latest AND
-  windows-latest** × Python 3.12/3.14 (the oldest and the newest supported). Windows is included deliberately,
-  not just as a formality -- this app targets Windows as a first-class
-  local-run environment, and at least one module
-  (`modules/timeout_utils.py`) exists specifically because a naive
-  implementation (`signal.alarm`) would silently do nothing there;
-  testing only on Linux would never catch that class of bug for real, it
-  would just look green. The workflow also byte-compiles the whole
-  project (including `app.py` and `ui/` themselves, which the pytest
-  suite never imports directly since they're the Streamlit
-  script/pages) as a cheap first check
-  before running the actual suite. Trigger it manually from the Actions
-  tab any time via `workflow_dispatch`.
-- **Optional local pre-commit hook** (`.pre-commit-config.yaml`): runs
-  the same suite before each commit, for immediate feedback rather than
-  finding out something broke only after pushing. The full suite is over
-  sixteen hundred tests and takes about two minutes, so this is still a
-  noticeable wait on every commit -- opt in only if you want that trade,
-  or run it on `git push` instead by adding
-  `stages: [pre-push]` to the hook and installing with
-  `pre-commit install --hook-type pre-push`. Opt in with:
-  ```bash
-  pip install pre-commit
-  pre-commit install
-  ```
-  Skip it for a single commit with `git commit --no-verify`.
-- **Coverage floor**: `pytest` fails if line coverage of `modules/` drops
-  below the `fail_under` value in `pyproject.toml` (currently 90%; measured
-  coverage is in the mid-90s). It exists to catch a meaningful chunk of new
-  code shipping with no tests at all, not to chase 100% -- the remaining
-  uncovered lines are mostly defensive branches around third-party failures.
-- **Plot target selectors** (Y-axis / Z-axis / contour value) solve the
-  equation for the chosen variable. The UI also shows a slider for that
-  variable (its selectbox comes after the sliders); the solve deliberately
-  ignores that slider value, and the UI says so in a caption. If sympy can't
-  solve for the target the plot falls back to the equation's residual, which
-  needs a value for every non-axis symbol -- a missing one raises a
-  `ValueError` naming it (`modules/plot_params.py`, shared by the live Plotly
-  figures and the exported matplotlib snapshots so the two always agree).
-- **Type checking covers everything**: CI runs
-  `mypy modules/ ui/ app.py cli.py config.py api_server.py` (zero errors).
-  It used to skip `ui/` and `app.py`; checking them turned up real latent
-  crashes (not just noise), so they're now held to the same standard.
+- **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:
+  **ubuntu-latest and windows-latest** x Python **3.12 and 3.14** (the oldest and
+  newest supported) x two hash seeds. Windows is included deliberately, since this
+  app targets it and some code (the timeout wrapper) exists because the obvious
+  approach, `signal.alarm`, does nothing there. CI also byte-compiles the project
+  and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`.
+- **Coverage floor:** `pytest` fails below 90% line coverage of `modules/`
+  (measured: mid-90s). It exists to catch new code with no tests at all, not to
+  chase 100%. Coverage uses `sys.monitoring` (`core = "sysmon"`), which reports the
+  same lines as the default tracer at about a third of the overhead.
 - **UI tests** (`tests/test_ui_smoke.py`) drive the real `app.py` through
-  Streamlit's `AppTest` harness: every sidebar mode must render without an
-  exception, plus regressions for the page-level bugs the type checker
-  found. The app's four SQLite databases are redirected to a temp dir, so
-  running the suite never touches your real history, chains, templates or
-  settings (only the log file, `data/app.log`, is created by importing the
-  app, same as it always was). Booting a page costs several seconds (nearly
-  all of it building Plotly figures), so the tests are written to pay it
-  sparingly: checks that only READ a page share one boot (`_shared_*_page`,
-  which must never be touched with a widget), a page's controls are
-  exercised in one test rather than one test each, and the "press the GIF
-  button" tests use the `gif_stub` fixture -- a recorder standing in for the
-  matplotlib renderer, so the test asserts what the button is HANDED instead
-  of spending 5-15 seconds rendering 40 frames. The renderers themselves are
-  tested for real (valid GIF, right frame count) in `test_gif_export.py` and
-  `test_time_plots*.py`, and one GIF button per page is still clicked
-  end-to-end.
-- **Coverage is measured with `sys.monitoring`** (`[tool.coverage.run] core =
-  "sysmon"` in `pyproject.toml`, needs `coverage>=7.9`). It reports the same
-  covered lines as the default C tracer -- checked across the whole suite --
-  but with roughly a third of the overhead; the default tracer made the suite
-  about 2.5x slower than running it with no coverage at all.
-- **SQLite connections are closed** (`modules/db_util.py`). `with
-  sqlite3.connect(...) as conn:` commits but does not close, so each of the
-  app's four small databases leaked a connection per call: harmless on
-  Python 3.12, a `ResourceWarning` per connection on 3.13+ (hundreds per test
-  run on 3.14), and a locked `-wal`/`-shm` file on Windows. The `_connect()`
-  helpers now return a connection that commits (or rolls back) *and* closes
-  when the `with` block ends; `tests/test_db_util.py` checks all four, with
-  `ResourceWarning` promoted to an error.
-- **Reruns reuse unchanged work** (`ui/cache.py`). Streamlit re-executes the
-  whole script on every widget interaction, so moving one slider used to rebuild
-  every figure and re-solve every differential equation on the page: about two
-  seconds on an ODE page, almost all of it for things the slider had nothing to
-  do with (an animated Plotly figure with 60 frames takes a second or more to
-  construct). `cached(key, parts, compute)` returns the previous result unless
-  `parts` -- every input it depends on -- changed; ODE and recurrence solves are
-  cached by the model's content (`cached_by_model`). Staleness is prevented by
-  what is hashed: inputs are fingerprinted by CONTENT (array bytes and shape,
-  expression structure, dataclass fields), never by identity or `repr`, and
-  anything that can't be hashed that way makes the call recompute -- slower,
-  never wrong. One entry is kept per call site, 64 at most. Measured on the
-  spiral ODE example, a rerun after moving an unrelated slider went from about
-  2.0 s to 0.2 s; the page the slider belongs to still rebuilds only the figure
-  it feeds. Cached figures are shared between reruns, so they are passed straight
-  to `st.plotly_chart` and never modified. (`st.fragment` was considered and
-  deliberately NOT used: a fragment re-runs alone, so state it changes -- the
-  "include in report" toggles, say -- would not update the sections outside it
-  until the next full run, and the test harness can't reproduce partial reruns.)
-- **Hypothesis deadlines are disabled suite-wide** (`tests/conftest.py`).
-  Nearly every property test drives SymPy, whose first call on a fresh
-  expression shape warms internal caches (a cold call can take several
-  times longer than the identical warm one), so Hypothesis' default 200ms
-  per-example deadline failed nondeterministically as a `FlakyFailure` --
-  a timing artifact, not a correctness signal. Each test's own
-  `@settings(max_examples=...)` still applies.
+  Streamlit's `AppTest`, with the SQLite databases redirected to a temp directory.
+  Booting a page is slow, so read-only checks share one boot (`_shared_*_page`,
+  never touched with a widget), a page's controls are tested together, and GIF
+  buttons use the `gif_stub` recorder; the renderers themselves are tested for
+  real elsewhere.
+- **Hypothesis deadlines are disabled** (`tests/conftest.py`): SymPy's first call
+  on a new expression is several times slower than later ones, so the default
+  deadline failed at random without meaning anything.
+- **Pre-commit hook** (optional, `.pre-commit-config.yaml`): runs the suite before
+  each commit. It takes about two minutes, so you may prefer
+  `pre-commit install --hook-type pre-push` with `stages: [pre-push]`. Skip it
+  once with `git commit --no-verify`.

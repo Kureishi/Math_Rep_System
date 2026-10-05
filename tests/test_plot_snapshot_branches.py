@@ -7,7 +7,7 @@ array, vector plots of every dimension, etc.).
 Every test asserts on real output -- valid PNG/GIF magic bytes -- rather than
 merely "didn't raise": a figure function that silently returned empty bytes
 would otherwise pass. Byte validity is NOT the same as correct rendering
-(see the export notes in this repo's README); these tests guard the control
+(see the plots-and-exports notes in ARCHITECTURE.md's design notes); these tests guard the control
 flow, and the existing visual-inspection step guards the pixels.
 """
 import numpy as np

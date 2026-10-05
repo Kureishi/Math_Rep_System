@@ -383,3 +383,84 @@ a given `solve_for` target actually takes, based on which kind of relation
 defines it -- this is what lets `compute_steps()` and `verify()` dispatch
 correctly even when a single problem mixes kinds (e.g. an equation and a
 constraint together).
+
+## Design notes
+
+Decisions and operational details that don't belong in the README.
+
+**Verification and solving**
+- **Dimensional checking uses a fresh placeholder per symbol**
+  (`units_checker.make_dimension_placeholder`). Substituting the same unit object
+  for two different symbols that share a unit makes SymPy treat them as
+  interchangeable, so `a - b` (both lengths) collapses to `0` and is reported
+  dimensionless. A `Piecewise` is checked branch by branch, because SymPy's own
+  dimension machinery mishandles it whole. The dimension of `d^n f / dx^n` is
+  `dim(f) / dim(x)^n`.
+- **Optimisation never drops an equality constraint.** Each is used to eliminate a
+  variable (and is then substituted out of every other constraint), found
+  redundant, or -- if SymPy can't isolate a variable, or it pins the last free one
+  -- the whole problem falls back to Lagrange multipliers. An unsolvable Lagrange
+  system is an error, never an answer that ignores the constraint.
+- **A matrix view is shown only for a genuine system**, i.e. one that can't be
+  solved one unknown at a time (`matrix_utils._is_sequentially_solvable`). The
+  "show me another way" toggle bypasses that heuristic with `force=True`.
+- **The numerical fallback is surfaced in the step trace only.** It isn't threaded
+  into the independent cross-check or the confidence report, which stay scoped to
+  exact symbolic answers.
+- **Numeric answers are computed once and reused.** Monte Carlo, parameter sweeps,
+  interval arithmetic and error propagation solve the system symbolically once and
+  evaluate the closed form vectorised. An earlier per-sample version hit
+  `sp.nsimplify`'s slow path on arbitrary floats (100 samples took 14 s).
+- **`ode_utils.py` is shared by `solver.py` and `verifier.py`** to avoid a circular
+  import between them. Coupled ODEs are grouped by shared function names and
+  solved together with `dsolve_system`.
+- **Vector variables carry no `known_value`**; only their components do.
+
+**Plots and exports**
+- **`plot_snapshot.py` (matplotlib) is deliberately separate from `plotter.py`
+  (Plotly)**, so a change to the live figures can't break exported documents.
+  `plot_params.py` is the one shared piece (solve for the target, else plot the
+  residual), so a live plot and its snapshot always agree.
+- **No `kaleido`.** Its current releases need a separately installed Chrome, which
+  conflicts with a "pip install and go" app. PDF equations use matplotlib
+  mathtext, so no system LaTeX either. Byte validity is not correct rendering, so
+  exports are inspected by eye.
+- **Animations** use Plotly frames with a Play/Pause button and slider, with a
+  matplotlib `PillowWriter` GIF as the export. Axis ranges and colour scales are
+  fixed up front so nothing rescales mid-animation.
+
+**Operations**
+- **Timeouts** (`timeout_utils.py`) use a daemon thread per call, not
+  `signal.alarm` (absent on Windows) and not a shared pool. Python can't kill a
+  thread, so a timed-out computation keeps running; that is bounded by
+  `MAX_ABANDONED` (8), after which calls are refused with `ComputationBusyError`.
+  A shared pool of four used to fill up after four hangs and report even `1 + 1`
+  as timed out. Call sites degrade according to importance: the primary solve
+  reports a visible failure, while secondary features (uncertainty, alternate
+  method, constraint elimination) quietly become "unavailable".
+- **SQLite** (`history.py` and three siblings): WAL journal, `synchronous=NORMAL`,
+  a 5 s `busy_timeout`, and history pruned to `MAX_HISTORY_RECORDS` (100).
+  `db_util.ClosingConnection` makes `with _connect() as conn:` commit *and* close
+  (the plain context manager only commits, which leaks a connection and warns on
+  Python 3.13+). Numbered, idempotent migrations (`db_migrations.py`) run at
+  startup.
+- **Uploads** are capped at 500 MB twice: `server.maxUploadSize` in
+  `.streamlit/config.toml`, and `ui/common.check_upload_size()` for a clearer
+  message. `.gitignore` carries a narrow exception so that one secret-free file is
+  tracked.
+- **Logging** (`app_logging.py`): a rotating WARNING-and-above log (5 MB x 3),
+  wired into three gateways that nearly every failure passes through:
+  `LMStudioClient.chat()`, `extract_json()` and `run_with_timeout()`. The handler
+  is guarded so Streamlit's script reruns don't add duplicates.
+- **Dependencies are pinned** to the versions the suite has run against, because
+  an open-ended range can pull in a breaking release unseen. To upgrade, bump one
+  line and let CI run on both platforms.
+- **Reruns reuse work** (`ui/cache.py`). Streamlit re-executes the script on every
+  widget change, and building one 60-frame Plotly figure takes a second or more.
+  `cached(key, parts, compute)` returns the previous result unless `parts` changed.
+  Inputs are fingerprinted by content (array bytes and shape, expression structure,
+  dataclass fields), never identity or `repr`, and anything unhashable recomputes:
+  slower, never stale. Cached figures are shared, so they are never modified.
+  `st.fragment` was considered and not used: a fragment reruns alone, so state it
+  changes (the "include in report" toggles) wouldn't update the rest of the page,
+  and the test harness can't reproduce partial reruns.
