@@ -288,8 +288,10 @@ def render_pde_tab():
         grid_n = st.slider("Grid resolution", 21, 101, 41, step=10, key="fd_resolution")
         result = persist_on_click(
             "Solve", "fd_button", "fd_result", True,
-            lambda: solve_pde_finite_difference_2d(
-                source_fd, boundary_fd, domain_fd, (x_min, x_max), (y_min, y_max), grid_n, grid_n))
+            lambda progress: solve_pde_finite_difference_2d(
+                source_fd, boundary_fd, domain_fd, (x_min, x_max), (y_min, y_max), grid_n, grid_n,
+                progress=progress),
+            run_label="Finite-difference solve", stoppable=True)
         if result is not None:
             if result.error:
                 st.error(result.error)
@@ -334,9 +336,10 @@ def render_pde_tab():
                                       "than the grid gets finer.")
         result = persist_on_click(
             "Solve & animate", "heat2d_button", "heat2d_result", True,
-            lambda: solve_heat_equation_2d_dirichlet(
+            lambda progress: solve_heat_equation_2d_dirichlet(
                 ic_2d, bc_2d, (0.0, width_2d), (0.0, height_2d), alpha=alpha_2d,
-                nx=grid_n_2d, ny=grid_n_2d))
+                nx=grid_n_2d, ny=grid_n_2d, progress=progress),
+            run_label="2D heat equation")    # the stepping is one indivisible call: stages, but no Stop
         if result is not None:
             if result.error:
                 st.error(result.error)

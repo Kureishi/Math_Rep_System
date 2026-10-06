@@ -15,8 +15,7 @@ from modules.followup import answer_followup
 from modules.vector_utils import vector_summary
 from modules.plotter import build_vector_plot, build_descent_path_plot, build_motion_diagram
 from modules.plot_snapshot import snapshot_vector_plot, snapshot_motion_diagram_gif
-from modules import history, chains
-from modules.exporter import build_markdown, build_pdf_bytes
+from modules import history
 from ui.cache import cached
 from ui.common import snapshot_button, gif_download_button
 from ui.theme import badge_row
@@ -137,51 +136,6 @@ def render_motion_diagram(model: ProblemModel, report: VerificationReport):
                 tr.t_values, tr.x_values, tr.v_values, x_label=tr.x_label,
                 x_unit=tr.x_unit, t_unit=tr.t_unit, a_values=av, n_strobes=ns),
         )
-
-
-
-def render_send_to_chain(model: ProblemModel):
-    """One-click shortcut to feed a just-solved target into a problem chain."""
-    # ---- send to chain: a one-click shortcut so getting a just-solved
-    # problem into a chain doesn't mean re-pasting its text into the
-    # separate Problem chains mode. Only offered when there's an
-    # algebraic result to actually expose downstream.
-    send_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
-    if send_targets:
-        with st.expander("🔗 Send this result to a chain"):
-            existing_chains = chains.list_chains()
-            chain_choice = st.selectbox(
-                "Chain", ["+ New chain"] + [c["name"] for c in existing_chains],
-                key="send_to_chain_choice",
-            )
-            send_target = st.selectbox("Expose which result downstream?", send_targets,
-                                         key="send_to_chain_target")
-            new_chain_name = ""
-            if chain_choice == "+ New chain":
-                new_chain_name = st.text_input(
-                    "New chain name", key="send_to_chain_new_name",
-                    placeholder=f"{model.problem_domain} chain",
-                )
-            if st.button("Send to chain", key="send_to_chain_button"):
-                if chain_choice == "+ New chain":
-                    if not new_chain_name.strip():
-                        st.error("Give the new chain a name first.")
-                        target_chain_id = None
-                    else:
-                        target_chain_id = chains.create_chain(new_chain_name.strip())
-                else:
-                    target_chain_id = next(c["id"] for c in existing_chains if c["name"] == chain_choice)
-                if target_chain_id is not None:
-                    try:
-                        chains.add_step(target_chain_id, st.session_state.get("problem_text", ""),
-                                          model, send_target)
-                    except ValueError as e:
-                        st.error(str(e))
-                    else:
-                        st.session_state["active_chain_id"] = target_chain_id
-                        st.success(f"Added as a step exposing `{send_target}` -- see the sidebar, "
-                                    "or switch to Problem chains to wire it up further.")
-                        st.toast(f"Added to chain, exposing `{send_target}`", icon="🔗")
 
 
 
@@ -465,34 +419,3 @@ def render_scenarios():
                     st.code(s.get("raw", ""))
             else:
                 st.markdown(f"- **{s.get('scenario', '')}**  \n  _{s.get('mapping', '')}_")
-
-
-
-def render_export(model: ProblemModel, report: VerificationReport, steps_by_target):
-    """Markdown / PDF export controls."""
-    # ---- export
-    st.divider()
-    st.markdown("### Export")
-    scenarios_list = st.session_state["scenarios"] or []
-    export_problem_text = st.session_state["problem_text"]
-    plot_snapshots_list = list(st.session_state["plot_snapshots"].values())
-    if plot_snapshots_list:
-        st.caption(f"{len(plot_snapshots_list)} plot(s) will be included in the exported report.")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        md_content = build_markdown(export_problem_text, model, report, steps_by_target, scenarios_list,
-                                      plot_snapshots=plot_snapshots_list)
-        st.download_button("📄 Download as Markdown", data=md_content,
-                            file_name="solved_problem.md", mime="text/markdown")
-    with c2:
-        if st.session_state["pdf_bytes"] is None:
-            if st.button("🖨️ Generate PDF"):
-                with st.spinner("Rendering PDF (typesetting equations)..."):
-                    st.session_state["pdf_bytes"] = build_pdf_bytes(
-                        export_problem_text, model, report, steps_by_target, scenarios_list,
-                        plot_snapshots=plot_snapshots_list)
-                st.rerun()
-        else:
-            st.download_button("⬇️ Download PDF", data=st.session_state["pdf_bytes"],
-                                file_name="solved_problem.pdf", mime="application/pdf")

@@ -137,7 +137,10 @@ Markdown, PDF, Python, or a Jupyter notebook.
 - **Geometry**, **PDE solver** (heat, wave, Laplace, first-order), **Tensor
   calculus**, **Transforms & series** (Laplace, Fourier, Taylor, Laurent,
   asymptotic, Fourier series), **Dimensional analysis** (Buckingham-Pi-style
-  exploration from units alone), **Extraction diff**, and **Research journal**.
+  exploration from units alone), **Extraction diff**, **Compare solves**
+  (`solve_compare.py`: two solves, or a what-if of one with some inputs changed, lined
+  up on answers, inputs, equations and verification; no LLM call), and **Research
+  journal**.
 
 **Plots and animations**
 - Interactive 2D line, 3D surface, contour, feasible-region, ODE, recurrence and
@@ -177,7 +180,9 @@ Markdown, PDF, Python, or a Jupyter notebook.
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**
   (`api_server.py`) covers `/solve`, `/fit`, `/equivalence` and
   `/dimensional-analysis`. Both talk to LM Studio the same way the app does.
-- **Export:** PDF equations are rendered with matplotlib mathtext, and plots go
+- **Export:** one **Share / export** button opens a dialog with the Markdown and PDF
+  downloads, copy-ready **LaTeX** and plain-text summaries (`share_text.py`), and
+  "send to a chain". PDF equations are rendered with matplotlib mathtext, and plots go
   into a report through an explicit "Include this plot" button. Static images
   deliberately avoid `kaleido`, whose current releases need a separate Chrome
   install.
@@ -201,8 +206,20 @@ Markdown, PDF, Python, or a Jupyter notebook.
   sidebar. The LM Studio connection block is collapsed unless there is a problem.
 - Phone-friendly: camera capture for both photo inputs, and compact
   `st.data_editor` tables instead of one widget per variable.
-- Moving a widget only rebuilds what it feeds (`ui/cache.py`), so animated pages
-  stay responsive.
+- Moving a widget only rebuilds what it feeds (`ui/cache.py`), and the heavy analysis
+  panels (Monte Carlo, sweeps, sensitivity, the interactive plots, the time views) are
+  isolated `st.fragment`s that rerun on their own.
+- **Plots you can click:** a tornado bar can be swept in detail, added to the
+  N-dimensional sweep or given a Monte Carlo uncertainty; a sweep-heatmap point can be
+  loaded into the Variables panel or opened in Compare; a dependency-graph node shows
+  its steps.
+- **Long runs show live progress** (Monte Carlo, batch solves, PDE solves) with a
+  **Stop** button that takes effect at the next checkpoint. A single SymPy or numpy call
+  cannot be interrupted, so Stop acts between chunks of work, not mid-calculation.
+- **Reopening a past problem restores how you were exploring it** (sample counts and
+  seeds, sweep setup, plot axes and sliders). Opening or solving a problem starts from
+  that problem's own settings rather than the previous one's.
+- Each step's "Explain just this step" is a popover rather than an expander.
 
 ## Extending it
 
@@ -236,7 +253,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite (about 1,650 tests, roughly two minutes) uses a mocked LLM client
+The suite (about 1,850 tests, roughly two minutes) uses a mocked LLM client
 (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:

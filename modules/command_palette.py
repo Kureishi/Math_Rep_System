@@ -39,6 +39,8 @@ _ENTRIES = [
     PaletteEntry("📚 Batch solver", ("multiple", "worksheet", "many problems")),
     PaletteEntry("🔗 Problem chains", ("chain", "sequence", "multi-step", "pipeline")),
     PaletteEntry("🔬 Extraction diff", ("wording", "compare", "rephrase")),
+    PaletteEntry("🆚 Compare solves", ("diff", "versus", "difference", "what if", "side by side",
+                                        "two problems")),
     PaletteEntry("📐 Dimensional analysis", ("units", "dimensions", "si", "imperial")),
     PaletteEntry("🔄 Transforms & series", ("laplace", "fourier", "taylor", "asymptotic", "expansion")),
     PaletteEntry("🌡️ PDE solver", ("heat", "wave", "laplace equation", "robin", "neumann", "dirichlet",

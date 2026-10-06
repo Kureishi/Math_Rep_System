@@ -65,6 +65,7 @@ def export_bundle(history_ids: list | None = None, chain_ids: list | None = None
         if loaded is None:
             continue
         problem_text, model, report, steps_by_target, scenarios = loaded
+        saved_view = history.load_view_state(hid)
         history_records.append({
             "problem_text": problem_text,
             "raw_json": model.raw_json,
@@ -76,6 +77,8 @@ def export_bundle(history_ids: list | None = None, chain_ids: list | None = None
             },
             "steps_by_target": {t: [asdict(s) for s in steps] for t, steps in steps_by_target.items()},
             "scenarios": scenarios,
+            # additive and optional (older bundles have none): how the problem was being explored
+            **({"view_state": saved_view} if saved_view else {}),
         })
 
     if chain_ids is None:
@@ -148,7 +151,9 @@ def import_bundle(bundle_json: str, workspace) -> ImportSummary:
             )
             steps_by_target = {t: [SolutionStep(**s) for s in steps]
                                  for t, steps in rec["steps_by_target"].items()}
-            history.save(rec["problem_text"], model, report, steps_by_target, rec.get("scenarios", []))
+            new_id = history.save(rec["problem_text"], model, report, steps_by_target, rec.get("scenarios", []))
+            if rec.get("view_state"):
+                history.save_view_state(new_id, rec["view_state"])
             n_history += 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"Skipped a history record ('{rec.get('problem_text', '?')[:40]}'): {e}")

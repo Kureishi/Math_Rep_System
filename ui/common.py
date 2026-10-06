@@ -18,6 +18,7 @@ from sympy.parsing.sympy_parser import (
 )
 from modules.templates import save_template, list_templates, load_template
 from modules.exporter import PlotSnapshot
+from ui.progress import notice_interrupted, tracked_run
 
 
 LIVE_PREVIEW_TRANSFORMS = standard_transformations + (implicit_multiplication_application, convert_xor)
@@ -134,7 +135,8 @@ def gif_download_button(key: str, file_stem: str, render_fn):
                                  mime="image/gif", key=f"save_gif_{key}")
 
 
-def persist_on_click(button_label: str, button_key: str, session_key: str, ready: bool, compute_fn):
+def persist_on_click(button_label: str, button_key: str, session_key: str, ready: bool, compute_fn,
+                     *, run_label: str | None = None, stoppable: bool = False):
     """Runs compute_fn() and stores the result in st.session_state when
     the button is clicked, then ALWAYS reads back from session_state
     (returning None if nothing's been computed yet) rather than only
@@ -152,8 +154,16 @@ def persist_on_click(button_label: str, button_key: str, session_key: str, ready
     interactivity upgrades adds throughout the PDE and tensor-calculus
     tabs, so every "Solve"/"Analyze" button in both was converted to
     this pattern rather than just the ones visibly breaking today."""
+    if run_label:
+        notice_interrupted(button_key, run_label.lower())
     if st.button(button_label, key=button_key) and ready:
-        st.session_state[session_key] = compute_fn()
+        if run_label:
+            # a live status block (ui/progress.py); `compute_fn` then takes the progress hook as its one
+            # argument, and `stoppable` adds a Stop button that takes effect at the next checkpoint
+            with tracked_run(button_key, run_label, stoppable=stoppable) as progress:
+                st.session_state[session_key] = compute_fn(progress)
+        else:
+            st.session_state[session_key] = compute_fn()
     return st.session_state.get(session_key)
 
 

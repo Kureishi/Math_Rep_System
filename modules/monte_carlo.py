@@ -36,7 +36,10 @@ import numpy as np
 import sympy as sp
 
 from modules.equation_engine import ProblemModel, target_kind
+from modules.progress import ProgressFn, chunk_bounds, report
 from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
+
+EVAL_CHUNK = 2500  # samples evaluated per numpy call WHEN a progress hook is given -- see run_monte_carlo
 
 MAX_SAMPLES = 20000  # a sanity cap -- generous, since (unlike chains.py) this module only ever
                        # does ONE symbolic solve regardless of sample count, so cost scales with
@@ -69,8 +72,34 @@ class MonteCarloResult:
     p95: float | None = None
 
 
+def _evaluate_in_chunks(f, arg_arrays: list, n_samples: int, progress: ProgressFn | None) -> np.ndarray:
+    """f(*samples) as a complex array of length n_samples. Vectorised when it can be, one sample at a
+    time when lambdify's vectorised path can't handle the expression (piecewise conditionals, certain
+    special functions) -- an individual sample that itself raises just becomes NaN, like any other
+    failed sample. With no `progress` hook the whole array goes through in one call, exactly as it
+    always did; with one, it goes through EVAL_CHUNK samples at a time with a checkpoint after each."""
+    bounds = chunk_bounds(n_samples, EVAL_CHUNK if progress is not None else n_samples)
+    pieces = []
+    for start, stop in bounds:
+        part = [arr[start:stop] for arr in arg_arrays]
+        try:
+            piece = np.broadcast_to(np.asarray(f(*part), dtype=complex), (stop - start,))
+        except Exception:  # noqa: BLE001
+            vals = []
+            for i in range(stop - start):
+                try:
+                    vals.append(complex(f(*[arr[i] for arr in part])))
+                except Exception:  # noqa: BLE001
+                    vals.append(complex("nan"))
+            piece = np.array(vals)
+        pieces.append(piece)
+        report(progress, f"Evaluated {stop:,} of {n_samples:,} samples", 0.1 + 0.85 * stop / n_samples)
+    return np.concatenate(pieces) if pieces else np.array([], dtype=complex)
+
+
 def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[UncertainVariable],
-                     n_samples: int = 1000, seed: int | None = None) -> MonteCarloResult:
+                     n_samples: int = 1000, seed: int | None = None,
+                     progress: ProgressFn | None = None) -> MonteCarloResult:
     """Draws `n_samples` joint samples (each uncertain variable sampled
     independently from its own Normal(mean, std)) and evaluates a single
     closed-form solution for `target` at every sample. A sample that
@@ -98,6 +127,7 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
         seed = int(np.random.SeedSequence().generate_state(1, dtype=np.uint32)[0])
 
     n_samples = max(10, min(n_samples, MAX_SAMPLES))
+    report(progress, "Drawing random inputs", 0.0)
     rng = np.random.default_rng(seed)
     draws = {uv.symbol: rng.normal(uv.mean, uv.std, size=n_samples) for uv in uncertain_vars}
 
@@ -116,6 +146,7 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
 
     algebraic_targets = [t for t in model.solve_for if target_kind(model, t) == "equation"]
     target_syms = [sp.Symbol(t) for t in algebraic_targets]
+    report(progress, "Solving the model symbolically (once)", 0.05)
     try:
         sol = run_with_timeout(sp.solve, eqs, target_syms, dict=True, label="monte carlo solve")
     except ComputationTimeoutError:
@@ -147,21 +178,7 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
     f = sp.lambdify([sp.Symbol(uv.symbol) for uv in active_vars], target_expr, "numpy")
     arg_arrays = [draws[uv.symbol] for uv in active_vars]
 
-    try:
-        raw = np.broadcast_to(np.asarray(f(*arg_arrays), dtype=complex), (n_samples,))
-    except Exception:  # noqa: BLE001
-        # lambdify's vectorized path can't always handle every expression
-        # (piecewise conditionals, certain special functions) -- fall
-        # back to evaluating one sample at a time rather than failing
-        # the whole run; an individual sample that itself raises just
-        # becomes NaN, same as any other failed sample
-        vals = []
-        for i in range(n_samples):
-            try:
-                vals.append(complex(f(*[arr[i] for arr in arg_arrays])))
-            except Exception:  # noqa: BLE001
-                vals.append(complex("nan"))
-        raw = np.array(vals)
+    raw = _evaluate_in_chunks(f, arg_arrays, n_samples, progress)
 
     is_real = np.abs(raw.imag) < 1e-9
     real_vals = raw.real

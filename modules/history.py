@@ -218,6 +218,33 @@ def load(entry_id: int):
     return problem_text, model, report, steps_by_target, scenarios
 
 
+def save_view_state(entry_id: int, view_state: dict) -> bool:
+    """Stores the exploration state (modules/view_state.py's wrap() form) with the problem's record, inside
+    its existing JSON payload, so it needs no schema change and an older database simply has none.
+    Returns False if there is no such record. An empty state removes a previously saved one."""
+    with _connect() as conn:
+        row = conn.execute("SELECT payload FROM problems WHERE id = ?", (entry_id,)).fetchone()
+        if row is None:
+            return False
+        payload = json.loads(row[0])
+        if view_state and view_state.get("values"):
+            payload["view_state"] = view_state
+        else:
+            payload.pop("view_state", None)
+        conn.execute("UPDATE problems SET payload = ? WHERE id = ?", (json.dumps(payload), entry_id))
+    return True
+
+
+def load_view_state(entry_id: int) -> dict:
+    """The saved exploration state of a record (the wrap() form), or {} if it has none or doesn't exist."""
+    with _connect() as conn:
+        row = conn.execute("SELECT payload FROM problems WHERE id = ?", (entry_id,)).fetchone()
+    if row is None:
+        return {}
+    saved = json.loads(row[0]).get("view_state")
+    return saved if isinstance(saved, dict) else {}
+
+
 def delete(entry_id: int):
     with _connect() as conn:
         conn.execute("DELETE FROM problems WHERE id = ?", (entry_id,))

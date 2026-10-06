@@ -19,6 +19,7 @@ from modules.plotter import build_bifurcation_plot, build_cobweb_plot, build_par
 from modules.recurrence_utils import extract_step_map, solve_recurrence
 from modules.time_uncertainty import candidate_parameters, ode_uncertainty_fan
 from ui.cache import cached, cached_by_model
+from ui.fragments import isolated
 from ui.common import gif_download_button, snapshot_button
 
 
@@ -69,6 +70,7 @@ def render_ode_time_views(model: ProblemModel) -> None:
         _render_morph(symbolic, params, names, label, t0, t_sym)
 
 
+@isolated
 def _render_fan(model, group, symbolic, params, label, t0) -> None:
     with st.expander(f"🌫️ Uncertainty over time: {label}"):
         st.caption("Give any parameter or initial value a standard deviation. Draws from those distributions "
@@ -122,6 +124,7 @@ def _render_fan(model, group, symbolic, params, label, t0) -> None:
             render_fn=lambda f=fan: snapshot_uncertainty_fan(f))
 
 
+@isolated
 def _render_morph(symbolic, params, names, label, t0, t_sym) -> None:
     with st.expander(f"🎞️ Parameter morph: {label}"):
         st.caption("Vary one parameter (or initial value) across a range and watch the whole solution change "
@@ -194,6 +197,7 @@ def _initial_value(model: ProblemModel, func_name: str) -> float | None:
     return None
 
 
+@isolated
 def _render_bifurcation(model, func_name, g_expr, g_var, free, known) -> None:
     with st.expander(f"🌿 Bifurcation diagram for {func_name}"):
         st.caption("Iterate the map for each value of one parameter, throw away the first iterates, and plot "
@@ -253,6 +257,7 @@ def _render_bifurcation(model, func_name, g_expr, g_var, free, known) -> None:
             render_fn=lambda r=result, m=marker: snapshot_bifurcation_plot(r, marker=m))
 
 
+@isolated
 def _render_cobweb_without_closed_form(model, func_name, g_expr, g_var, known) -> None:
     """The cobweb diagram, for a map whose recurrence has no closed form
     (a nonlinear map like the logistic): the cobweb in the main recurrence

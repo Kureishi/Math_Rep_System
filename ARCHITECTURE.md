@@ -132,6 +132,16 @@ math-rep-system/
 │   │                          #   snapshot/download buttons, query-param syncing, ...)
 │   ├── cache.py                 # per-session cache keyed by the CONTENT of a result's inputs, so
 │   │                          #   a rerun rebuilds only what its widget changed (figures, ODE solves)
+│   ├── fragments.py             # @isolated: a panel that reruns on its own (st.fragment), plus a
+│   │                          #   registry of which panels those are (a test pins the list)
+│   ├── actions.py               # buttons that set up OTHER widgets: queue the values in a callback,
+│   │                          #   apply them at the top of app.py before any widget exists
+│   ├── plot_select.py           # selectable_chart(): a Plotly figure whose points can be clicked
+│   ├── progress.py              # tracked_run(): a long computation as a live status block with a
+│   │                          #   Stop button, and notice_interrupted() for a run that was cut short
+│   ├── view_state.py            # save/restore how a problem was being explored (with its history record)
+│   ├── share.py                 # the Share / export dialog: downloads, copy-as-LaTeX, send to a chain
+│   ├── compare.py, compare_constants.py   # the Compare solves mode (and the names panels link to it by)
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
 │   │                          #   badges, button/spacing polish -- called once from app.py),
 │   │                          #   render_hero(), badge()/badge_row(), and dark_mode_css()
@@ -146,7 +156,7 @@ math-rep-system/
 │   └── results/                  # the results view for a solved problem, one function
 │       ├── __init__.py             #   per section, called in display order by render_results()
 │       ├── summary.py              # confidence banner, derived equations, variables,
-│       │                          #   vector summary, follow-up Q&A, scenarios, export, ...
+│       │                          #   vector summary, follow-up Q&A, scenarios, ...
 │       ├── steps.py                # the step-by-step section: step list, per-target answer
 │       │                          #   extras, and the uncertainty/bounds/goal-seek/
 │       │                          #   sensitivity expanders (split per feature)
@@ -352,7 +362,17 @@ math-rep-system/
     ├── research_journal.py            # stitches a chosen set of history entries into ONE
     │                                 #   running Markdown document
     ├── workspace.py                  # cross-problem variable memory (session_state)
-    ├── history.py                     # SQLite-backed solved-problem history
+    ├── history.py                     # SQLite-backed solved-problem history (and, inside each
+    │                                 #   record's JSON, the saved exploration view)
+    ├── progress.py                    # the optional progress hook long computations call at their
+    │                                 #   checkpoints (and chunk_bounds / scaled helpers)
+    ├── plot_selection.py              # reads a click on a plot: which bar, grid point or graph node
+    ├── view_state.py                  # WHICH widget settings form a problem's saved view, and how to
+    │                                 #   capture and sanitise them (pure; takes any mapping)
+    ├── solve_compare.py               # compare two solves: answers, inputs, equations (equivalence
+    │                                 #   decided by SymPy), verification; what-if snapshots
+    ├── compare_plots.py               # the two charts on the Compare page
+    ├── share_text.py                  # copy-ready LaTeX and plain-text summaries
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
 ```
 
@@ -461,6 +481,72 @@ Decisions and operational details that don't belong in the README.
   Inputs are fingerprinted by content (array bytes and shape, expression structure,
   dataclass fields), never identity or `repr`, and anything unhashable recomputes:
   slower, never stale. Cached figures are shared, so they are never modified.
-  `st.fragment` was considered and not used: a fragment reruns alone, so state it
-  changes (the "include in report" toggles) wouldn't update the rest of the page,
-  and the test harness can't reproduce partial reruns.
+
+- **Isolated panels** (`ui/fragments.py`). The heavy analysis panels (the per-target
+  Monte Carlo / error / bounds / goal-seek / sensitivity expanders, the N-dimensional
+  sweep, the all-targets Monte Carlo, the interactive plots, and the four time views)
+  are `st.fragment`s: moving a widget inside one reruns only that panel. This was
+  first judged not worth it, because a fragment reruns alone and so cannot update the
+  rest of the page. That is still true, and is handled rather than avoided: three
+  rules, stated in the module, keep it correct. (1) A fragment may only write into a
+  container it creates, so each `with tab:` lives at the call site and the decorated
+  function draws into whatever container it is called in. (2) Anything that must
+  change another panel goes through `ui/actions.py`: the click's callback queues the
+  values, a fragment-scoped click then asks for a full rerun (`st.rerun()`), and
+  `apply_pending_updates()` writes them at the top of app.py, before any widget
+  exists, which is the only time Streamlit lets code set a widget. The "include in
+  report" buttons already did `st.rerun()` for the same reason. (3) A fragment never
+  writes to the sidebar. `isolated` also autosaves the saved view afterwards, since a
+  fragment rerun never reaches the end of the results page. **What the tests can and
+  cannot show:** `AppTest` never performs a fragment-scoped rerun (every interaction
+  reruns the whole script), so which panels are isolated is pinned structurally
+  (`ISOLATED`), and everything else about them is tested by running them for real;
+  the speed-up itself needs a browser to observe.
+- **Click-to-act plots** (`ui/plot_select.py`, `modules/plot_selection.py`). Selecting
+  a point reruns the page with the selection in `st.session_state[key]`; the page then
+  offers actions for it (a clicked tornado bar -> sweep it, add it to the N-D sweep, or
+  give it a Monte Carlo uncertainty; a clicked heatmap grid point -> load its values
+  into the Variables panel or open it in Compare; a clicked dependency-graph node ->
+  that node's steps, shown under the graph and marked in the step list). A click is
+  identified by what it IS on the figure (a bar's label, a grid point's x and y, a
+  node's coordinates), not by trace or point index, which shift whenever a figure
+  gains a trace. Plotly cannot select heatmap cells, so the grid points are drawn as
+  small visible markers over the heatmap, and those are what is clicked. The page
+  cannot scroll itself, so "jump to that step" shows the steps in place instead.
+  Selectable figures are built fresh each run, never taken from `ui/cache.py`.
+- **Live status and Stop** (`ui/progress.py`, `modules/progress.py`). Streamlit has no
+  cancel API; clicking any widget during a run requests a rerun, and Streamlit abandons
+  the running script at its next `st.*` call. So a long computation takes an optional
+  `progress` hook and calls it at checkpoints *between chunks of work* (Monte Carlo
+  evaluates in chunks of 2,500 after drawing all samples at once, so a seed gives the
+  same numbers with or without a hook; the finite-difference PDE solver checkpoints
+  before its refined solve). Each checkpoint updates the status block, and is where a
+  Stop takes effect. A single numpy/SymPy call cannot be interrupted, and a timeout
+  wrapper's worker thread has no Streamlit context, so the 2D heat solver (one
+  indivisible stepping call) gets stages but no Stop button. An aborted run leaves
+  nothing on screen, so `tracked_run` raises a flag that only a finished or failed run
+  clears; a flag found at the next run is reported as "stopped before it finished". A
+  finished result is stored only on completion, so Stop never discards an earlier one,
+  and a stopped batch keeps the problems that finished.
+- **Saved views** (`modules/view_state.py`, `ui/view_state.py`). Reopening a problem
+  restores how it was explored: sample counts and seeds, sweep setup, plot axes and
+  sliders, time-view settings. It is a whitelist of key patterns, never all of
+  `session_state`; only scalars and short lists are kept (a `data_editor`'s value is
+  edits against one particular table, so those tables are rebuilt from the remembered
+  selections instead). The view is stored in the history record's existing JSON payload
+  (no schema change; an older record simply has none) and travels in project bundles.
+  Widget keys are built from symbol and target names, which different problems share,
+  so opening or solving a problem first clears the previous problem's keys: a setting
+  from one problem no longer leaks into the next. A test checks that every widget key
+  in `ui/results/` is either covered or deliberately excluded.
+- **Share dialog** (`ui/share.py`). The old inline Export section and the "send to
+  chain" expander are one dialog. A dialog reruns only itself, so generating the PDF
+  must not call `st.rerun()` (that would close it). Nothing is built until it opens,
+  which also stops the full Markdown report being rebuilt on every rerun.
+  `AppTest` closes a dialog on any interaction, so the dialog's tab bodies are tested
+  directly and only the opening of the dialog goes through the app.
+- **Compare** (`modules/solve_compare.py`, `ui/compare.py`). Two solves from the
+  screen, history or a what-if (known inputs changed, re-solved by SymPy). A what-if is
+  verified with the deterministic checks only and says so; the independent LLM re-solve
+  is not repeated. Equations are paired as identical, equivalent (SymPy decides,
+  under the usual timeout), changed or one-sided.

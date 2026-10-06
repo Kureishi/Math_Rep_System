@@ -39,6 +39,7 @@ if not st.session_state.get("_booted"):
 from modules.llm_client import LMStudioClient  # noqa: E402  (deliberately after the first paint, see above)
 from modules.workspace import Workspace  # noqa: E402
 from ui import PAGES  # noqa: E402
+from ui.actions import apply_pending_updates  # noqa: E402
 from ui.sidebar import render_sidebar  # noqa: E402
 from ui.word_problem import render_word_problem_page  # noqa: E402
 
@@ -49,7 +50,7 @@ _SESSION_DEFAULTS: list[tuple[str, Any]] = [
     ("problem_text", ""), ("model", None), ("report", None),
     ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
     ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
-    ("batch_results", None), ("last_saved_history_id", None),
+    ("batch_results", None), ("last_saved_history_id", None), ("current_history_id", None),
     ("paranoid_result", None), ("followup_history", []),
     ("self_consistency_result", None), ("error_pattern_messages", []),
 ]
@@ -69,6 +70,11 @@ if "_pending_mode" in st.session_state:
     st.session_state["app_mode"] = st.session_state.pop("_pending_mode")
     for _k, _v in st.session_state.pop("_pending_prefill", {}).items():
         st.session_state[_k] = _v
+
+# ---- apply values queued by action buttons ("add this input to the sweep", "load these values").
+# Same constraint, same place as the block above: widgets may only be set before they are created in
+# this run. See ui/actions.py.
+apply_pending_updates()
 
 sidebar = render_sidebar(client, ws)
 

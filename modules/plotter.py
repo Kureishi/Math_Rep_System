@@ -438,7 +438,7 @@ def build_histogram_plot(samples: list[float], target_symbol: str,
 
 
 def build_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: str, y_label: str,
-                          target_symbol: str) -> go.Figure:
+                          target_symbol: str, selectable: bool = False) -> go.Figure:
     """A 2D parameter sweep's result as a heatmap -- x/y are the two
     swept variables, color is the target value at each grid point. The
     natural visualization for parameter_sweep.py's 2-variable case,
@@ -451,6 +451,21 @@ def build_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: str, 
     ))
     fig.update_layout(xaxis_title=x_label, yaxis_title=y_label,
                         title=f"{target_symbol} across {x_label} \u00d7 {y_label}")
+    if selectable:
+        # Plotly cannot select points of a heatmap (no click/box/lasso selection for that trace type), so
+        # the grid points are drawn again as small markers, which can be. They are visible on purpose:
+        # near-transparent markers are not reliably selectable, and showing the grid also makes it
+        # obvious that the points are the clickable thing.
+        xs_flat = [x for _ in y_values for x in x_values]
+        ys_flat = [y for y in y_values for _ in x_values]
+        zs_flat = [float(v) for row in z_matrix for v in row]
+        fig.add_trace(go.Scatter(
+            x=xs_flat, y=ys_flat, mode="markers", showlegend=False,
+            marker=dict(size=9, color="rgba(255,255,255,0.55)", line=dict(width=1, color="rgba(0,0,0,0.55)")),
+            hovertemplate=(f"{x_label} = %{{x:.4g}}<br>{y_label} = %{{y:.4g}}<br>"
+                           f"{target_symbol} = %{{customdata:.5g}}<extra></extra>"),
+            customdata=zs_flat,
+        ))
     return fig
 
 

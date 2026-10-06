@@ -106,15 +106,27 @@ def solve_one(client: LMStudioClient, index: int, problem_text: str,
 
 
 def solve_batch(client: LMStudioClient, problem_texts: list[str],
-                 narrate: bool = False, progress_callback=None) -> list[BatchItemResult]:
+                 narrate: bool = False, progress_callback=None, on_result=None,
+                 before_each=None) -> list[BatchItemResult]:
     """Solves every problem in problem_texts in order. progress_callback,
     if given, is called as progress_callback(done_count, total_count)
     after each problem -- e.g. to drive a Streamlit progress bar,
-    without this module needing to import Streamlit itself."""
+    without this module needing to import Streamlit itself.
+
+    `before_each(index, total, text)` is called just BEFORE each problem starts, and `on_result(result)`
+    right after each one finishes. Together they are what let a caller stop a long batch part-way and
+    keep what was done: the UI's `before_each` is a checkpoint where Stop can take effect (modules/
+    progress.py explains why), and its `on_result` stores each finished problem as it arrives, so an
+    interrupted batch still has its first k results."""
     results = []
     total = len(problem_texts)
     for i, text in enumerate(problem_texts):
-        results.append(solve_one(client, i, text, narrate=narrate))
+        if before_each:
+            before_each(i, total, text)
+        result = solve_one(client, i, text, narrate=narrate)
+        results.append(result)
+        if on_result:
+            on_result(result)
         if progress_callback:
             progress_callback(i + 1, total)
     return results

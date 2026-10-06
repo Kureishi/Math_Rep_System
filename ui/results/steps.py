@@ -23,12 +23,19 @@ from modules.plotter import build_tornado_chart, build_sweep_chart, build_histog
     build_monte_carlo_convergence_plot
 from modules.plot_snapshot import snapshot_tornado_chart, snapshot_sweep_chart, snapshot_histogram_plot
 from ui.common import format_download_button, snapshot_button
+from ui.actions import action_button
+from ui.fragments import isolated
+from ui.plot_select import selectable_chart
+from ui.progress import notice_interrupted, tracked_run
+from modules.plot_selection import clicked_symbol
 from modules.workspace import Workspace
 
 
 def render_step_list(client: LMStudioClient, model: ProblemModel, report: VerificationReport, steps, target_name):
     """One target's heading, tutor-mode toggle, and the (optionally progressively revealed) steps."""
     st.markdown(f"#### Solving for `{target_name}`")
+    if target_name in st.session_state.get("_graph_focus", ()):
+        st.caption("📍 Selected in the dependency graph (Explore tab)")
 
     # ---- guided/tutor mode: predict-then-reveal instead of a
     # full wall of steps immediately, plus a graded final-
@@ -74,7 +81,7 @@ def render_step_list(client: LMStudioClient, model: ProblemModel, report: Verifi
         # follow-up Q&A further down -- grounds the LLM only in
         # THIS step's own content, not the full derivation. See
         # step_explainer.py.
-        with st.expander(f"🔍 Explain just step {i}"):
+        with st.popover(f"🔍 Explain step {i}", help="Explain just this step"):
             explain_mode = st.radio(
                 "How?", ["default", "simpler", "example"], horizontal=True,
                 key=f"explain_mode_{target_name}_{i}",
@@ -181,6 +188,7 @@ def render_alternate_method(model: ProblemModel, target_name):
 
 
 
+@isolated
 def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
     """Monte Carlo uncertainty propagation expander."""
     if known_vars_here:
@@ -250,15 +258,18 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                         {k: int(np.random.default_rng().integers(0, 2**31 - 1))}),
                 )
 
+            run_key = f"mc_{target_name}"
+            notice_interrupted(run_key, "Monte Carlo run")
             if st.button("Run Monte Carlo", key=f"mc_run_{target_name}") and uncertain_vars:
-                with st.spinner(f"Sampling {mc_n} times..."):
-                    try:
+                try:
+                    with tracked_run(run_key, f"Monte Carlo for {target_name}: {mc_n:,} samples") as progress:
                         mc_result = run_monte_carlo(model, target_name, uncertain_vars,
                                                       n_samples=mc_n,
-                                                      seed=st.session_state[mc_seed_key])
-                    except ValueError as e:
-                        st.error(str(e))
-                        mc_result = None
+                                                      seed=st.session_state[mc_seed_key],
+                                                      progress=progress)
+                except ValueError as e:
+                    st.error(str(e))
+                    mc_result = None
                 st.session_state[f"mc_result_{target_name}"] = mc_result
             mc_result = st.session_state.get(f"mc_result_{target_name}")
             if mc_result is not None and mc_result.samples:
@@ -293,6 +304,7 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
 
 
 
+@isolated
 def render_analytic_error(model: ProblemModel, known_vars_here, target_name):
     """Analytic (first-order) error propagation expander."""
     # ---- analytic error propagation: the textbook first-
@@ -353,6 +365,7 @@ def render_analytic_error(model: ProblemModel, known_vars_here, target_name):
 
 
 
+@isolated
 def render_interval_bounds(model: ProblemModel, known_vars_here, target_name):
     """Interval-arithmetic guaranteed-bounds expander."""
     # ---- interval arithmetic: a GUARANTEED bound instead of
@@ -409,6 +422,7 @@ def render_interval_bounds(model: ProblemModel, known_vars_here, target_name):
 
 
 
+@isolated
 def render_goal_seek(model: ProblemModel, other_vars, target_name):
     """Goal-seek (inverse solve) expander."""
     if other_vars:
@@ -441,6 +455,37 @@ def render_goal_seek(model: ProblemModel, other_vars, target_name):
 
 
 
+def _merged_selection(key: str, symbol: str) -> list[str]:
+    """What the multiselect `key` would hold with `symbol` added (kept in its existing order)."""
+    current = list(st.session_state.get(key) or [])
+    return current if symbol in current else current + [symbol]
+
+
+def render_tornado_actions(model: ProblemModel, target_name: str, picked: str) -> None:
+    """What to do with the input whose tornado bar was clicked: look at it in detail, add it to the
+    N-dimensional sweep, or give it an uncertainty in this target's Monte Carlo. Each button only SETS the
+    other panel's widgets (ui/actions.py); the person still presses that panel's own Run."""
+    st.markdown(f"**{picked}** selected -- what next?")
+    n_known = sum(1 for v in model.variables if v.known_value is not None)
+    can_nd_sweep = target_kind(model, target_name) == "equation" and n_known >= 2
+    cols = st.columns(3)
+    with cols[0]:
+        action_button("🔍 Sweep it in detail", key=f"tornado_detail_{target_name}",
+                      updates={f"sweep_pick_{target_name}": picked},
+                      toast=f"Detailed sweep below now shows {picked}.")
+    with cols[1]:
+        if can_nd_sweep:
+            action_button("📊 Add to the N-D sweep", key=f"tornado_nd_{target_name}",
+                          updates={"sweep_target": target_name,
+                                   "sweep_symbols": _merged_selection("sweep_symbols", picked)},
+                          toast=f"{picked} added to the parameter sweep (Explore tab).")
+    with cols[2]:
+        action_button("🎲 Use in Monte Carlo", key=f"tornado_mc_{target_name}",
+                      updates={f"mc_vars_{target_name}": _merged_selection(f"mc_vars_{target_name}", picked)},
+                      toast=f"{picked} added to the uncertain inputs for {target_name}.")
+
+
+@isolated
 def render_sensitivity(model: ProblemModel, target_name):
     """Sensitivity / tornado-analysis expander."""
     # ---- sensitivity / what-if analysis: which input
@@ -456,7 +501,11 @@ def render_sensitivity(model: ProblemModel, target_name):
             st.caption("No swept inputs available for this target.")
         else:
             tornado_fig = build_tornado_chart(entries)
-            st.plotly_chart(tornado_fig, width='stretch', key=f"tornado_{target_name}")
+            st.caption("Click a bar to act on that input.")
+            tornado_state = selectable_chart(tornado_fig, key=f"tornado_{target_name}")
+            picked = clicked_symbol(tornado_state, [e.symbol for e in entries])
+            if picked:
+                render_tornado_actions(model, target_name, picked)
             snapshot_button(
                 key=f"tornado_{target_name}",
                 title=f"Sensitivity (tornado chart) for {target_name}",

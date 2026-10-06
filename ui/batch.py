@@ -14,6 +14,7 @@ from modules.batch_solver import (
 )
 from modules.exporter import build_batch_markdown, build_batch_pdf_bytes
 from ui.common import check_upload_size
+from ui.progress import notice_interrupted, tracked_run
 
 
 def render_batch_solver_tab(client: LMStudioClient):
@@ -43,19 +44,33 @@ def render_batch_solver_tab(client: LMStudioClient):
     narrate = st.checkbox("Include step narration (slower -- one extra LLM call per problem)",
                             key="batch_narrate")
 
+    if notice_interrupted("batch", "batch"):
+        partial_results = st.session_state.get("batch_partial") or []
+        if partial_results:
+            st.session_state["batch_results"] = list(partial_results)
+            st.info(f"Showing the {len(partial_results)} problem(s) that finished before it stopped.")
+        st.session_state["batch_partial"] = []
+
     if st.button("Solve batch", type="primary", key="batch_solve_button"):
         problems = split_batch_text(batch_text)
         if not problems:
             st.warning("No problems detected -- separate them with a blank line or a '---' line.")
             return
-        progress = st.progress(0.0, text=f"Solving 0/{len(problems)}...")
+        # Each finished problem is stored as it arrives, so a batch that is stopped part-way (the Stop
+        # button, or any other click) still has its first k results -- see ui/progress.py
+        st.session_state["batch_partial"] = []
+        partial = st.session_state["batch_partial"]
 
-        def _update(done, total):
-            progress.progress(done / total, text=f"Solving {done}/{total}...")
+        with tracked_run("batch", f"Solving {len(problems)} problem(s)",
+                         done_label=f"Solved {len(problems)} problem(s)") as progress:
+            def _before(i, total, text):
+                first_line = text.strip().splitlines()[0][:60] if text.strip() else ""
+                progress(f"Problem {i + 1} of {total}: {first_line}", i / total)
 
-        fresh_results = solve_batch(client, problems, narrate=narrate, progress_callback=_update)
+            fresh_results = solve_batch(client, problems, narrate=narrate, before_each=_before,
+                                        on_result=partial.append)
         st.session_state["batch_results"] = fresh_results
-        progress.empty()
+        st.session_state["batch_partial"] = []
 
     results = st.session_state.get("batch_results")
     if not results:

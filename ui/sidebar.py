@@ -11,6 +11,7 @@ from modules.command_palette import search as palette_search
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
 from modules import history, chains
+from ui import view_state
 from ui.common import restore_from_query_param, sync_query_param
 from ui.theme import dark_mode_css
 from modules.command_palette import MODE_LABELS
@@ -399,6 +400,11 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                                 problem_text=p_text, model=l_model, report=l_report,
                                 steps=l_steps, scenarios=l_scenarios, pdf_bytes=None, plot_snapshots={},
                             )
+                            # reopen the problem the way it was being explored (Monte Carlo inputs, sweep
+                            # setup, plot axes, ...) -- see ui/view_state.py
+                            n_restored = view_state.restore(hist_entry["id"])
+                            if n_restored:
+                                st.toast(f"Restored {n_restored} saved view setting(s)", icon="🗂️")
                             st.rerun()
                 with c3:
                     if st.button("", icon=":material/delete:", key=f"delhist_{hist_entry['id']}",

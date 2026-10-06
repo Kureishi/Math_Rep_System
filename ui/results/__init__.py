@@ -9,10 +9,12 @@ from modules.llm_client import LMStudioClient
 from modules.verifier import VerificationReport
 from modules.workspace import Workspace
 from ui.results.summary import (
-    render_confidence_banner, render_geometry_schematic, render_motion_diagram, render_send_to_chain,
+    render_confidence_banner, render_geometry_schematic, render_motion_diagram,
     render_similar_past_problems, render_derived_equations, render_matrix_view, render_assumptions,
-    render_variables, render_vector_summary, render_followup, render_scenarios, render_export,
+    render_variables, render_vector_summary, render_followup, render_scenarios,
 )
+from ui.share import render_share_button
+from ui.view_state import autosave
 from ui.results.verify_tab import render_verify_tab
 from ui.results.explore_tab import render_dependency_and_sweeps, render_interactive_plot
 from ui.results.practice_tab import render_practice_tab
@@ -26,10 +28,11 @@ def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, r
     inline script rendered it. The sections are separate functions now; the only values that flow
     between them are `opt_result`, `edited_values` and `steps_by_target` (computed below)."""
     st.divider()
+    st.session_state["_graph_focus"] = []     # set again by the Explore tab if a graph node is selected
     render_confidence_banner(report)
     render_geometry_schematic(model)
     render_motion_diagram(model, report)
-    render_send_to_chain(model)
+    render_share_button(model, report, st.session_state["steps"] or {})
 
     st.caption("Secondary panels are grouped into tabs below -- verification checks, "
                 "exploratory plots, and practice tools -- so the main solution flow "
@@ -60,4 +63,4 @@ def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, r
     render_recurrence_solution(ws, model)
     render_map_views(model)
     render_interactive_plot(model, edited_values, tab_explore)
-    render_export(model, report, steps_by_target)
+    autosave()   # remember how this problem is being explored (a no-op unless something changed)

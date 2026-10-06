@@ -11,6 +11,7 @@ import streamlit as st
 from modules import history
 from modules.llm_client import LMStudioClient, LLMOutputError
 from modules.workspace import Workspace
+from ui import view_state
 from ui.common import check_upload_size
 
 # modules.pipeline (-> solver, verifier, scipy, ...), modules.ocr (-> PIL) and ui.results (-> pandas,
@@ -107,6 +108,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                                      pdf_bytes=None, plot_snapshots={})
             saved_id = history.save(problem_text, model, report, steps, scenarios)
             st.session_state["last_saved_history_id"] = saved_id
+            view_state.start_fresh(saved_id)     # a new problem starts from default settings
             st.toast("Saved to history", icon="💾")
 
         except LLMOutputError as e:

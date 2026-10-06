@@ -46,6 +46,7 @@ from sympy.parsing.sympy_parser import (
 )
 from sympy.solvers.pde import pdsolve, checkpdesol
 
+from modules.progress import ProgressFn, report
 from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 
 _TRANSFORMS = standard_transformations + (implicit_multiplication_application, convert_xor)
@@ -850,7 +851,8 @@ def solve_pde_finite_difference_2d(source_str: str = "0", boundary_value_str: st
                                     domain_predicate_str: str = "True",
                                     x_range: tuple = (0.0, 1.0), y_range: tuple = (0.0, 1.0),
                                     nx: int = 41, ny: int = 41,
-                                    convergence_tolerance: float = 0.02) -> FiniteDifferencePDEResult:
+                                    convergence_tolerance: float = 0.02,
+                                    progress: ProgressFn | None = None) -> FiniteDifferencePDEResult:
     """Numeric fallback for u_xx + u_yy = source(x, y) on an arbitrary
     (not necessarily rectangular) region: the region within the
     bounding box [x_range] x [y_range] where domain_predicate_str(x, y)
@@ -896,6 +898,7 @@ def solve_pde_finite_difference_2d(source_str: str = "0", boundary_value_str: st
     except Exception as exc:  # noqa: BLE001
         return FiniteDifferencePDEResult(error=f"Expression could not be evaluated numerically: {exc}")
 
+    report(progress, f"Solving on a {nx} x {ny} grid", 0.1)
     try:
         xs, ys, U, inside = run_with_timeout(
             _build_and_solve_fd_grid, nx, ny, x_range, y_range, inside_fn, boundary_fn, source_fn,
@@ -908,6 +911,9 @@ def solve_pde_finite_difference_2d(source_str: str = "0", boundary_value_str: st
     # convergence check: re-solve at roughly double the resolution, compare
     # at the coarse grid's own sample points via nearest-neighbor lookup
     convergence_error, converged = None, False
+    # a checkpoint BEFORE the refined solve: it is the expensive half (about 4x the unknowns), and the
+    # caller's progress hook is where a Stop takes effect -- see modules/progress.py
+    report(progress, f"Re-solving on a {2 * nx - 1} x {2 * ny - 1} grid to check convergence", 0.45)
     try:
         nx2, ny2 = 2 * nx - 1, 2 * ny - 1
         xs2, ys2, U2, inside2 = run_with_timeout(
@@ -927,6 +933,7 @@ def solve_pde_finite_difference_2d(source_str: str = "0", boundary_value_str: st
     except Exception:  # noqa: BLE001
         pass  # convergence check is a bonus diagnostic; a failure here shouldn't hide a valid solve
 
+    report(progress, "Comparing the two grids", 0.95)
     note = "Grid-refinement check confirms the solution has converged." if converged else \
         ("Could not confirm grid-refinement convergence within tolerance -- consider a finer grid "
          "(higher nx/ny) if precision near this level matters." if convergence_error is not None else
@@ -952,7 +959,8 @@ def solve_heat_equation_2d_dirichlet(initial_condition_str: str, boundary_value_
                                       x_range: tuple = (0.0, 1.0), y_range: tuple = (0.0, 1.0),
                                       alpha: float = 1.0, t_max: float | None = None,
                                       nx: int = 41, ny: int = 41,
-                                      n_frames: int = 30) -> TimeDependent2DResult:
+                                      n_frames: int = 30,
+                                      progress: ProgressFn | None = None) -> TimeDependent2DResult:
     """Time-dependent 2D heat equation u_t = alpha*(u_xx + u_yy) on a
     RECTANGULAR domain [x_range] x [y_range] with Dirichlet boundary
     conditions, solved by explicit finite differences (FTCS) and
@@ -984,6 +992,7 @@ def solve_heat_equation_2d_dirichlet(initial_condition_str: str, boundary_value_
     y0, y1 = y_range
     x_sym, y_sym = sp.Symbol("x"), sp.Symbol("y")
     import numpy as np
+    report(progress, "Parsing the initial and boundary conditions", 0.05)
     try:
         ic_expr = parse_expr(initial_condition_str, local_dict={"x": x_sym, "y": y_sym},
                                transformations=_TRANSFORMS)
@@ -1046,6 +1055,9 @@ def solve_heat_equation_2d_dirichlet(initial_condition_str: str, boundary_value_
                                            "as a bug.")
         return frames, times
 
+    # the stepping loop runs on the timeout wrapper's worker thread, which has no Streamlit script
+    # context, so it cannot report from inside -- the checkpoints are before and after it
+    report(progress, f"Time-stepping {n_steps:,} steps on a {nx} x {ny} grid", 0.15)
     try:
         frames, times = run_with_timeout(_step_forward, label="heat_2d_time_stepping")
     except FloatingPointError as exc:
@@ -1053,5 +1065,6 @@ def solve_heat_equation_2d_dirichlet(initial_condition_str: str, boundary_value_
     except Exception as exc:  # noqa: BLE001
         return TimeDependent2DResult(error=f"Time-stepping failed: {exc}")
 
+    report(progress, "Packaging the animation frames", 0.95)
     return TimeDependent2DResult(grid_x=xs, grid_y=ys, frames=np.array(frames),
                                    times=np.array(times), dt_used=dt, stable=True)
