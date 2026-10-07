@@ -14,10 +14,9 @@ in-memory PNG and embedded in the PDF.
 """
 import base64
 import io
-from dataclasses import dataclass
+import re
 from datetime import datetime
 
-import sympy as sp
 import matplotlib
 matplotlib.use("Agg")  # headless -- no display needed, safe in a server context
 import matplotlib.pyplot as plt
@@ -25,188 +24,56 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
 from modules.equation_engine import ProblemModel
-from modules.verifier import VerificationReport, _known_substitutions
+from modules.report_content import (
+    REPORT_TITLE, PlotSnapshot, ReportExtras, Section, build_sections, generated_stamp,
+)
+from modules.verifier import VerificationReport
 from modules.solver import SolutionStep
-from modules.matrix_utils import linear_system_view
-from modules.vector_utils import vector_summary
-from modules.unit_conversion import sweep_conversions
-
-
-@dataclass
-class PlotSnapshot:
-    """A user-chosen static capture of an interactive plot, for inclusion
-    in an exported report -- the interactive version lives only in the
-    browser session, so this is the opt-in way to get a specific view
-    (with whatever parameter values were selected at the time) into a
-    document. `caption` should describe exactly what's shown, e.g. which
-    equation, which axes, and what any fixed slider values were, since a
-    static image alone doesn't carry that context."""
-    title: str
-    caption: str
-    png_bytes: bytes
 
 
 # ---------------------------------------------------------------- Markdown
 
+def _md_cell(value) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def render_markdown(sections: list[Section], title: str = REPORT_TITLE) -> str:
+    """Markdown for already-built sections. LaTeX goes in as $$...$$ blocks."""
+    L: list[str] = [f"# {title}", f"*{generated_stamp()}*", ""]
+    for sec in sections:
+        L += [f"## {sec.title}", ""]
+        for b in sec.blocks:
+            if b.kind == "text":
+                L += [{"italic": f"_{b.text}_", "bold": f"**{b.text}**"}.get(b.style, b.text), ""]
+            elif b.kind == "label":
+                L += [f"**{b.text}**", ""]
+            elif b.kind == "subheading":
+                m = re.fullmatch(r"Solving for (.+)", b.text)
+                L += [f"### Solving for `{m.group(1)}`" if m else f"### {b.text}", ""]
+            elif b.kind == "equation":
+                L += [f"$$ {b.text} $$", ""]
+            elif b.kind == "bullets":
+                L += [f"- {item}" for item in b.items] + [""]
+            elif b.kind == "table":
+                L += ["| " + " | ".join(b.headers) + " |", "|" + "---|" * len(b.headers)]
+                L += ["| " + " | ".join(_md_cell(c) for c in row) + " |" for row in b.rows] + [""]
+            elif b.kind == "status":
+                L += [f"- {'✅' if ok else '❌'} **{label}:** {detail}" for ok, label, detail in b.rows] + [""]
+            elif b.kind == "kv":
+                L += [f"**{k}:** {v}  " for k, v in b.rows] + [""]
+            elif b.kind == "image":
+                b64 = base64.b64encode(b.png).decode("ascii")
+                L += [f"**{b.label_text}**", "", f"![{b.label_text}](data:image/png;base64,{b64})", "", f"_{b.text}_", ""]
+    return "\n".join(L)
+
+
 def build_markdown(problem_text: str, model: ProblemModel, report: VerificationReport,
                     steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict],
-                    plot_snapshots: list[PlotSnapshot] | None = None) -> str:
-    L = []
-    L.append("# Math Representation System -- Solved Problem")
-    L.append(f"*Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
-    L.append("")
-    L.append("## Problem")
-    L.append("")
-    L.append(problem_text.strip())
-    L.append("")
-    L.append(f"**Domain:** {model.problem_domain}  ")
-    status = "✅ Passed" if report.passed else "⚠️ Issues found -- review before trusting"
-    L.append(f"**Self-verification:** {status}")
-    L.append("")
-
-    L.append("## Derived equations")
-    L.append("")
-    for eq in model.equations:
-        latex_str = sp.latex(eq.sympy_eq) if eq.sympy_eq is not None else eq.raw_expression
-        L.append(f"**{eq.name}**")
-        L.append("")
-        L.append(f"$$ {latex_str} $$")
-        L.append("")
-        L.append(eq.derivation)
-        L.append("")
-
-    if model.assumptions:
-        L.append("**Assumptions:**")
-        L.extend(f"- {a}" for a in model.assumptions)
-        L.append("")
-
-    L.append("## Variables")
-    L.append("")
-    L.append("| Symbol | Meaning | Known value | Unit |")
-    L.append("|---|---|---|---|")
-    for v in model.variables:
-        kv = v.known_value if v.known_value is not None else "_(solved)_"
-        L.append(f"| {v.symbol} | {v.meaning} | {kv} | {v.unit or ''} |")
-    L.append("")
-
-    matrix_result = linear_system_view(model, _known_substitutions(model))
-    if matrix_result is not None:
-        L.append("## Matrix representation")
-        L.append("")
-        x_latex = sp.latex(sp.Matrix([sp.Symbol(s) for s in matrix_result.symbols]))
-        L.append(f"$$ {sp.latex(matrix_result.A)} {x_latex} = {sp.latex(matrix_result.b)} $$")
-        L.append("")
-        if matrix_result.is_square:
-            L.append(f"**det(A) = {sp.latex(matrix_result.determinant)}**")
-            L.append("")
-            if matrix_result.eigenvalues:
-                eig_text = ", ".join(
-                    f"{sp.latex(val)}" + (f" (x{mult})" if mult > 1 else "")
-                    for val, mult in matrix_result.eigenvalues.items())
-                L.append(f"Eigenvalues: {eig_text}")
-                L.append("")
-        L.append(matrix_result.classification)
-        L.append("")
-
-    vector_vars = [v for v in model.variables if v.is_vector and v.components]
-    if vector_vars:
-        L.append("## Vectors")
-        L.append("")
-        knowns = _known_substitutions(model)
-        for v in vector_vars:
-            summary = vector_summary(v.symbol, v.components, knowns)
-            if summary:
-                comp_str = ", ".join(f"{c}={val:g}" for c, val in summary["components"].items())
-                L.append(f"- **{v.symbol}** ({v.meaning}): {comp_str} -- "
-                          f"magnitude = {summary['magnitude']:.6g} {v.unit or ''}")
-            else:
-                L.append(f"- **{v.symbol}** ({v.meaning}): components {', '.join(v.components)}")
-        L.append("")
-
-    if report.sympy_numeric_answers:
-        conv_lines = []
-        for target, val in report.sympy_numeric_answers.items():
-            unit = next((v.unit for v in model.variables if v.symbol == target), None)
-            alternates = sweep_conversions(val, unit)
-            if alternates:
-                alt_text = ", ".join(f"{av:.6g} {au}" for au, av in alternates)
-                conv_lines.append(f"- **{target}** = {val:.6g} {unit} = {alt_text}")
-        if conv_lines:
-            L.append("## Results in other units")
-            L.append("")
-            L.extend(conv_lines)
-            L.append("")
-
-    cr = report.confidence_report()
-    L.append("## Confidence report")
-    L.append("")
-    L.append(f"**Overall score: {cr.score:.0%}** ({cr.label}) -- {cr.passed_count}/{cr.total_count} "
-              f"checks passed.")
-    L.append("")
-    for cat, cat_summary in cr.categories.items():
-        mark = "✅" if cat_summary.all_passed else "❌"
-        L.append(f"- {mark} **{cat}:** {cat_summary.passed}/{cat_summary.total}")
-    L.append("")
-    if cr.critical_failures:
-        L.append("**Critical failures:**")
-        for c in cr.critical_failures:
-            L.append(f"- {c.label}: {c.detail}")
-        L.append("")
-
-    if report.domain_notes:
-        L.append("## Domain of validity")
-        L.append("")
-        for note in report.domain_notes:
-            if note.violated:
-                L.append(f"- ❌ **{note.equation}** -- undefined with the given values: " +
-                          "; ".join(r.description for r in note.violated))
-            ok = note.satisfied + note.pending
-            if ok:
-                L.append(f"- **{note.equation}** requires: " + "; ".join(r.description for r in ok))
-        L.append("")
-
-    L.append("## Verification detail")
-    L.append("")
-    for c in report.checks:
-        mark = "✅" if c.passed else "❌"
-        L.append(f"- {mark} **{c.label}:** {c.detail}")
-    L.append("")
-
-    if steps_by_target:
-        L.append("## Step-by-step solution")
-        L.append("")
-        for target, steps in steps_by_target.items():
-            L.append(f"### Solving for `{target}`")
-            L.append("")
-            for i, s in enumerate(steps, 1):
-                L.append(f"**Step {i}: {s.description}**")
-                L.append("")
-                L.append(f"$$ {s.expression} $$")
-                if s.explanation:
-                    L.append("")
-                    L.append(f"_{s.explanation}_")
-                L.append("")
-
-    if plot_snapshots:
-        L.append("## Plots")
-        L.append("")
-        for snap in plot_snapshots:
-            b64 = base64.b64encode(snap.png_bytes).decode("ascii")
-            L.append(f"**{snap.title}**")
-            L.append("")
-            L.append(f"![{snap.title}](data:image/png;base64,{b64})")
-            L.append("")
-            L.append(f"_{snap.caption}_")
-            L.append("")
-
-    if scenarios and not any("error" in scenario for scenario in scenarios):
-        L.append("## Where else this applies")
-        L.append("")
-        for scenario in scenarios:
-            L.append(f"- **{scenario.get('scenario', '')}** -- {scenario.get('mapping', '')}")
-        L.append("")
-
-    return "\n".join(L)
+                    plot_snapshots: list[PlotSnapshot] | None = None,
+                    extras: ReportExtras | None = None, include: list[str] | set[str] | None = None) -> str:
+    """The whole report as Markdown. `include` limits it to some sections (see report_content.SECTIONS)."""
+    return render_markdown(build_sections(problem_text, model, report, steps_by_target, scenarios,
+                                          plot_snapshots, extras, include))
 
 
 # ---------------------------------------------------------------- PDF
@@ -263,198 +130,74 @@ def _add_equation(pdf: FPDF, latex_str: str, fontsize: int = 13, max_h: float = 
     pdf.multi_cell(0, 5, _safe(latex_str), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-def build_pdf_bytes(problem_text: str, model: ProblemModel, report: VerificationReport,
-                     steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict],
-                     plot_snapshots: list[PlotSnapshot] | None = None) -> bytes:
+_EQ_SIZES = {"plain": (13, 9), "step": (11, 7), "matrix": (12, 16)}      # (font size, max image height)
+
+
+def _pdf_line(pdf: FPDF, text: str, font: str = "Helvetica", style: str = "", size: int = 10, h: float = 5) -> None:
+    pdf.set_font(font, style, size)
+    pdf.multi_cell(0, h, _safe(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+
+def render_pdf(sections: list[Section]) -> bytes:
+    """PDF for already-built sections. Equations are typeset to images by matplotlib's mathtext."""
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.multi_cell(0, 10, _safe("Math Representation System"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    _pdf_line(pdf, "Math Representation System", style="B", size=18, h=10)
     pdf.set_text_color(120, 120, 120)
-    pdf.multi_cell(0, 5, _safe(f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}"),
-                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    _pdf_line(pdf, generated_stamp(), size=9)
     pdf.set_text_color(0, 0, 0)
     pdf.ln(2)
 
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.multi_cell(0, 7, "Problem", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 6, _safe(problem_text.strip()), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(1)
-
-    pdf.set_font("Helvetica", "B", 11)
-    status = "PASSED" if report.passed else "ISSUES FOUND -- review before trusting"
-    pdf.multi_cell(0, 6, _safe(f"Domain: {model.problem_domain}    |    Self-verification: {status}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
-
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.multi_cell(0, 8, "Derived equations", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    for eq in model.equations:
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.multi_cell(0, 6, _safe(eq.name), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        latex_str = sp.latex(eq.sympy_eq) if eq.sympy_eq is not None else eq.raw_expression
-        _add_equation(pdf, latex_str, fontsize=13, max_h=9)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.multi_cell(0, 6, _safe(eq.derivation), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(1)
-
-    if model.assumptions:
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.multi_cell(0, 6, "Assumptions", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        for a in model.assumptions:
-            pdf.multi_cell(0, 5, _safe(f"- {a}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(1)
-
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.multi_cell(0, 8, "Variables", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 10)
-    for v in model.variables:
-        kv = v.known_value if v.known_value is not None else "(solved)"
-        pdf.multi_cell(0, 5, _safe(f"{v.symbol} -- {v.meaning}: {kv} {v.unit or ''}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
-
-    matrix_result = linear_system_view(model, _known_substitutions(model))
-    if matrix_result is not None:
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.multi_cell(0, 8, "Matrix representation", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        x_latex = sp.latex(sp.Matrix([sp.Symbol(s) for s in matrix_result.symbols]))
-        _add_equation(pdf, f"{sp.latex(matrix_result.A)} {x_latex} = {sp.latex(matrix_result.b)}",
-                       fontsize=12, max_h=16)
-        pdf.set_font("Helvetica", "", 10)
-        if matrix_result.is_square:
-            pdf.multi_cell(0, 5, _safe(f"det(A) = {matrix_result.determinant}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            if matrix_result.eigenvalues:
-                eig_text = ", ".join(f"{val}" + (f" (x{mult})" if mult > 1 else "")
-                                       for val, mult in matrix_result.eigenvalues.items())
-                pdf.multi_cell(0, 5, _safe(f"Eigenvalues: {eig_text}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.multi_cell(0, 5, _safe(matrix_result.classification), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(2)
-
-    vector_vars = [v for v in model.variables if v.is_vector and v.components]
-    if vector_vars:
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.multi_cell(0, 8, "Vectors", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        knowns = _known_substitutions(model)
-        for v in vector_vars:
-            summary = vector_summary(v.symbol, v.components, knowns)
-            if summary:
-                comp_str = ", ".join(f"{c}={val:g}" for c, val in summary["components"].items())
-                pdf.multi_cell(0, 5, _safe(f"{v.symbol} ({v.meaning}): {comp_str} -- "
-                                            f"magnitude = {summary['magnitude']:.6g} {v.unit or ''}"),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            else:
-                pdf.multi_cell(0, 5, _safe(f"{v.symbol} ({v.meaning}): components "
-                                            f"{', '.join(v.components)}"),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(2)
-
-    if report.sympy_numeric_answers:
-        conv_written = False
-        for target, val in report.sympy_numeric_answers.items():
-            unit = next((v.unit for v in model.variables if v.symbol == target), None)
-            alternates = sweep_conversions(val, unit)
-            if alternates:
-                if not conv_written:
-                    pdf.set_font("Helvetica", "B", 13)
-                    pdf.multi_cell(0, 8, "Results in other units", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                    pdf.set_font("Helvetica", "", 10)
-                    conv_written = True
-                alt_text = ", ".join(f"{av:.6g} {au}" for au, av in alternates)
-                pdf.multi_cell(0, 5, _safe(f"{target} = {val:.6g} {unit} = {alt_text}"),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        if conv_written:
-            pdf.ln(2)
-
-    cr = report.confidence_report()
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.multi_cell(0, 8, "Confidence report", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.multi_cell(0, 5, _safe(f"Overall score: {cr.score:.0%} ({cr.label}) -- "
-                                f"{cr.passed_count}/{cr.total_count} checks passed."),
-                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    for cat, cat_summary in cr.categories.items():
-        mark = "[OK]" if cat_summary.all_passed else "[!!]"
-        pdf.multi_cell(0, 5, _safe(f"{mark} {cat}: {cat_summary.passed}/{cat_summary.total}"),
-                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    if cr.critical_failures:
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.multi_cell(0, 5, "Critical failures:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        for c in cr.critical_failures:
-            pdf.multi_cell(0, 5, _safe(f"- {c.label}: {c.detail}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
-
-    if report.domain_notes:
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.multi_cell(0, 8, "Domain of validity", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        for note in report.domain_notes:
-            if note.violated:
-                pdf.multi_cell(0, 5, _safe(f"[FAIL] {note.equation} -- undefined with the given "
-                                            "values: " + "; ".join(r.description for r in note.violated)),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            ok = note.satisfied + note.pending
-            if ok:
-                pdf.multi_cell(0, 5, _safe(f"{note.equation} requires: " +
-                                            "; ".join(r.description for r in ok)),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(2)
-
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.multi_cell(0, 8, "Verification detail", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
-    for c in report.checks:
-        mark = "[PASS]" if c.passed else "[FAIL]"
-        pdf.multi_cell(0, 5, _safe(f"{mark} {c.label}: {c.detail}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
-
-    if steps_by_target:
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.multi_cell(0, 8, "Step-by-step solution", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        for target, steps in steps_by_target.items():
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.multi_cell(0, 6, _safe(f"Solving for {target}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            for i, s in enumerate(steps, 1):
-                pdf.set_font("Helvetica", "B", 10)
-                pdf.multi_cell(0, 5, _safe(f"Step {i}: {s.description}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                _add_equation(pdf, s.expression, fontsize=11, max_h=7)
-                if s.explanation:
-                    pdf.set_font("Helvetica", "I", 9)
-                    pdf.multi_cell(0, 5, _safe(s.explanation), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    for sec in sections:
+        _pdf_line(pdf, sec.title, style="B", size=13, h=8)
+        for b in sec.blocks:
+            if b.kind == "text":
+                style = {"italic": "I", "bold": "B"}.get(b.style, "")
+                _pdf_line(pdf, b.text, style=style, size=9 if b.style == "italic" else 10,
+                          h=6 if b.style == "plain" else 5)
+            elif b.kind == "label":
+                _pdf_line(pdf, b.text, style="B", size=10 if b.text.startswith("Step ") else 11, h=5 if b.text.startswith("Step ") else 6)
+            elif b.kind == "subheading":
+                _pdf_line(pdf, b.text, style="B", size=11, h=6)
+            elif b.kind == "equation":
+                size, height = _EQ_SIZES.get(b.style, _EQ_SIZES["plain"])
+                _add_equation(pdf, b.text, fontsize=size, max_h=height)
+            elif b.kind == "bullets":
+                for item in b.items:
+                    _pdf_line(pdf, f"- {item}")
+            elif b.kind == "table":
+                pdf.set_font("Helvetica", "", 9)
+                with pdf.table(first_row_as_headings=True, text_align="LEFT", line_height=5) as table:
+                    for row_cells in [b.headers] + b.rows:
+                        row = table.row()
+                        for cell in row_cells:
+                            row.cell(_safe(str(cell)))
                 pdf.ln(1)
-
-    if plot_snapshots:
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.multi_cell(0, 8, "Plots", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        for snap in plot_snapshots:
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.multi_cell(0, 6, _safe(snap.title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            try:
-                pdf.image(io.BytesIO(snap.png_bytes), w=170)
-            except Exception as e:  # noqa: BLE001
-                pdf.set_font("Helvetica", "I", 9)
-                pdf.multi_cell(0, 5, _safe(f"(couldn't embed image: {e})"),
-                                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font("Helvetica", "I", 9)
-            pdf.multi_cell(0, 5, _safe(snap.caption), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.ln(2)
-
-    if scenarios and not any("error" in scenario for scenario in scenarios):
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.multi_cell(0, 8, "Where else this applies", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        for scenario in scenarios:
-            pdf.set_font("Helvetica", "", 10)
-            pdf.multi_cell(0, 6, _safe(f"- {scenario.get('scenario', '')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            if scenario.get("mapping"):
-                pdf.set_font("Helvetica", "I", 9)
-                pdf.multi_cell(0, 5, _safe(f"  {scenario['mapping']}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
+            elif b.kind == "status":
+                for ok, label, detail in b.rows:
+                    _pdf_line(pdf, f"{'[PASS]' if ok else '[FAIL]'} {label}: {detail}", size=9)
+            elif b.kind == "kv":
+                for k, v in b.rows:
+                    _pdf_line(pdf, f"{k}: {v}")
+            elif b.kind == "image":
+                _pdf_line(pdf, b.label_text, style="B", size=11, h=6)
+                try:
+                    pdf.image(io.BytesIO(b.png), w=170)
+                except Exception as e:  # noqa: BLE001
+                    _pdf_line(pdf, f"(couldn't embed image: {e})", style="I", size=9)
+                _pdf_line(pdf, b.text, style="I", size=9)
+        pdf.ln(2)
     return bytes(pdf.output())
+
+
+def build_pdf_bytes(problem_text: str, model: ProblemModel, report: VerificationReport,
+                     steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict],
+                     plot_snapshots: list[PlotSnapshot] | None = None,
+                     extras: ReportExtras | None = None, include: list[str] | set[str] | None = None) -> bytes:
+    """The whole report as a PDF. `include` limits it to some sections (see report_content.SECTIONS)."""
+    return render_pdf(build_sections(problem_text, model, report, steps_by_target, scenarios,
+                                     plot_snapshots, extras, include))
 
 
 def build_batch_markdown(results: list) -> str:

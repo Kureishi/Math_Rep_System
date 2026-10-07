@@ -66,11 +66,26 @@ def check_upload_size(uploaded_file) -> bool:
     return True
 
 
-def snapshot_button(key: str, title: str, caption: str, render_fn):
+def _figure_json(figure) -> str:
+    """The figure as JSON for the HTML report, or "" if there is none or it cannot be serialised -- a plot
+    that cannot go in live still goes in as its image."""
+    if figure is None:
+        return ""
+    try:
+        return figure.to_json()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def snapshot_button(key: str, title: str, caption: str, render_fn, figure=None):
     """Renders a small 'include this plot in the report' control under a
     plot. render_fn is a zero-arg callable producing PNG bytes -- kept
     lazy so the (potentially slow) matplotlib re-render only happens when
-    the user actually opts in, not on every script rerun."""
+    the user actually opts in, not on every script rerun.
+
+    `figure`, if given, is the plot's live Plotly figure: it is kept alongside the static image so the
+    interactive HTML report can show the plot live (zoom, hover) instead of as a picture. The static
+    image is still what PDF, Word, PowerPoint and Markdown use."""
     existing = st.session_state["plot_snapshots"].get(key)
     if existing:
         c1, c2 = st.columns([4, 1])
@@ -85,7 +100,8 @@ def snapshot_button(key: str, title: str, caption: str, render_fn):
         if st.button("📸 Include this plot in the report", key=f"include_snap_{key}"):
             try:
                 png = render_fn()
-                st.session_state["plot_snapshots"][key] = PlotSnapshot(title=title, caption=caption, png_bytes=png)
+                st.session_state["plot_snapshots"][key] = PlotSnapshot(
+                    title=title, caption=caption, png_bytes=png, figure_json=_figure_json(figure))
                 st.session_state["pdf_bytes"] = None
                 st.rerun()
             except Exception as e:  # noqa: BLE001

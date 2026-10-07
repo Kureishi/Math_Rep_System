@@ -23,6 +23,7 @@ from modules.plotter import build_tornado_chart, build_sweep_chart, build_histog
     build_monte_carlo_convergence_plot
 from modules.plot_snapshot import snapshot_tornado_chart, snapshot_sweep_chart, snapshot_histogram_plot
 from ui.common import format_download_button, snapshot_button
+from modules.answer_copy import copy_forms, monte_carlo_copy_forms
 from ui.actions import action_button
 from ui.fragments import isolated
 from ui.plot_select import selectable_chart
@@ -107,10 +108,22 @@ def render_step_list(client: LMStudioClient, model: ProblemModel, report: Verifi
 
 
 
+def render_copy_popover(label: str, forms: dict, key: str) -> None:
+    """A "Copy" popover offering the same result in several forms, one shown at a time in a code block --
+    whose built-in copy icon does the copying (Streamlit has no other clipboard access)."""
+    if not forms:
+        return
+    with st.popover(f"📋 {label}", help="Copy this result as text, with units, as LaTeX or as Python"):
+        choice = st.radio("Format", list(forms), horizontal=True, key=f"copy_fmt_{key}")
+        text, language = forms[choice]
+        st.code(text, language=language)
+
+
 def render_target_answer(ws: Workspace, model: ProblemModel, report: VerificationReport, problem_text: str, opt_result, target_name):
     """One target's numeric answer extras: workspace extract, sig-fig note, unit conversions, Python export."""
     sympy_val = report.sympy_numeric_answers.get(target_name)
     if sympy_val is not None:
+        render_copy_popover(f"Copy {target_name}", copy_forms(model, report, target_name), key=target_name)
         if st.button(f"➕ Extract {target_name} to workspace", key=f"extract_{target_name}"):
             unit = next((v.unit for v in model.variables if v.symbol == target_name), None)
             ws.store(target_name, sympy_val,
@@ -277,6 +290,10 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                           f"(5th–95th percentile: {mc_result.p5:.6g} to {mc_result.p95:.6g})")
                 st.caption(f"Seed used: {mc_result.seed} -- reuse it above to reproduce "
                             "this exact run.")
+                render_copy_popover(f"Copy {target_name} summary", monte_carlo_copy_forms(
+                    target_name, mc_result.mean, mc_result.std, mc_result.p5, mc_result.p95,
+                    mc_result.n_requested, mc_result.seed,
+                    next((v.unit for v in model.variables if v.symbol == target_name), None)), key=f"mc_{target_name}")
                 if mc_result.n_failed:
                     st.caption(f"{mc_result.n_failed} of {mc_result.n_requested} samples "
                                 "didn't produce a real result and were excluded.")
@@ -509,6 +526,7 @@ def render_sensitivity(model: ProblemModel, target_name):
             snapshot_button(
                 key=f"tornado_{target_name}",
                 title=f"Sensitivity (tornado chart) for {target_name}",
+                figure=tornado_fig,
                 caption=f"±{pct_range:.0%} sweep of each input",
                 render_fn=lambda e=entries: snapshot_tornado_chart(e),
             )
@@ -523,6 +541,7 @@ def render_sensitivity(model: ProblemModel, target_name):
                 st.plotly_chart(sweep_fig, width='stretch', key=f"sweep_{target_name}")
                 snapshot_button(
                     key=f"sweep_{target_name}_{sweep_symbol}",
+                    figure=sweep_fig,
                     title=f"{target_name} vs {sweep_symbol}",
                     caption=f"±{pct_range:.0%} sweep of {sweep_symbol}",
                     render_fn=lambda sr=sweep_result: snapshot_sweep_chart(sr),

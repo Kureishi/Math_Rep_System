@@ -51,7 +51,7 @@ _SESSION_DEFAULTS: list[tuple[str, Any]] = [
     ("steps", None), ("scenarios", None), ("extracted_from_image", ""),
     ("pdf_bytes", None), ("plot_snapshots", {}), ("worksheet_problems", []),
     ("batch_results", None), ("last_saved_history_id", None), ("current_history_id", None),
-    ("paranoid_result", None), ("followup_history", []),
+    ("paranoid_result", None), ("followup_history", []), ("tutor_saved", []), ("provenance", None),
     ("self_consistency_result", None), ("error_pattern_messages", []),
 ]
 for key, default in _SESSION_DEFAULTS:

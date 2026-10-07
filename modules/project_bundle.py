@@ -66,6 +66,8 @@ def export_bundle(history_ids: list | None = None, chain_ids: list | None = None
             continue
         problem_text, model, report, steps_by_target, scenarios = loaded
         saved_view = history.load_view_state(hid)
+        extras = {k: history.load_extra(hid, k) for k in ("followups", "tutor", "provenance")}
+        extras = {k: v for k, v in extras.items() if v}
         history_records.append({
             "problem_text": problem_text,
             "raw_json": model.raw_json,
@@ -79,6 +81,8 @@ def export_bundle(history_ids: list | None = None, chain_ids: list | None = None
             "scenarios": scenarios,
             # additive and optional (older bundles have none): how the problem was being explored
             **({"view_state": saved_view} if saved_view else {}),
+            # the follow-up Q&A, tutor transcripts and how it was solved; also optional
+            **({"extras": extras} if extras else {}),
         })
 
     if chain_ids is None:
@@ -154,6 +158,9 @@ def import_bundle(bundle_json: str, workspace) -> ImportSummary:
             new_id = history.save(rec["problem_text"], model, report, steps_by_target, rec.get("scenarios", []))
             if rec.get("view_state"):
                 history.save_view_state(new_id, rec["view_state"])
+            for extra_key, extra_value in (rec.get("extras") or {}).items():
+                if extra_key in ("followups", "tutor", "provenance"):
+                    history.save_extra(new_id, extra_key, extra_value)
             n_history += 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"Skipped a history record ('{rec.get('problem_text', '?')[:40]}'): {e}")

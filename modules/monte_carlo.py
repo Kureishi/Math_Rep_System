@@ -70,6 +70,8 @@ class MonteCarloResult:
     std: float | None = None
     p5: float | None = None
     p95: float | None = None
+    inputs: list[str] = field(default_factory=list)   # the uncertain inputs, as "v_f ~ N(20, 1)", so a
+                                                       # result (and a report quoting it) says what was varied
 
 
 def _evaluate_in_chunks(f, arg_arrays: list, n_samples: int, progress: ProgressFn | None) -> np.ndarray:
@@ -127,6 +129,7 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
         seed = int(np.random.SeedSequence().generate_state(1, dtype=np.uint32)[0])
 
     n_samples = max(10, min(n_samples, MAX_SAMPLES))
+    inputs = [f"{u.symbol} ~ N({u.mean:g}, {u.std:g})" for u in uncertain_vars]
     report(progress, "Drawing random inputs", 0.0)
     rng = np.random.default_rng(seed)
     draws = {uv.symbol: rng.normal(uv.mean, uv.std, size=n_samples) for uv in uncertain_vars}
@@ -172,7 +175,7 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
     if not active_vars:
         # the target doesn't depend on any uncertain input -- deterministic
         value = float(target_expr)
-        return MonteCarloResult(target=target, samples=[value] * n_samples, n_requested=n_samples,
+        return MonteCarloResult(inputs=inputs, target=target, samples=[value] * n_samples, n_requested=n_samples,
                                   n_failed=0, seed=seed, mean=value, std=0.0, p5=value, p95=value)
 
     f = sp.lambdify([sp.Symbol(uv.symbol) for uv in active_vars], target_expr, "numpy")
@@ -187,12 +190,12 @@ def run_monte_carlo(model: ProblemModel, target: str, uncertain_vars: list[Uncer
     n_failed = n_samples - len(samples)
 
     if not samples:
-        return MonteCarloResult(target=target, samples=[], n_requested=n_samples, n_failed=n_failed,
+        return MonteCarloResult(inputs=inputs, target=target, samples=[], n_requested=n_samples, n_failed=n_failed,
                                   seed=seed)
 
     arr = np.array(samples)
     return MonteCarloResult(
-        target=target, samples=samples, n_requested=n_samples, n_failed=n_failed, seed=seed,
+        inputs=inputs, target=target, samples=samples, n_requested=n_samples, n_failed=n_failed, seed=seed,
         mean=float(np.mean(arr)), std=float(np.std(arr)),
         p5=float(np.percentile(arr, 5)), p95=float(np.percentile(arr, 95)),
     )

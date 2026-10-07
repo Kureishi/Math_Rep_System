@@ -66,7 +66,8 @@ def _widget_keys(path_glob: str) -> set[str]:
 
 # Widgets in the results page that are deliberately NOT part of a saved view: grading and worksheet inputs
 # belong to the practice tab's own flow, and the self-consistency / adversarial panels re-run an LLM.
-NOT_PERSISTED = {"adv_target", "grade_target", "grade_work_input_method", "grade_work_use_vision",
+NOT_PERSISTED = {"copy_fmt_X",             # which form the Copy popover shows: a transient chooser
+                 "adv_target", "grade_target", "grade_work_input_method", "grade_work_use_vision",
                  "self_consistency_runs", "self_consistency_spread_target", "worksheet_count",
                  "worksheet_difficulty", "worksheet_targeted"}
 

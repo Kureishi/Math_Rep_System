@@ -218,30 +218,49 @@ def load(entry_id: int):
     return problem_text, model, report, steps_by_target, scenarios
 
 
-def save_view_state(entry_id: int, view_state: dict) -> bool:
-    """Stores the exploration state (modules/view_state.py's wrap() form) with the problem's record, inside
-    its existing JSON payload, so it needs no schema change and an older database simply has none.
-    Returns False if there is no such record. An empty state removes a previously saved one."""
+# Things stored INSIDE a record's JSON payload next to the problem itself, so none needs a schema change and
+# an older database simply has none of them. Anything else is refused rather than quietly stored.
+EXTRA_KEYS = ("view_state", "followups", "tutor", "provenance")
+
+
+def save_extra(entry_id: int, key: str, value) -> bool:
+    """Stores `value` (JSON-serialisable) under `key` in the record's payload. An empty value (None, {}, [])
+    removes the key. Returns False if there is no such record. Raises ValueError for a key not in EXTRA_KEYS."""
+    if key not in EXTRA_KEYS:
+        raise ValueError(f"Unknown record extra {key!r}; expected one of {EXTRA_KEYS}.")
     with _connect() as conn:
         row = conn.execute("SELECT payload FROM problems WHERE id = ?", (entry_id,)).fetchone()
         if row is None:
             return False
         payload = json.loads(row[0])
-        if view_state and view_state.get("values"):
-            payload["view_state"] = view_state
+        if value:
+            payload[key] = value
         else:
-            payload.pop("view_state", None)
+            payload.pop(key, None)
         conn.execute("UPDATE problems SET payload = ? WHERE id = ?", (json.dumps(payload), entry_id))
     return True
 
 
-def load_view_state(entry_id: int) -> dict:
-    """The saved exploration state of a record (the wrap() form), or {} if it has none or doesn't exist."""
+def load_extra(entry_id: int, key: str):
+    """The value stored under `key`, or None if the record or the key is absent."""
+    if key not in EXTRA_KEYS:
+        raise ValueError(f"Unknown record extra {key!r}; expected one of {EXTRA_KEYS}.")
     with _connect() as conn:
         row = conn.execute("SELECT payload FROM problems WHERE id = ?", (entry_id,)).fetchone()
     if row is None:
-        return {}
-    saved = json.loads(row[0]).get("view_state")
+        return None
+    return json.loads(row[0]).get(key)
+
+
+def save_view_state(entry_id: int, view_state: dict) -> bool:
+    """Stores the exploration state (modules/view_state.py's wrap() form) with the problem's record.
+    An empty state removes a previously saved one. Returns False if there is no such record."""
+    return save_extra(entry_id, "view_state", view_state if view_state and view_state.get("values") else None)
+
+
+def load_view_state(entry_id: int) -> dict:
+    """The saved exploration state of a record (the wrap() form), or {} if it has none or doesn't exist."""
+    saved = load_extra(entry_id, "view_state")
     return saved if isinstance(saved, dict) else {}
 
 

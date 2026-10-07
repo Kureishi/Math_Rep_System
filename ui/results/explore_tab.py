@@ -95,6 +95,7 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                 _render_node_selection(graph_state, dep_nodes, dep_edges)
                 snapshot_button(
                     key="dependency_graph",
+                    figure=fig,
                     title="Dependency graph",
                     caption=f"{model.problem_domain} -- variable/equation dependencies",
                     render_fn=lambda: snapshot_dependency_graph(dep_nodes, dep_edges),
@@ -392,6 +393,7 @@ def _interactive_plot_panel(model: ProblemModel, edited_values):
             )
             snapshot_button(
                 key=f"surface_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                figure=fig,
                 title=f"{eq_choice.name}: {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
                 caption=surf_caption,
                 render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
@@ -464,6 +466,7 @@ def _interactive_plot_panel(model: ProblemModel, edited_values):
             )
             snapshot_button(
                 key=f"contour_{eq_choice.name}_{x_symbol}_{y_symbol}",
+                figure=fig,
                 title=f"{eq_choice.name}: contours of {z_target or 'residual'} vs {x_symbol}, {y_symbol}",
                 caption=contour_caption,
                 render_fn=lambda ec=eq_choice, xs=x_symbol, ys=y_symbol, pv=param_values,
@@ -529,6 +532,7 @@ def _interactive_plot_panel(model: ProblemModel, edited_values):
             )
             snapshot_button(
                 key=f"line_{eq_choice.name}_{x_symbol}",
+                figure=fig,
                 title=f"{eq_choice.name}: {y_target or 'residual'} vs {x_symbol}",
                 caption=line_caption,
                 render_fn=lambda ec=eq_choice, xs=x_symbol, pv=param_values, xr=x_range, yt=y_target,

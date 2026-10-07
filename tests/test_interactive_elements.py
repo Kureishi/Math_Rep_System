@@ -378,16 +378,17 @@ def test_the_share_button_replaces_the_inline_export_and_chain_sections():
     assert not any("Send this result to a chain" in e.label for e in at.expander)
 
 
-def test_the_dialog_offers_downloads_latex_and_a_plain_summary():
+def test_the_dialog_offers_every_format_latex_and_a_plain_summary():
     at = solved_app()
     button(at, "open_share_dialog").click()
     at.run()
     assert _exceptions(at) == []
     labels = [d.proto.label for d in at.get("download_button")]
-    assert "📄 Download as Markdown" in labels
+    for expected in ("📕 PDF", "🌐 Interactive HTML", "📘 Word", "📙 PowerPoint", "📄 LaTeX", "📝 Markdown"):
+        assert expected in labels
     latex = next(c for c in at.code if c.language == "latex").value
     assert r"\begin{gather*}" in latex and r"d = 84\,\text{m}" in latex
-    plain = next(c for c in at.code if c.language == "plaintext").value
+    plain = next(c.value for c in at.code if c.language == "plaintext" and "Verification:" in c.value)
     assert "  a = 2 m/s^2" in plain
 
 
@@ -402,43 +403,28 @@ def _share_tabs_script():
     from modules.solver import compute_steps
     from tests.conftest import KINEMATICS_TWO_TARGET_JSON
     from ui import share
+    from ui.exports import collect_context
     model = build_model(json.loads(KINEMATICS_TWO_TARGET_JSON))
     report = deterministic_report(model)
     steps = compute_steps(model)
-    for key, default in (("problem_text", "A car accelerates."), ("scenarios", []), ("pdf_bytes", None),
-                         ("plot_snapshots", {}), ("active_chain_id", None)):
+    for key, default in (("problem_text", "A car accelerates."), ("scenarios", []), ("model", model),
+                         ("report", report), ("steps", steps), ("plot_snapshots", {}), ("followup_history", []),
+                         ("active_chain_id", None)):
         st.session_state.setdefault(key, default)
-    which = st.session_state.get("_tab", "download")
-    if which == "download":
-        share._download_tab(model, report, steps, st.session_state["problem_text"])
+    which = st.session_state.get("_tab", "export")
+    if which == "export":
+        share._export_tab(collect_context())
     elif which == "copy":
         share._copy_tab(model, report, steps, st.session_state["problem_text"])
     else:
         share.render_send_to_chain_form(model)
 
 
-def _share_tab(which: str):
+def _share_tab(which: str = "export"):
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_function(_share_tabs_script, default_timeout=120)
     at.session_state["_tab"] = which
     return at.run()
-
-
-def test_the_pdf_is_generated_in_place_and_offered_without_a_rerun_of_the_page():
-    at = _share_tab("download")
-    assert _exceptions(at) == []
-    assert at.session_state["pdf_bytes"] is None
-    assert "⬇️ Download PDF" not in [d.proto.label for d in at.get("download_button")]
-    button(at, "share_pdf_generate").click()
-    at.run()
-    assert _exceptions(at) == []
-    assert at.session_state["pdf_bytes"][:4] == b"%PDF"
-    assert "⬇️ Download PDF" in [d.proto.label for d in at.get("download_button")]       # same run, no st.rerun()
-
-
-def test_the_download_tab_says_how_many_marked_plots_the_report_will_contain():
-    at = _share_tab("download")
-    assert any("📸" in c.value for c in at.caption)                  # the tip, when none are marked
 
 
 def test_the_include_steps_checkbox_adds_the_worked_steps_to_the_latex():
@@ -487,7 +473,9 @@ def test_an_existing_chain_can_be_chosen_and_extended():
 def test_each_step_has_an_explain_popover_instead_of_an_expander():
     at = solved_app()
     n_steps = sum(len(s) for s in at.session_state["steps"].values())
-    assert len(at.get("popover")) == n_steps
+    explain = [p for p in at.get("popover") if any(getattr(c, "key", "") and c.key.startswith("explain_btn_")
+                                                   for c in p.children.values())]
+    assert len(explain) == n_steps
     assert not any(e.label.startswith("🔍 Explain just step") for e in at.expander)
     assert "explain_btn_a_1" in keys(at)
 

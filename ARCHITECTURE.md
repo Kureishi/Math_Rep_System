@@ -140,7 +140,9 @@ math-rep-system/
 │   ├── progress.py              # tracked_run(): a long computation as a live status block with a
 │   │                          #   Stop button, and notice_interrupted() for a run that was cut short
 │   ├── view_state.py            # save/restore how a problem was being explored (with its history record)
-│   ├── share.py                 # the Share / export dialog: downloads, copy-as-LaTeX, send to a chain
+│   ├── share.py                 # the Share / export dialog: presets, section ticks, one-click formats,
+│   │                          #   copy-as-LaTeX, send to a chain
+│   ├── exports.py               # the session -> an ExportContext, and the cached deferred downloads
 │   ├── compare.py, compare_constants.py   # the Compare solves mode (and the names panels link to it by)
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
 │   │                          #   badges, button/spacing polish -- called once from app.py),
@@ -373,6 +375,16 @@ math-rep-system/
     │                                 #   decided by SymPy), verification; what-if snapshots
     ├── compare_plots.py               # the two charts on the Compare page
     ├── share_text.py                  # copy-ready LaTeX and plain-text summaries
+    ├── report_content.py              # a solved problem as ordered SECTIONS of a few kinds of BLOCK
+    │                                 #   (the one model every export renders from), plus the presets
+    ├── exporter.py                    # Markdown and PDF renderers over those sections (+ batch exports)
+    ├── report_html.py                 # the self-contained interactive HTML report (SVG equations, live plots)
+    ├── report_tex.py                  # LaTeX document (and a zip when it has figures)
+    ├── report_office.py               # Word (.docx) and PowerPoint (.pptx, one slide per step)
+    ├── report_export.py               # one entry point for every format; expected file name/mime
+    ├── provenance.py                  # model, settings and versions a problem was solved with
+    ├── session_extras.py              # follow-ups, tutor guesses and Monte Carlo runs -> report extras
+    ├── answer_copy.py                 # one answer as plain text / with units / LaTeX / Python
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
 ```
 
@@ -545,6 +557,55 @@ Decisions and operational details that don't belong in the README.
   which also stops the full Markdown report being rebuilt on every rerun.
   `AppTest` closes a dialog on any interaction, so the dialog's tab bodies are tested
   directly and only the opening of the dialog goes through the app.
+- **One content model, many formats** (`modules/report_content.py`). Markdown and PDF
+  each used to walk the model by hand, so every new section (or fix) had to be made
+  twice, and a third and fourth format would have made it four times. A solved problem
+  is now built ONCE into ordered `Section`s of a few `Block` kinds (paragraph, equation,
+  bullets, table, status list, key-value list, image, live figure) and each format is
+  only a renderer: Markdown and PDF (`exporter.py`), HTML, LaTeX, Word and PowerPoint.
+  Choosing sections therefore means the same thing everywhere, and `build_markdown` /
+  `build_pdf_bytes` keep their signatures. A section with nothing in it is left out
+  whether or not it was asked for. The sections are: problem, results, derived
+  equations, variables, matrix, vectors, other units, confidence, domain, verification,
+  steps, sensitivity and uncertainty, plots, scenarios, follow-ups, tutor practice and
+  reproducibility; the presets are Full audit, Student handout, Peer review and Quick
+  summary.
+- **The HTML report** (`modules/report_html.py`) is one file with nothing external.
+  Equations are inline SVG from matplotlib's mathtext with glyphs as paths (no font,
+  no JavaScript, and a root `fill="currentColor"` so they follow dark mode; they were
+  invisible in dark mode before that was checked in a browser). Plots are live Plotly
+  figures: marked plots (when the plot had a figure at the time), a tornado chart per
+  target and a histogram per Monte Carlo run. Live plots need the Plotly library
+  embedded, about 5 MB, once; a report with no live plots has no script library at all.
+  All text is HTML-escaped and the figure JSON cannot close its `<script>`.
+- **LaTeX** is `report_tex.py`: plain pdflatex with amsmath only, prose escaped, an
+  unparsed equation set as text rather than math (raw text is not valid math and would
+  stop the compile). A single .tex cannot carry pictures, so a report with marked plots
+  is a zip of `report.tex` and `figures/`. **Word and PowerPoint** (`report_office.py`)
+  typeset equations to images, since LaTeX-to-Office-Math is its own project. The deck
+  gives each worked step its own slide (description as the title, the equation large,
+  the explanation in the speaker notes) and lets tables and text flow onto "(cont.)"
+  slides rather than overflow.
+- **One-click, cached downloads** (`ui/exports.py`). Each format button is a deferred
+  `st.download_button`: the file is built when it is clicked, so there is no
+  "generate, then download" step and opening the dialog costs nothing. Streamlit runs
+  that callable on its own thread with no script context, so it closes over plain
+  data and the cache is the module's own (a lock-protected LRU bounded by entries and
+  bytes), keyed by the content fingerprint of everything the file was built from plus
+  the format, the sections and the current minute (every export is stamped with when
+  it was made). Content that cannot be fingerprinted is rebuilt each time.
+- **Provenance** (`modules/provenance.py`) is captured when a problem is SOLVED and stored
+  with its history record, so an export next month reports what actually produced the
+  result. A problem saved before this has no record, and the report says exactly that
+  and labels the current settings as current. It states that the extraction is sampled
+  from a language model and not guaranteed to repeat, rather than implying determinism.
+  `config.APP_VERSION` did not exist before; it is bumped by hand.
+- **Follow-ups, tutor guesses and Monte Carlo inputs** are now part of a problem.
+  Follow-ups and the tutor transcript are saved with the history record (inside its
+  JSON payload, like the saved view, under a fixed set of keys) and travel in project
+  bundles; a Monte Carlo result now records its uncertain inputs. This also fixed an
+  existing bug: the follow-up list was never cleared, so one problem's questions
+  appeared under the next one.
 - **Compare** (`modules/solve_compare.py`, `ui/compare.py`). Two solves from the
   screen, history or a what-if (known inputs changed, re-solved by SymPy). A what-if is
   verified with the deterministic checks only and says so; the independent LLM re-solve

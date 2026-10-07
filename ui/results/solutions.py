@@ -66,6 +66,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                 )
                 snapshot_button(
                     key=f"ode_{func_name}",
+                    figure=fig,
                     title=f"{func_name}({indep_sym}) solution curve",
                     caption=ode_caption,
                     render_fn=lambda rf=rhs_final, ind=indep_sym, tr=t_range, fn=func_name:

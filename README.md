@@ -180,12 +180,22 @@ Markdown, PDF, Python, or a Jupyter notebook.
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**
   (`api_server.py`) covers `/solve`, `/fit`, `/equivalence` and
   `/dimensional-analysis`. Both talk to LM Studio the same way the app does.
-- **Export:** one **Share / export** button opens a dialog with the Markdown and PDF
-  downloads, copy-ready **LaTeX** and plain-text summaries (`share_text.py`), and
-  "send to a chain". PDF equations are rendered with matplotlib mathtext, and plots go
-  into a report through an explicit "Include this plot" button. Static images
-  deliberately avoid `kaleido`, whose current releases need a separate Chrome
-  install.
+- **Export:** one **Share / export** button opens a dialog. Choose what goes in (a
+  preset -- *Full audit*, *Student handout*, *Peer review*, *Quick summary* -- or tick
+  sections: problem, results, equations, steps, sensitivity and Monte Carlo, plots,
+  follow-up Q&A, tutor practice, reproducibility ...) and click a format; the file is
+  built on that click. Formats: **PDF**, an **interactive HTML** report (one offline
+  file, live zoomable plots, click an equation to copy its LaTeX), **Word**,
+  **PowerPoint** (one slide per worked step, explanations in the speaker notes),
+  **LaTeX** source, and **Markdown**. Every export can carry a reproducibility
+  footer (model, settings, library versions, Monte Carlo seeds). The dialog also has
+  copy-ready LaTeX and plain-text summaries and "send to a chain". Plots go into a
+  report through an explicit "Include this plot" button. Static images deliberately
+  avoid `kaleido`, whose current releases need a separate Chrome install.
+- **Copy buttons:** each answer, and each Monte Carlo summary, has a 📋 popover to copy
+  it as plain text, with units, as LaTeX, or as Python (a value, or the function).
+- **Follow-up questions and tutor-mode guesses are saved with the problem**, so they
+  survive reopening it and appear in exports.
 
 **Reliability**
 - Every SymPy-heavy call has a configurable timeout (default 10 s). A thread
@@ -253,7 +263,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite (about 1,850 tests, roughly two minutes) uses a mocked LLM client
+The suite (about 2,000 tests, roughly two minutes) uses a mocked LLM client
 (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:

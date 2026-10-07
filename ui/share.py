@@ -1,28 +1,36 @@
 """
-The "Share / export" dialog: one place for everything that takes a solved problem OUT of the app.
+The "Share / export" dialog: everything that takes a solved problem OUT of the app, in one place.
 
-It replaces two things that used to sit in the results page itself -- the Export section at the very
-bottom and the "Send this result to a chain" expander near the top -- with a single button. Opening it
-gives three tabs:
+    Export   choose what goes in (a preset, or tick sections), then one click on a format:
+             PDF, interactive HTML, Word, PowerPoint, LaTeX or Markdown
+    Copy     LaTeX source and a plain-text summary, each in a code block with a copy button
+    Chain    send a target's result to a problem chain
 
-    Download   Markdown, and a PDF (generate once, then download)
-    Copy       LaTeX source and a plain-text summary, each in a code block with a copy button
-    Chain      send a target's result to a problem chain (the old expander, unchanged)
+ONE CLICK: each format button is a deferred download (ui/exports.py) -- the file is built when the button is
+clicked, not before, so there is no "generate, then download" step, opening the dialog costs nothing, and
+the same file is not rebuilt if it is clicked again.
 
-Nothing is built until the dialog is open, which also takes the full Markdown report out of every rerun
-(the old Export section rebuilt it each time any widget moved, only to hand it to a download button).
+WHAT GOES IN: the sections of modules/report_content.py. Only sections that have content for THIS problem
+are offered (no "Matrix representation" ticked for a problem with no matrix). The choice is remembered for the
+session, and picking a preset replaces it; editing a tick afterwards switches the preset to "Custom".
 
-A dialog is its own fragment: interacting with it reruns the dialog and leaves the page alone, which is
-why generating the PDF here must not call st.rerun() -- that would reload the whole page and close the
-dialog. The PDF is stored in session state and its download button shown in the same run.
+A dialog is its own fragment: interacting with it reruns the dialog and leaves the page alone.
 """
 import streamlit as st
 
 from modules import chains
 from modules.equation_engine import ProblemModel, target_kind
-from modules.exporter import build_markdown, build_pdf_bytes
+from modules.report_content import (
+    DEFAULT_PRESET, PRESETS, SECTION_DESCRIPTIONS, SECTION_IDS, SECTION_TITLES,
+)
+from modules.report_export import FORMATS, ExportContext, available_sections
 from modules.share_text import build_latex, build_plain_text
 from modules.verifier import VerificationReport
+from ui.cache import cached
+from ui.exports import collect_context, download_button
+
+_SELECTION_KEY = "share_selection"      # the chosen section ids, kept apart from the checkbox widgets
+_CUSTOM = "Custom"
 
 
 def render_share_button(model: ProblemModel, report: VerificationReport, steps_by_target) -> None:
@@ -34,38 +42,67 @@ def render_share_button(model: ProblemModel, report: VerificationReport, steps_b
 
 @st.dialog("Share this solution", width="large")
 def share_dialog(model: ProblemModel, report: VerificationReport, steps_by_target) -> None:
-    tab_download, tab_copy, tab_chain = st.tabs(["⬇️ Download", "📋 Copy", "🔗 Send to a chain"])
-    problem_text = st.session_state["problem_text"]
-    with tab_download:
-        _download_tab(model, report, steps_by_target, problem_text)
+    ctx = collect_context()
+    tab_export, tab_copy, tab_chain = st.tabs(["⬇️ Export", "📋 Copy", "🔗 Send to a chain"])
+    with tab_export:
+        _export_tab(ctx)
     with tab_copy:
-        _copy_tab(model, report, steps_by_target, problem_text)
+        _copy_tab(model, report, steps_by_target, ctx.problem_text)
     with tab_chain:
         render_send_to_chain_form(model)
 
 
-def _download_tab(model, report, steps_by_target, problem_text) -> None:
-    scenarios = st.session_state["scenarios"] or []
-    snapshots = list(st.session_state["plot_snapshots"].values())
-    if snapshots:
-        st.caption(f"{len(snapshots)} plot(s) you marked with 📸 will be included in the report.")
+def _apply_preset() -> None:
+    chosen = PRESETS.get(st.session_state["share_preset"])
+    if chosen is None:
+        return
+    st.session_state[_SELECTION_KEY] = list(chosen)
+    for sid in SECTION_IDS:
+        st.session_state[f"share_sec_{sid}"] = sid in chosen
+
+
+def _toggled(section_id: str) -> None:
+    selection = set(st.session_state.get(_SELECTION_KEY, []))
+    (selection.add if st.session_state[f"share_sec_{section_id}"] else selection.discard)(section_id)
+    st.session_state[_SELECTION_KEY] = [s for s in SECTION_IDS if s in selection]
+    st.session_state["share_preset"] = _CUSTOM
+
+
+def _export_tab(ctx: ExportContext) -> None:
+    available = cached("share_available", (ctx,), lambda: available_sections(ctx))
+    selection = st.session_state.setdefault(_SELECTION_KEY, list(PRESETS[DEFAULT_PRESET]))
+    st.session_state.setdefault("share_preset", DEFAULT_PRESET)
+
+    st.selectbox("What to include", list(PRESETS) + [_CUSTOM], key="share_preset", on_change=_apply_preset,
+                 help="A preset ticks a set of sections; change any tick and it becomes Custom.")
+    cols = st.columns(3)
+    for i, sid in enumerate(s for s in SECTION_IDS if s in available):
+        key = f"share_sec_{sid}"
+        with cols[i % 3]:
+            if key in st.session_state:                      # state wins; passing a value too would be ignored
+                st.checkbox(SECTION_TITLES[sid], key=key, on_change=_toggled, args=(sid,),
+                            help=SECTION_DESCRIPTIONS[sid])
+            else:
+                st.checkbox(SECTION_TITLES[sid], value=sid in selection, key=key, on_change=_toggled,
+                            args=(sid,), help=SECTION_DESCRIPTIONS[sid])
+    skipped = [SECTION_TITLES[s] for s in SECTION_IDS if s not in available]
+    if skipped:
+        st.caption("Nothing to include for: " + ", ".join(skipped) + ".")
+    if ctx.snapshots:
+        st.caption(f"{len(ctx.snapshots)} plot(s) you marked with 📸 are in the Plots section.")
     else:
-        st.caption("Tip: use 📸 “Include this plot in the report” under a plot to put it in the report.")
+        st.caption("Tip: 📸 “Include this plot in the report” under a plot adds it to the Plots section.")
 
-    st.download_button("📄 Download as Markdown",
-                       data=build_markdown(problem_text, model, report, steps_by_target, scenarios,
-                                           plot_snapshots=snapshots),
-                       file_name="solved_problem.md", mime="text/markdown", key="share_md",
-                       on_click="ignore")
-
-    if st.button("🖨️ Generate PDF", key="share_pdf_generate"):
-        with st.spinner("Rendering PDF (typesetting equations)..."):
-            st.session_state["pdf_bytes"] = build_pdf_bytes(problem_text, model, report, steps_by_target,
-                                                            scenarios, plot_snapshots=snapshots)
-    if st.session_state["pdf_bytes"] is not None:
-        st.download_button("⬇️ Download PDF", data=st.session_state["pdf_bytes"],
-                           file_name="solved_problem.pdf", mime="application/pdf", key="share_pdf",
-                           on_click="ignore")
+    chosen = [s for s in SECTION_IDS if s in available and st.session_state.get(f"share_sec_{s}", s in selection)]
+    if not chosen:
+        st.warning("Tick at least one section to export.")
+        return
+    st.markdown("**Download** -- built when you click")
+    grid = st.columns(3)
+    for i, spec in enumerate(FORMATS):
+        with grid[i % 3]:
+            download_button(spec.key, f"{spec.icon} {spec.label}", ctx, chosen, key=f"share_dl_{spec.key}")
+            st.caption(spec.note)
 
 
 def _copy_tab(model, report, steps_by_target, problem_text) -> None:

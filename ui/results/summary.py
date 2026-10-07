@@ -376,6 +376,7 @@ def render_vector_summary(model: ProblemModel, edited_values):
             st.plotly_chart(fig, width='stretch')
             snapshot_button(
                 key=f"vectors_{dim}d",
+                figure=fig,
                 title=f"Vector diagram ({dim}D): " + ", ".join(name for name, _ in vecs),
                 caption=", ".join(f"{name} = {comps}" for name, comps in vecs),
                 render_fn=lambda vv=vecs: snapshot_vector_plot(vv),
