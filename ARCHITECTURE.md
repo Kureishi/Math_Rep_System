@@ -144,6 +144,7 @@ math-rep-system/
 │   │                          #   copy-as-LaTeX, send to a chain
 │   ├── exports.py               # the session -> an ExportContext, and the cached deferred downloads
 │   ├── compare.py, compare_constants.py   # the Compare solves mode (and the names panels link to it by)
+│   ├── quantum.py               # the Quantum mechanics mode: five tabs, each showing its result with its checks
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
 │   │                          #   badges, button/spacing polish -- called once from app.py),
 │   │                          #   render_hero(), badge()/badge_row(), and dark_mode_css()
@@ -385,6 +386,13 @@ math-rep-system/
     ├── provenance.py                  # model, settings and versions a problem was solved with
     ├── session_extras.py              # follow-ups, tutor guesses and Monte Carlo runs -> report extras
     ├── answer_copy.py                 # one answer as plain text / with units / LaTeX / Python
+    ├── quantum_common.py              # CheckList / QuantumCheck, and the safe expression parser
+    ├── quantum_1d.py                  # 1D Schrödinger eigenstates: potential library, 3-grid convergence study
+    ├── quantum_dynamics.py            # wavepackets (split-step, Crank–Nicolson), transfer-matrix scattering
+    ├── quantum_operators.py           # operator algebra, evaluator, identities, uncertainty, BCH
+    ├── quantum_qubits.py              # gates, Bloch sphere, Lindblad noise, purity, fidelity
+    ├── quantum_perturbation.py        # exact Rayleigh–Schrödinger corrections and their comparison with exact
+    ├── quantum_plots.py               # the Plotly figures for all of the above
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
 ```
 
@@ -606,6 +614,46 @@ Decisions and operational details that don't belong in the README.
   bundles; a Monte Carlo result now records its uncertain inputs. This also fixed an
   existing bug: the follow-up list was never cleared, so one problem's questions
   appeared under the next one.
+- **Quantum mechanics** (`modules/quantum_*.py`, `ui/quantum.py`). The principle is that a
+  result is shown with the checks that were *run on it* (`CheckList`: label, verdict and the numbers
+  behind it), never with an implied "verified". Each tool pairs its method with something it does not
+  share code with: the eigensolver with the analytic spectrum and a measured three-grid convergence order;
+  the two time-evolution methods with each other and with the exact stationary-scattering solution; the
+  Bloch-vector noise equations with the density-matrix Lindblad superoperator; the perturbation
+  coefficients with exact diagonalisation (by the measured error slope) and, for the oscillator, with the
+  real-space solver; the BCH series with `logm(expm(X) expm(Y))`. Every such check has a test that
+  deliberately breaks the thing it checks and asserts the check fails.
+  - *Typed expressions* (potentials, operator expressions) are walked as a syntax tree and refused unless
+    they are numbers, whitelisted names and functions, and arithmetic; only then does SymPy see them. The
+    operator evaluator is its own small tree-walker over SymPy matrices and never calls `eval`.
+  - *Scattering.* Across each flat piece (ψ, ψ') is multiplied by the exact propagation matrix, and matching
+    to incident, reflected and transmitted plane waves gives T and R with T + R = 1 (checked against the
+    textbook closed forms to 1e-12). A packet is a superposition, so what the simulation is compared with is
+    the *average* of T(E(k)) over its momentum distribution, not T at the central energy. The comparison is
+    to the barrier as the GRID represents it (a barrier of width 1 is a whole number of cells), since
+    the nominal width is not what was simulated. It is also refused unless the run is long enough for the
+    packet to have crossed: a run that stops while the packet is still approaching has no probability near
+    the barrier either, and that must not read as "settled".
+  - *Time steps.* Split-step Fourier is unitary, so the norm is conserved at any step, but its kinetic
+    factor rotates the grid's highest-momentum component by ħk²Δt/2m per step, and a sharp-edged potential
+    puts a little probability there. Energy drift is ~1e-6 when the half-step phase is at most about 3 rad and
+    order 1 at ~10, so `recommended_steps` keeps it at 3 and the energy check reports the drift. The two
+    methods are not expected to agree exactly: finite differences carry dispersion error ω(1 − k²Δx²/12), and
+    the cross-check's allowance is 2% plus the phase error that predicts.
+  - *Noise.* During a gate the Lindblad equation is linear in the Bloch vector (dr/dt = M r + b), so
+    propagation is one 4×4 matrix exponential per segment: there is no time-step error at any noise rate.
+    Amplitude damping is non-unital and can raise the purity of a mixed state, so the check is
+    "purity never exceeds 1", not "never increases".
+  - *Truncation.* The oscillator's operators are infinite matrices cut off at a dimension. The cut-off
+    breaks [a, a†] = 1 in the last diagonal entry (it comes out 1 − d there); a failure confined to the last
+    rows and columns is flagged as a truncation artefact and shown, not hidden and not called a failure.
+  - *Perturbation.* Corrections are exact (SymPy rationals and radicals). A degenerate level gets the
+    eigenvalues of V in its subspace at first order and no second order (not computed). The slope check
+    is one-sided: a wrong coefficient leaves a lower-order error and a slope BELOW k + 1, whereas a slope
+    above it means the next coefficient vanishes by symmetry. The anharmonic series is asymptotic and the
+    page says so.
+  - *Limits.* 1D only; one qubit; operators up to 8 × 8; the Schrödinger solver's Coulomb case converges
+    more slowly than second order on a uniform grid, which is reported rather than extrapolated away.
 - **Compare** (`modules/solve_compare.py`, `ui/compare.py`). Two solves from the
   screen, history or a what-if (known inputs changed, re-solved by SymPy). A what-if is
   verified with the deterministic checks only and says so; the independent LLM re-solve

@@ -139,8 +139,8 @@ Markdown, PDF, Python, or a Jupyter notebook.
   asymptotic, Fourier series), **Dimensional analysis** (Buckingham-Pi-style
   exploration from units alone), **Extraction diff**, **Compare solves**
   (`solve_compare.py`: two solves, or a what-if of one with some inputs changed, lined
-  up on answers, inputs, equations and verification; no LLM call), and **Research
-  journal**.
+  up on answers, inputs, equations and verification; no LLM call), **Quantum
+  mechanics** (below), and **Research journal**.
 
 **Plots and animations**
 - Interactive 2D line, 3D surface, contour, feasible-region, ODE, recurrence and
@@ -192,6 +192,25 @@ Markdown, PDF, Python, or a Jupyter notebook.
   copy-ready LaTeX and plain-text summaries and "send to a chain". Plots go into a
   report through an explicit "Include this plot" button. Static images deliberately
   avoid `kaleido`, whose current releases need a separate Chrome install.
+- **Quantum mechanics** (`⚛️` mode; no LLM involved; ħ = m = 1 unless you change them). Five tools, each
+  of which checks its own result and shows what it checked:
+  - *Eigenstates*: the 1D Schrödinger equation for a library of potentials (box, oscillator, finite well,
+    Morse, Pöschl–Teller, double well, hydrogen radial) or a formula you type. The energy ladder with
+    wavefunctions, a convergence study (the grid order is measured on three grids, not assumed), and
+    comparison with the analytic spectrum where one exists.
+  - *Wavepacket*: a Gaussian packet evolved by split-step Fourier and, independently, Crank–Nicolson, with
+    an animation. Tunnelling is compared with the *exact* transfer-matrix result averaged over the packet's
+    momentum distribution; norm, energy and Ehrenfest's theorem are checked.
+  - *Operators*: commutators, anticommutators and identities (exact), eigen-decompositions, the
+    Heisenberg–Robertson and Schrödinger–Robertson uncertainty relations on a state, and the
+    Baker–Campbell–Hausdorff expansion to fifth order with its error exponent measured. Spin-j,
+    Pauli and (truncated) oscillator operators are built in; so are two matrices of your own.
+  - *Qubit*: gate sequences on the Bloch sphere (animated), amplitude damping, dephasing and depolarising
+    noise (exact propagation, cross-checked against the Lindblad master equation), purity and fidelity,
+    density matrices, and T1/Ramsey measurements.
+  - *Perturbation*: Rayleigh–Schrödinger corrections through third order in exact arithmetic (E¹ = 3/4,
+    E² = −21/8, E³ = 333/16 for the quartic oscillator's ground state), compared with exact diagonalisation;
+    the measured error slope per order is what catches a wrong coefficient.
 - **Copy buttons:** each answer, and each Monte Carlo summary, has a 📋 popover to copy
   it as plain text, with units, as LaTeX, or as Python (a value, or the function).
 - **Follow-up questions and tutor-mode guesses are saved with the problem**, so they
@@ -263,7 +282,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite (about 2,000 tests, roughly two minutes) uses a mocked LLM client
+The suite (about 2,400 tests, roughly two minutes) uses a mocked LLM client
 (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:

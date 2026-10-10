@@ -51,6 +51,6 @@ class Settings:
 
 # Bumped by hand when behaviour that affects results or exports changes. It is stamped on every export
 # (modules/provenance.py) so a report can be tied to the code that produced it.
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 settings = Settings()

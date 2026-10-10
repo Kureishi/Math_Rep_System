@@ -45,6 +45,7 @@ PAGE_TARGETS: dict[str, tuple[str, str, bool]] = {
     "🔗 Problem chains": ("ui.chains", "render_chains_tab", True),
     "🔬 Extraction diff": ("ui.extraction_diff", "render_extraction_diff_tab", True),
     "🆚 Compare solves": ("ui.compare", "render_compare_tab", False),
+    "⚛️ Quantum mechanics": ("ui.quantum", "render_quantum_tab", False),
     "📐 Dimensional analysis": ("ui.dimensional", "render_dimensional_analysis_tab", False),
     "🔄 Transforms & series": ("ui.transforms_series", "render_transforms_series_tab", False),
     "🌡️ PDE solver": ("ui.pde", "render_pde_tab", False),
