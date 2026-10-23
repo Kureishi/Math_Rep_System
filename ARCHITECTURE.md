@@ -145,6 +145,8 @@ math-rep-system/
 │   ├── exports.py               # the session -> an ExportContext, and the cached deferred downloads
 │   ├── compare.py, compare_constants.py   # the Compare solves mode (and the names panels link to it by)
 │   ├── quantum.py               # the Quantum mechanics mode: five tabs, each showing its result with its checks
+│   ├── relativity.py            # the General relativity mode: six tabs (curvature, geodesics, potentials, coordinate
+│   │                          #   changes, cones & Penrose, gravitational waves), each shown with its checks
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
 │   │                          #   badges, button/spacing polish -- called once from app.py),
 │   │                          #   render_hero(), badge()/badge_row(), and dark_mode_css()
@@ -393,6 +395,14 @@ math-rep-system/
     ├── quantum_qubits.py              # gates, Bloch sphere, Lindblad noise, purity, fidelity
     ├── quantum_perturbation.py        # exact Rayleigh–Schrödinger corrections and their comparison with exact
     ├── quantum_plots.py               # the Plotly figures for all of the above
+    ├── gr_metrics.py                  # GRMetric, presets, guarded user-metric parser, GR_TIMEOUT
+    ├── gr_curvature.py                # rational-trig simplifier, Riemann..Weyl, invariants, field equations, singularities
+    ├── gr_potential.py                # V_eff, horizons/photon sphere/ISCO, Kerr closed forms, exact Schwarzschild precession & deflection
+    ├── gr_geodesics.py                # geodesic integrator, conserved-quantity monitors (incl. Carter), orbit analysis
+    ├── gr_transforms.py               # explicit/implicit coordinate changes with invariant-preservation checks
+    ├── gr_cones.py                    # light cones, null curves, Penrose diagrams (Minkowski, Schwarzschild)
+    ├── gr_waves.py                    # linearised gravity, TT plane waves, test masses, quadrupole formula, Peters inspiral
+    ├── gr_plots.py                    # the Plotly figures for all of the above
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
 ```
 
@@ -614,6 +624,45 @@ Decisions and operational details that don't belong in the README.
   bundles; a Monte Carlo result now records its uncertain inputs. This also fixed an
   existing bug: the follow-up list was never cleared, so one problem's questions
   appeared under the next one.
+- **General relativity** (`modules/gr_*.py`, `ui/relativity.py`). Same principle as the quantum tools: every
+  result carries the `CheckList` that was run on it, and every check pairs the method with something it shares no
+  code with.
+  - *The simplifier is the engine.* `tensor_calculus.py` calls `sp.simplify` on each component, which is fine for a
+    sphere and hopeless for Kerr. `gr_curvature.simplify_expr` replaces sin/cos (and sinh/cosh) of a coordinate by
+    two fresh symbols, cancels to one rational function, and applies s² + c² = 1 (or c² − s² = 1) as a polynomial
+    *remainder*. That is a canonical form for the rational-trigonometric expressions GR metrics are made of, so
+    "is this exactly zero?" has an answer rather than "simplify() did not manage it", and a full Kerr curvature
+    tensor takes ~10 s. Where the canonical form does not close, zero tests fall back to sample points and the
+    result says so (`numeric_decisions`). The two curvature engines are cross-checked in the tests.
+  - *Identities as built-in tests.* Every curvature computation also evaluates identities true for any metric: ∇g = 0,
+    the Riemann symmetries, first Bianchi, the contracted second Bianchi ∇ₐGᵃ_b = 0 (the strongest single check
+    of Γ and R), traceless Weyl, and K = C² + 4Ric²/(n−2) − 2R²/((n−1)(n−2)) between four quantities computed
+    by separate contractions.
+  - *Chain-rule derivatives.* The curvature engine takes a `partial(expr, i)` hook, so components expressed in
+    another chart's variables (Kruskal–Szekeres, whose inverse needs Lambert W) get their curvature from
+    d'_a = (J⁻¹)^m_a d_m with no inversion; the result is compared with the original invariants and with the tensor
+    law R' = JᵀRJ. SymPy is first asked to invert the map, with a short time limit, and the preset list switches
+    that off where it is known to fail.
+  - *Geodesics* are integrated in chunks (the progress hook and Stop act between chunks) from lambdified
+    Christoffel symbols, and the integrator is checked against mathematics it shares no code with: the periapsis
+    advance 4K(m)/√(2M(u_c − u_a)) − 2π and the light-deflection integral (evaluated after the substitution
+    u = u₀ − w², which removes the endpoint singularity). Conserved quantities are found automatically (a Killing
+    vector is a coordinate the metric does not depend on) plus the two that are not visible that way: total L² in
+    a spherical metric and the Carter constant in Kerr. A deliberately loose tolerance is tested to be *caught*.
+  - *Singularities.* Candidate loci are zeros of denominators of g, g⁻¹, Γ and the invariants (solved in plain real
+    symbols, since SymPy says r = 0 has no solution when r is declared positive, and restricted to each
+    coordinate's range); each is then approached numerically in mpmath. Diverging invariant ⇒ curvature singularity;
+    finite invariants with misbehaving components ⇒ coordinate artefact. Sums of squares (the Kerr Σ) are
+    solved term by term, which is what finds the ring.
+  - *Hash-seed hazards found here.* `sp.factor` and `Matrix.inv` can raise `TypeError` on symbolic exponents
+    (`t**(2p)`), but only for some hash seeds; factoring is cosmetic and inversion has a pivot-free fallback
+    (`invert_metric`).
+  - *Waves.* The linearised Ricci tensor is validated against d/dε of the full nonlinear Ricci of η + εh; a TT wave
+    is a solution exactly when ω = k and the check fails otherwise; free particles in TT gauge are shown not to
+    move using the geodesic integrator on the exact TT metric; the quadrupole result is the symbolic derivative
+    chain compared with the closed forms. Scope: lowest (quadrupole) order, no post-Newtonian corrections.
+  - *Timeouts.* `GR_TIMEOUT` (default 120 s, env `GR_TIMEOUT_SECONDS`) replaces the 10 s default, which a Kerr
+    tensor would exceed; each stage is bounded separately.
 - **Quantum mechanics** (`modules/quantum_*.py`, `ui/quantum.py`). The principle is that a
   result is shown with the checks that were *run on it* (`CheckList`: label, verdict and the numbers
   behind it), never with an implied "verified". Each tool pairs its method with something it does not

@@ -50,6 +50,7 @@ PAGE_TARGETS: dict[str, tuple[str, str, bool]] = {
     "🔄 Transforms & series": ("ui.transforms_series", "render_transforms_series_tab", False),
     "🌡️ PDE solver": ("ui.pde", "render_pde_tab", False),
     "🧮 Tensor calculus": ("ui.tensor", "render_tensor_calculus_tab", False),
+    "🌌 General relativity": ("ui.relativity", "render_relativity_tab", False),
     "📔 Research journal": ("ui.journal", "render_research_journal_tab", False),
     "🚀 Quick start": ("ui.quick_start", "render_quick_start_tab", False),
     "📐 Geometry": ("ui.geometry", "render_geometry_tab", False),
