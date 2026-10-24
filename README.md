@@ -140,7 +140,11 @@ Markdown, PDF, Python, or a Jupyter notebook.
   exploration from units alone), **Extraction diff**, **Compare solves**
   (`solve_compare.py`: two solves, or a what-if of one with some inputs changed, lined
   up on answers, inputs, equations and verification; no LLM call), **Quantum
+<<<<<<< HEAD
   mechanics** (below), **General relativity** (below), **Statistical mechanics** (below), and **Research journal**.
+=======
+  mechanics** (below), **General relativity** (below), and **Research journal**.
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
 
 **Plots and animations**
 - Interactive 2D line, 3D surface, contour, feasible-region, ODE, recurrence and
@@ -192,6 +196,7 @@ Markdown, PDF, Python, or a Jupyter notebook.
   copy-ready LaTeX and plain-text summaries and "send to a chain". Plots go into a
   report through an explicit "Include this plot" button. Static images deliberately
   avoid `kaleido`, whose current releases need a separate Chrome install.
+<<<<<<< HEAD
 - **Statistical mechanics** (`🔥` mode; no LLM involved; k_B = 1). Six tools; every result is shown with the checks that
   were run on it, and nearly every check compares the method with an exact result it shares no code with.
   - *Partition functions*: Z, F, U, S and C against temperature for a two-level system, harmonic oscillator, rigid
@@ -226,6 +231,8 @@ Markdown, PDF, Python, or a Jupyter notebook.
     ratio statistic ⟨r̃⟩.
   Every stochastic result stores the **seed** that produced it (a fresh one is drawn when the seed box is empty), so any run can
   be reproduced by typing it back in.
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
 - **General relativity** (`🌌` mode; no LLM involved; G = c = 1, signature (−,+,+,+), MTW sign convention). Six
   tools around the metric tensor, each shown with the checks that were run on it:
   - *Curvature & fields*: Christoffel symbols → Riemann → Ricci → Einstein → Weyl for a preset (Minkowski,
@@ -349,7 +356,11 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+<<<<<<< HEAD
 The suite (about 3,000 tests, roughly eight minutes with coverage) uses a mocked LLM client
+=======
+The suite (about 2,600 tests, roughly six minutes with coverage) uses a mocked LLM client
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
 (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:

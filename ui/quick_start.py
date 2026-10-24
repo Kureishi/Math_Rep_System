@@ -49,12 +49,15 @@ def render_quick_start_tab():
          "Integrate a bound Schwarzschild orbit and compare the measured periapsis advance with the exact elliptic-integral "
          "result -- open the Geodesics → Orbit & precession tab and press Integrate.",
          {}),
+<<<<<<< HEAD
         ("🔥 Statistical mechanics", "Find the Ising critical point",
          "Scan 8×8 and 16×16 Ising lattices across T_c and read the Binder-cumulant crossing -- Lattice Monte Carlo → Temperature scan.",
          {}),
         ("🔥 Statistical mechanics", "Where mean field fails",
          "Mean field, Bethe, exact 1D and Onsager's 2D solution side by side -- Mean field vs exact.",
          {}),
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
         ("🌌 General relativity", "Is r = 2M a real singularity?",
          "Compute the Schwarzschild curvature, then press Find singularities: r = 0 diverges, r = 2M does not.",
          {}),

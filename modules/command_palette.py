@@ -49,11 +49,14 @@ _ENTRIES = [
     PaletteEntry("🌡️ PDE solver", ("heat", "wave", "laplace equation", "robin", "neumann", "dirichlet",
                                     "partial differential")),
     PaletteEntry("🧮 Tensor calculus", ("metric", "christoffel", "ricci", "curvature", "riemann", "covariant derivative")),
+<<<<<<< HEAD
     PaletteEntry("🔥 Statistical mechanics", ("partition function", "free energy", "entropy", "heat capacity", "ising", "potts", "xy model",
                                               "metropolis", "monte carlo lattice", "binder cumulant", "critical point", "onsager",
                                               "mean field", "fermi-dirac", "bose-einstein", "maxwell-boltzmann", "bec",
                                               "chemical potential", "langevin", "brownian", "fokker-planck", "diffusion",
                                               "fluctuation dissipation", "random matrix", "wigner semicircle", "level spacing")),
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
     PaletteEntry("🌌 General relativity", ("geodesic", "schwarzschild", "kerr", "black hole", "einstein", "kretschmann", "precession",
                                             "light bending", "effective potential", "isco", "horizon", "penrose", "light cone",
                                             "gravitational waves", "quadrupole", "eddington", "kruskal", "singularity", "weyl")),
