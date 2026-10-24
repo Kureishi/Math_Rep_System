@@ -140,7 +140,7 @@ Markdown, PDF, Python, or a Jupyter notebook.
   exploration from units alone), **Extraction diff**, **Compare solves**
   (`solve_compare.py`: two solves, or a what-if of one with some inputs changed, lined
   up on answers, inputs, equations and verification; no LLM call), **Quantum
-  mechanics** (below), and **Research journal**.
+  mechanics** (below), **General relativity** (below), **Statistical mechanics** (below), and **Research journal**.
 
 **Plots and animations**
 - Interactive 2D line, 3D surface, contour, feasible-region, ODE, recurrence and
@@ -192,6 +192,73 @@ Markdown, PDF, Python, or a Jupyter notebook.
   copy-ready LaTeX and plain-text summaries and "send to a chain". Plots go into a
   report through an explicit "Include this plot" button. Static images deliberately
   avoid `kaleido`, whose current releases need a separate Chrome install.
+- **Statistical mechanics** (`🔥` mode; no LLM involved; k_B = 1). Six tools; every result is shown with the checks that
+  were run on it, and nearly every check compares the method with an exact result it shares no code with.
+  - *Partition functions*: Z, F, U, S and C against temperature for a two-level system, harmonic oscillator, rigid
+    rotor, explicit levels, or any E_n and g_n you type (infinite spectra are truncated where the sum has converged,
+    and a spectrum whose partition function diverges is refused). The Gibbs entropy −kΣp ln p must equal (U−F)/T,
+    U and C must equal finite-difference derivatives of ln Z, S → k ln g₀ as T → 0, the numerical sum must match the
+    closed form where one exists, the rotor matches its high-T series, and the Schottky peak is located two ways.
+    The ideal gas shows the Gibbs paradox: entropy is extensive only with the 1/N! factor.
+  - *Lattice Monte Carlo*: Metropolis for Ising, q-state Potts and XY on an L×L lattice (checkerboard updates, vectorised),
+    with a live lattice animation. Error bars carry the **integrated autocorrelation time** (Sokal windowing) and
+    χ', C and the Binder cumulant are jackknife estimates; the page warns when a point has fewer than 50τ of data
+    or the first and second halves disagree. A scan over temperatures and sizes gives the Binder crossing (T_c) and
+    finite-size-scaling exponents (γ/ν, β/ν). Verified against the **exact** 4×4 Ising lattice (all 65 536 states: e, ⟨|m|⟩,
+    χ', C, U₄ within their errors) and against an exact transfer matrix for the Potts torus (q = 3, 4).
+  - *Mean field vs exact*: mean field, the Bethe approximation, exact 1D (transfer matrix) and Onsager's exact 2D solution on
+    one set of axes, with the failures computed rather than asserted: T_c (4J against 2.269J), β (1/2 against 1/8), a
+    specific-heat *jump* against a logarithmic divergence, no short-range order above T_c. The Onsager energy is obtained
+    twice (closed form with the elliptic integral, and as d(βf)/dβ of the free-energy integral) and Bethe with z = 2 must
+    reproduce the exact chain. Optional Monte Carlo overlay.
+  - *Distributions*: Maxwell–Boltzmann, Fermi–Dirac, Bose–Einstein; chemical-potential solvers at fixed density; Bose–Einstein
+    condensation (μ sticks at 0, condensate fraction 1 − (T/T_c)^(3/2)); the classical limit checked two ways
+    (occupations → MB with deviation ∓e^(−y), second virial coefficient ±2^(−5/2)); the degenerate Fermi limit against the
+    Sommerfeld expansion. The solvers use fast integral forms; the polylogarithm is the independent reference.
+  - *Stochastic dynamics*: overdamped (Euler–Maruyama) and underdamped (BAOAB) Langevin in a free, harmonic, double-well or
+    typed potential; MSD against its exact ballistic-to-diffusive crossover; the **Einstein relation / fluctuation–
+    dissipation theorem measured** (D from a force-free ensemble, μ from the drift under a force, D/μ = kT; breaking the
+    noise–friction tie makes it fail); Green–Kubo; a Fokker–Planck solver (Scharfetter–Gummel fluxes, Crank–Nicolson)
+    compared with the Langevin ensemble and, for the harmonic trap, with the exact Gaussian at every time.
+  - *Random matrices*: GOE, GUE, Poisson and Wishart. Eigenvalue density against Wigner's semicircle (moments are the Catalan
+    numbers; the second moment is checked against its exact finite-N value) and Marchenko–Pastur; unfolded nearest-neighbour
+    spacings classified against the GOE/GUE surmises and Poisson; the surmise is tested as *exact* for 2×2 matrices; the
+    ratio statistic ⟨r̃⟩.
+  Every stochastic result stores the **seed** that produced it (a fresh one is drawn when the seed box is empty), so any run can
+  be reproduced by typing it back in.
+- **General relativity** (`🌌` mode; no LLM involved; G = c = 1, signature (−,+,+,+), MTW sign convention). Six
+  tools around the metric tensor, each shown with the checks that were run on it:
+  - *Curvature & fields*: Christoffel symbols → Riemann → Ricci → Einstein → Weyl for a preset (Minkowski,
+    Schwarzschild, Reissner–Nordström, Kerr, Schwarzschild–de Sitter, flat FRW, de Sitter, Eddington–Finkelstein)
+    or any metric you type. Four invariants (R, R_abR^ab, Kretschmann, Weyl²); the field equations
+    G_ab + Λg_ab = 8πT_ab checked for vacuum, a custom T_ab, or an electromagnetic field F_ab (Reissner–Nordström
+    solves Einstein–Maxwell, a wrong charge does not); an effective-fluid reading that returns the Friedmann
+    equations for FRW; and a *singularity classifier* that finds where metric or invariants blow up and tells a
+    curvature singularity (Schwarzschild r = 0, the Kerr ring, the big bang) from a coordinate artefact (r = 2M,
+    the polar axis, the Kerr horizons). Every run checks identities valid for any metric (∇g = 0, Riemann
+    symmetries, the contracted Bianchi identity, traceless Weyl, K = C² + 2Ric² − R²/3). A full Kerr tensor takes
+    about half a minute.
+  - *Geodesics*: any metric; integrate from coordinate velocities or, for (t, r, θ, φ) metrics, from E and L.
+    Energy, angular momentum, the norm, total L² (spherical symmetry) and the **Carter constant** (Kerr) are
+    monitored and their drift reported. Dedicated tabs compare an integrated Schwarzschild orbit with the *exact*
+    elliptic-integral periapsis advance and an integrated light ray with the *exact* deflection integral (both
+    agree to ~1e-10). Animated 2D path, 3D view, Stop button.
+  - *Potentials*: V_eff(r) for several L with horizons, photon sphere, ISCO and marginally bound orbit marked,
+    live as M, Q, Λ or the Kerr spin change; any f(r) you type; Kerr's closed-form radii cross-checked against
+    numerical circular-orbit analysis.
+  - *Coordinate changes*: Schwarzschild → Eddington–Finkelstein / isotropic / Kruskal–Szekeres, Minkowski →
+    Rindler / spherical, de Sitter → conformal time, or your own map (either direction). The curvature
+    invariants must be unchanged, and the Ricci tensor must transform as a tensor, which is checked against the
+    engine's direct computation.
+  - *Cones & Penrose*: light cones and null rays in any coordinate plane (Schwarzschild coordinates pinch the
+    cones at r = 2M, Eddington–Finkelstein ones tilt through it); Penrose diagrams for Minkowski and the
+    maximally extended Schwarzschild spacetime (there is no general algorithm for other metrics, and the app says
+    so instead of guessing).
+  - *Gravitational waves*: TT plane waves in any direction, verified against the linearised vacuum equations
+    (an off-shell wave is correctly reported as not a solution; the linear Ricci tensor is also checked against
+    the first-order part of the full nonlinear one); an animated ring of test masses; the quadrupole formula for
+    a circular binary or your own point-mass trajectories (symbolic, compared with the textbook amplitudes and
+    Peters' power); and an inspiral chirp integrated numerically against its closed form.
 - **Quantum mechanics** (`⚛️` mode; no LLM involved; ħ = m = 1 unless you change them). Five tools, each
   of which checks its own result and shows what it checked:
   - *Eigenstates*: the 1D Schrödinger equation for a library of potentials (box, oscillator, finite well,
@@ -282,7 +349,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite (about 2,400 tests, roughly two minutes) uses a mocked LLM client
+The suite (about 3,000 tests, roughly eight minutes with coverage) uses a mocked LLM client
 (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:
