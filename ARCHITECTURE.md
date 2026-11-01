@@ -145,9 +145,17 @@ math-rep-system/
 │   ├── exports.py               # the session -> an ExportContext, and the cached deferred downloads
 │   ├── compare.py, compare_constants.py   # the Compare solves mode (and the names panels link to it by)
 │   ├── quantum.py               # the Quantum mechanics mode: five tabs, each showing its result with its checks
+<<<<<<< HEAD
 │   ├── lab.py                   # the Numerics & verification lab: seven tabs for the cross-cutting tools
 │   ├── statmech.py              # the Statistical mechanics mode: six tabs (partition functions, lattice MC, mean field vs
 │   │                          #   exact, distributions, stochastic dynamics, random matrices), each shown with its checks
+=======
+<<<<<<< HEAD
+│   ├── statmech.py              # the Statistical mechanics mode: six tabs (partition functions, lattice MC, mean field vs
+│   │                          #   exact, distributions, stochastic dynamics, random matrices), each shown with its checks
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 │   ├── relativity.py            # the General relativity mode: six tabs (curvature, geodesics, potentials, coordinate
 │   │                          #   changes, cones & Penrose, gravitational waves), each shown with its checks
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
@@ -406,6 +414,10 @@ math-rep-system/
     ├── gr_cones.py                    # light cones, null curves, Penrose diagrams (Minkowski, Schwarzschild)
     ├── gr_waves.py                    # linearised gravity, TT plane waves, test masses, quadrupole formula, Peters inspiral
     ├── gr_plots.py                    # the Plotly figures for all of the above
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
     ├── sm_common.py                   # StatMechError, the seed convention, autocorrelation time, jackknife
     ├── sm_partition.py                # Z, F, U, S, C from spectra with self-checks; ideal gas and the Gibbs paradox
     ├── sm_lattice.py                  # Metropolis Ising/Potts/XY, Binder crossings, FSS, exact 4x4 and transfer-matrix references
@@ -414,6 +426,7 @@ math-rep-system/
     ├── sm_stochastic.py               # Langevin (EM, BAOAB), MSD, Einstein relation, Green-Kubo, Fokker-Planck (SG + CN)
     ├── sm_randommatrix.py             # GOE/GUE/Poisson/Wishart, semicircle, unfolded spacings, Wigner surmise
     ├── sm_plots.py                    # the Plotly figures for all of the above
+<<<<<<< HEAD
     ├── cc_common.py                   # CrossCuttingError, DriftReport (secular vs bounded), guarded parsing
     ├── cc_conservation.py             # invariant finder, drift monitors, leapfrog/Yoshida/midpoint/RK4, adapters for IVP/wavepacket/geodesic
     ├── cc_convergence.py              # refinement studies, observed order, Richardson, GCI; ODE/Hamiltonian/Poisson/wavepacket/SDE adapters
@@ -423,6 +436,10 @@ math-rep-system/
     ├── cc_crossval.py                 # closed form vs independent numerical route (integral, derivative, roots, ODE, sum, limit, eigenvalues)
     ├── cc_notebook.py                 # reproducible .ipynb / .py exports that verify themselves on re-run
     ├── cc_plots.py                    # the Plotly figures for all of the above
+=======
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
 ```
 
@@ -644,6 +661,7 @@ Decisions and operational details that don't belong in the README.
   bundles; a Monte Carlo result now records its uncertain inputs. This also fixed an
   existing bug: the follow-up list was never cleared, so one problem's questions
   appeared under the next one.
+<<<<<<< HEAD
 - **Cross-cutting tools** (`modules/cc_*.py`, `ui/lab.py`, plus a hook in `ui/results/solutions.py`). These are the checks that every other
   field benefits from, built so each verifies itself against something it shares no code with.
   - *Secular vs bounded.* A number for "energy drift" is nearly meaningless without its behaviour: symplectic integrators wobble in a bounded
@@ -665,6 +683,9 @@ Decisions and operational details that don't belong in the README.
     declared positive for that algebra, and the numerical equivalence check solves with real counterparts, because a derivative can be negative.
   - *Notebooks that cannot lie.* `make_record` execs the SAME code cells the notebook contains to obtain the recorded numbers; the tests execute every
     exported notebook, and tamper with a recorded value to prove the check can fail.
+=======
+<<<<<<< HEAD
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 - **Statistical mechanics** (`modules/sm_*.py`, `ui/statmech.py`). Same principle: each tool returns a `CheckList`, each check
   pairs the computation with an exact or independently computed result.
   - *Seeds.* `sm_common.resolve_seed` is the one place the project's convention lives: `seed=None` means "draw a fresh
@@ -687,6 +708,11 @@ Decisions and operational details that don't belong in the README.
     wrong place), a diffusion estimator that applied the ballistic correction the wrong way round (3% low, visible only by comparing
     with the exact MSD over several seeds), a Gibbs-entropy sum that underflowed (`p/g = 0`), an overflowing Bose integrand, and a
     quenched XY lattice that froze vortices in (physical, so the test starts the cold run ordered).
+<<<<<<< HEAD
+=======
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 - **General relativity** (`modules/gr_*.py`, `ui/relativity.py`). Same principle as the quantum tools: every
   result carries the `CheckList` that was run on it, and every check pairs the method with something it shares no
   code with.

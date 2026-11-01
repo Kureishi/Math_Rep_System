@@ -140,7 +140,15 @@ Markdown, PDF, Python, or a Jupyter notebook.
   exploration from units alone), **Extraction diff**, **Compare solves**
   (`solve_compare.py`: two solves, or a what-if of one with some inputs changed, lined
   up on answers, inputs, equations and verification; no LLM call), **Quantum
+<<<<<<< HEAD
   mechanics** (below), **General relativity** (below), **Statistical mechanics** (below), **Numerics & verification lab** (below), and **Research journal**.
+=======
+<<<<<<< HEAD
+  mechanics** (below), **General relativity** (below), **Statistical mechanics** (below), and **Research journal**.
+=======
+  mechanics** (below), **General relativity** (below), and **Research journal**.
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 
 **Plots and animations**
 - Interactive 2D line, 3D surface, contour, feasible-region, ODE, recurrence and
@@ -192,6 +200,7 @@ Markdown, PDF, Python, or a Jupyter notebook.
   copy-ready LaTeX and plain-text summaries and "send to a chain". Plots go into a
   report through an explicit "Include this plot" button. Static images deliberately
   avoid `kaleido`, whose current releases need a separate Chrome install.
+<<<<<<< HEAD
 - **Numerics & verification lab** (`🧰` mode; no LLM involved). The cross-cutting tools that apply to every field. As everywhere in the
   app, results come with the checks that were run on them.
   - *Conserved quantities*: type an ODE system and the app searches for conserved quantities (polynomials, optionally with ln y terms,
@@ -223,6 +232,9 @@ Markdown, PDF, Python, or a Jupyter notebook.
   - *Reproducible notebook*: export a computation (partition function, lattice scan, Einstein relation, random matrices, geodesic precession,
     integrator comparison, convergence, nondimensionalisation, cross-validation, limit check) as a `.ipynb` or `.py` that re-runs it from its
     **parameters and seed** and then **asserts it reproduces the numbers recorded at export**; it fails loudly if they differ. Library versions are recorded.
+=======
+<<<<<<< HEAD
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 - **Statistical mechanics** (`🔥` mode; no LLM involved; k_B = 1). Six tools; every result is shown with the checks that
   were run on it, and nearly every check compares the method with an exact result it shares no code with.
   - *Partition functions*: Z, F, U, S and C against temperature for a two-level system, harmonic oscillator, rigid
@@ -257,6 +269,11 @@ Markdown, PDF, Python, or a Jupyter notebook.
     ratio statistic ⟨r̃⟩.
   Every stochastic result stores the **seed** that produced it (a fresh one is drawn when the seed box is empty), so any run can
   be reproduced by typing it back in.
+<<<<<<< HEAD
+=======
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 - **General relativity** (`🌌` mode; no LLM involved; G = c = 1, signature (−,+,+,+), MTW sign convention). Six
   tools around the metric tensor, each shown with the checks that were run on it:
   - *Curvature & fields*: Christoffel symbols → Riemann → Ricci → Einstein → Weyl for a preset (Minkowski,
@@ -380,7 +397,15 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+<<<<<<< HEAD
 The suite (about 3,400 tests, roughly ten minutes with coverage) uses a mocked LLM client
+=======
+<<<<<<< HEAD
+The suite (about 3,000 tests, roughly eight minutes with coverage) uses a mocked LLM client
+=======
+The suite (about 2,600 tests, roughly six minutes with coverage) uses a mocked LLM client
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:

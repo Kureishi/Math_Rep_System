@@ -49,15 +49,24 @@ _ENTRIES = [
     PaletteEntry("🌡️ PDE solver", ("heat", "wave", "laplace equation", "robin", "neumann", "dirichlet",
                                     "partial differential")),
     PaletteEntry("🧮 Tensor calculus", ("metric", "christoffel", "ricci", "curvature", "riemann", "covariant derivative")),
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
     PaletteEntry("🔥 Statistical mechanics", ("partition function", "free energy", "entropy", "heat capacity", "ising", "potts", "xy model",
                                               "metropolis", "monte carlo lattice", "binder cumulant", "critical point", "onsager",
                                               "mean field", "fermi-dirac", "bose-einstein", "maxwell-boltzmann", "bec",
                                               "chemical potential", "langevin", "brownian", "fokker-planck", "diffusion",
                                               "fluctuation dissipation", "random matrix", "wigner semicircle", "level spacing")),
+<<<<<<< HEAD
     PaletteEntry("🧰 Numerics & verification lab", ("conserved quantity", "invariant", "symplectic", "leapfrog", "verlet", "energy drift", "convergence",
                                                     "order of convergence", "richardson", "lagrangian", "hamiltonian", "euler-lagrange", "noether", "poincare",
                                                     "phase portrait", "nondimensionalize", "dimensionless", "buckingham", "limiting case", "large n",
                                                     "cross-validation", "closed form", "notebook", "reproducible", "seed")),
+=======
+=======
+>>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
+>>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
     PaletteEntry("🌌 General relativity", ("geodesic", "schwarzschild", "kerr", "black hole", "einstein", "kretschmann", "precession",
                                             "light bending", "effective potential", "isco", "horizon", "penrose", "light cone",
                                             "gravitational waves", "quadrupole", "eddington", "kruskal", "singularity", "weyl")),
