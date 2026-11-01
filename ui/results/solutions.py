@@ -8,7 +8,8 @@ import plotly.graph_objects as go
 from sympy.core.function import AppliedUndef
 from modules.equation_engine import ProblemModel, symbols_and_functions_used
 from modules.verifier import _known_substitutions
-from modules.ode_utils import solve_ode, group_coupled_odes
+from modules.ode_utils import solve_ode, group_coupled_odes, prepare_ivp, IVPSetup
+from modules.cc_conservation import monitor_ivp
 from modules.recurrence_utils import solve_recurrence, _independent_variable, extract_step_map
 from modules.proof import build_recurrence_induction_proof
 from modules.ode_trajectories import compare_trajectories, phase_flow, ring_of_starts
@@ -125,6 +126,27 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                             f"[{cmp_.t0:g}, {t_end:g}]",
                     render_fn=lambda c=cmp_: snapshot_ode_error_plot(c),
                 )
+
+    # ---- conserved quantities found AUTOMATICALLY for the same IVP (modules/cc_conservation): a polynomial / ln-polynomial ansatz whose
+    # time derivative must vanish identically, verified by exact differentiation, then the drift along a numerical integration. Silent
+    # when the group is outside prepare_ivp's scope, same convention as the panels around it.
+    for group in group_coupled_odes([e for e in model.equations if e.kind == "ode" and e.sympy_eq is not None]):
+        setup = prepare_ivp(model, group, ode_solutions)
+        if not isinstance(setup, IVPSetup):
+            continue
+        label = ", ".join(setup.func_order)
+        with st.expander(f"🧮 Conserved quantities found automatically: {label}"):
+            mon = monitor_ivp(setup)
+            if isinstance(mon, str):
+                st.caption(mon[0].upper() + mon[1:] + ".")
+                continue
+            st.caption("A search over polynomials (and ln y terms) whose time derivative is zero along the system, each verified symbolically, then "
+                        "their drift along an independent numerical integration. 'Bounded oscillation' is integration noise; 'secular drift' would be a leak.")
+            for k, inv in enumerate(mon.invariants, 1):
+                st.latex(rf"Q_{{{k}}} = {sp.latex(inv.expr)}")
+                st.caption(("✅ " if inv.verified_exactly else "⚠️ ") + inv.note)
+            for r in mon.reports:
+                (st.success if (r.max_rel < 1e-6 and not r.secular) else st.warning)(f"{r.name}: {r.summary()}")
 
     # ---- phase portrait: only for a genuinely COUPLED 2-variable system
     # (dx/dt = f(x,y), dy/dt = g(x,y)) -- a view neither function's own

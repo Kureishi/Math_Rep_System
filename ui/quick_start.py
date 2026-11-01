@@ -45,6 +45,25 @@ def render_quick_start_tab():
          "The default metric already IS this example -- just press Analyze to see the Ricci "
          "scalar come out to 2/R², with a slider to explore how it depends on R.",
          {}),
+        ("🌌 General relativity", "Mercury-style orbit precession",
+         "Integrate a bound Schwarzschild orbit and compare the measured periapsis advance with the exact elliptic-integral "
+         "result -- open the Geodesics → Orbit & precession tab and press Integrate.",
+         {}),
+        ("🧰 Numerics & verification lab", "Symplectic vs RK4 on a pendulum",
+         "Watch the energy error stay bounded for leapfrog and drift steadily for RK4 -- Conserved quantities → Symplectic integrators.",
+         {}),
+        ("🧰 Numerics & verification lab", "Noether's theorem, automatically",
+         "Type a Lagrangian and get its conserved charges from symmetries -- Hamiltonian / Lagrangian, preset 'central'.",
+         {}),
+        ("🔥 Statistical mechanics", "Find the Ising critical point",
+         "Scan 8×8 and 16×16 Ising lattices across T_c and read the Binder-cumulant crossing -- Lattice Monte Carlo → Temperature scan.",
+         {}),
+        ("🔥 Statistical mechanics", "Where mean field fails",
+         "Mean field, Bethe, exact 1D and Onsager's 2D solution side by side -- Mean field vs exact.",
+         {}),
+        ("🌌 General relativity", "Is r = 2M a real singularity?",
+         "Compute the Schwarzschild curvature, then press Find singularities: r = 0 diverges, r = 2M does not.",
+         {}),
     ]
 
     for target_mode, title, description, prefill in examples:

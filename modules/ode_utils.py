@@ -240,6 +240,11 @@ class IVPSetup:
     window: float                         # a sensible default time span to integrate over
     rhs: Callable[..., list[float]]       # rhs(t, y) -> dy/dt, for solve_ivp
     sol_funcs: list[Callable[..., Any]]   # symbolic closed form per function, lambdified in t
+    # the symbolic right-hand sides (parameters already substituted), in the state functions y_i(t): used by the automatic
+    # conservation-law monitor (modules/cc_conservation.monitor_ivp); None for an IVPSetup built by hand
+    rhs_exprs: list[sp.Expr] | None = None
+    state_funcs: list[sp.Expr] | None = None
+    t_symbol: sp.Symbol | None = None
 
 
 def prepare_ivp(model: ProblemModel, group: list[Equation],
@@ -349,7 +354,8 @@ def prepare_ivp(model: ProblemModel, group: list[Equation],
     except Exception:  # noqa: BLE001
         window = 5.0
 
-    return IVPSetup(func_order=func_order, t0=t0, y0=y0, window=window, rhs=rhs, sol_funcs=sol_funcs)
+    return IVPSetup(func_order=func_order, t0=t0, y0=y0, window=window, rhs=rhs, sol_funcs=sol_funcs,
+                    rhs_exprs=rhs_exprs, state_funcs=[applied_by_name[n] for n in func_order], t_symbol=t)
 
 
 def numerical_cross_check(model: ProblemModel, group: list[Equation],

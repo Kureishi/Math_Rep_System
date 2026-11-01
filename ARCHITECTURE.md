@@ -145,6 +145,11 @@ math-rep-system/
 │   ├── exports.py               # the session -> an ExportContext, and the cached deferred downloads
 │   ├── compare.py, compare_constants.py   # the Compare solves mode (and the names panels link to it by)
 │   ├── quantum.py               # the Quantum mechanics mode: five tabs, each showing its result with its checks
+│   ├── lab.py                   # the Numerics & verification lab: seven tabs for the cross-cutting tools
+│   ├── statmech.py              # the Statistical mechanics mode: six tabs (partition functions, lattice MC, mean field vs
+│   │                          #   exact, distributions, stochastic dynamics, random matrices), each shown with its checks
+│   ├── relativity.py            # the General relativity mode: six tabs (curvature, geodesics, potentials, coordinate
+│   │                          #   changes, cones & Penrose, gravitational waves), each shown with its checks
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
 │   │                          #   badges, button/spacing polish -- called once from app.py),
 │   │                          #   render_hero(), badge()/badge_row(), and dark_mode_css()
@@ -393,6 +398,31 @@ math-rep-system/
     ├── quantum_qubits.py              # gates, Bloch sphere, Lindblad noise, purity, fidelity
     ├── quantum_perturbation.py        # exact Rayleigh–Schrödinger corrections and their comparison with exact
     ├── quantum_plots.py               # the Plotly figures for all of the above
+    ├── gr_metrics.py                  # GRMetric, presets, guarded user-metric parser, GR_TIMEOUT
+    ├── gr_curvature.py                # rational-trig simplifier, Riemann..Weyl, invariants, field equations, singularities
+    ├── gr_potential.py                # V_eff, horizons/photon sphere/ISCO, Kerr closed forms, exact Schwarzschild precession & deflection
+    ├── gr_geodesics.py                # geodesic integrator, conserved-quantity monitors (incl. Carter), orbit analysis
+    ├── gr_transforms.py               # explicit/implicit coordinate changes with invariant-preservation checks
+    ├── gr_cones.py                    # light cones, null curves, Penrose diagrams (Minkowski, Schwarzschild)
+    ├── gr_waves.py                    # linearised gravity, TT plane waves, test masses, quadrupole formula, Peters inspiral
+    ├── gr_plots.py                    # the Plotly figures for all of the above
+    ├── sm_common.py                   # StatMechError, the seed convention, autocorrelation time, jackknife
+    ├── sm_partition.py                # Z, F, U, S, C from spectra with self-checks; ideal gas and the Gibbs paradox
+    ├── sm_lattice.py                  # Metropolis Ising/Potts/XY, Binder crossings, FSS, exact 4x4 and transfer-matrix references
+    ├── sm_meanfield.py                # mean field, Bethe, exact 1D and Onsager 2D Ising
+    ├── sm_distributions.py            # MB / FD / BE, chemical-potential solvers, BEC, classical-limit checks
+    ├── sm_stochastic.py               # Langevin (EM, BAOAB), MSD, Einstein relation, Green-Kubo, Fokker-Planck (SG + CN)
+    ├── sm_randommatrix.py             # GOE/GUE/Poisson/Wishart, semicircle, unfolded spacings, Wigner surmise
+    ├── sm_plots.py                    # the Plotly figures for all of the above
+    ├── cc_common.py                   # CrossCuttingError, DriftReport (secular vs bounded), guarded parsing
+    ├── cc_conservation.py             # invariant finder, drift monitors, leapfrog/Yoshida/midpoint/RK4, adapters for IVP/wavepacket/geodesic
+    ├── cc_convergence.py              # refinement studies, observed order, Richardson, GCI; ODE/Hamiltonian/Poisson/wavepacket/SDE adapters
+    ├── cc_hamiltonian.py              # Euler-Lagrange, Legendre, Hamilton, Noether search, phase portraits, Poincare sections
+    ├── cc_nondim.py                   # automatic non-dimensionalisation with Buckingham pi and numerical equivalence
+    ├── cc_limits.py                   # limiting-case and large-N checks on top of series_asymptotics
+    ├── cc_crossval.py                 # closed form vs independent numerical route (integral, derivative, roots, ODE, sum, limit, eigenvalues)
+    ├── cc_notebook.py                 # reproducible .ipynb / .py exports that verify themselves on re-run
+    ├── cc_plots.py                    # the Plotly figures for all of the above
     └── exporter.py                     # Markdown + PDF (matplotlib mathtext) export
 ```
 
@@ -614,6 +644,88 @@ Decisions and operational details that don't belong in the README.
   bundles; a Monte Carlo result now records its uncertain inputs. This also fixed an
   existing bug: the follow-up list was never cleared, so one problem's questions
   appeared under the next one.
+- **Cross-cutting tools** (`modules/cc_*.py`, `ui/lab.py`, plus a hook in `ui/results/solutions.py`). These are the checks that every other
+  field benefits from, built so each verifies itself against something it shares no code with.
+  - *Secular vs bounded.* A number for "energy drift" is nearly meaningless without its behaviour: symplectic integrators wobble in a bounded
+    band forever, RK methods leak steadily. `cc_common.drift_report` cuts a run into four segments and calls the drift secular only if the
+    segment means move monotonically by more than three times the oscillation inside a segment; fewer than ~1.25 periods cannot be classified (tests
+    use long runs, and a quantity that should be 0 passes `scale=1` because "relative to zero" is meaningless).
+  - *Invariants by null space.* `find_invariants` evaluates d(basis)/dt along the vector field at random points and takes the SVD null space of the
+    resulting matrix; coefficients are rationalised, gradient-independent ones kept (Q² of a conserved Q adds nothing), and each is verified exactly
+    with SymPy. A numeric null space works for any basis (sin, 1/r, ln), where a symbolic coefficient match would not.
+  - *The ODE page hook.* `IVPSetup` gained optional `rhs_exprs`, `state_funcs` and `t_symbol` (defaults None, so every existing construction still works);
+    `monitor_ivp` uses them to run the invariant search on the system just solved and an independent DOP853 integration to measure drift.
+  - *Observed order without an answer.* `convergence_study` computes p from ln(d_k/d_{k+1})/ln r with d_k the difference of successive levels, so a
+    study needs no exact solution; levels at the rounding floor are excluded (an order fitted through round-off is meaningless). The tests check every
+    adapter against its method's theoretical order.
+  - *Noether by linear algebra.* The condition Σ(∂L/∂q ξ + ∂L/∂q̇ ξ̇) = dΛ/dt must hold identically; for ξ = Aq + b + βt and Λ = λ·q + μt it is linear in
+    the unknown constants, so a null space finds rotations, translations, boosts and the uniform-gravity charge together.
+  - *Non-dimensionalisation as linear algebra.* Scales are monomials in the parameters; the exponent equations (dimension constraints plus "these
+    coefficients become equal") are linear, so every balance set is solved exactly and the one leaving the fewest independent groups wins. Symbols are
+    declared positive for that algebra, and the numerical equivalence check solves with real counterparts, because a derivative can be negative.
+  - *Notebooks that cannot lie.* `make_record` execs the SAME code cells the notebook contains to obtain the recorded numbers; the tests execute every
+    exported notebook, and tamper with a recorded value to prove the check can fail.
+- **Statistical mechanics** (`modules/sm_*.py`, `ui/statmech.py`). Same principle: each tool returns a `CheckList`, each check
+  pairs the computation with an exact or independently computed result.
+  - *Seeds.* `sm_common.resolve_seed` is the one place the project's convention lives: `seed=None` means "draw a fresh
+    concrete seed", never "unseeded", and the seed used is stored in the result. A temperature scan spawns one generator per
+    temperature from a `SeedSequence`, so a point does not depend on the order or number of the others.
+  - *Honest errors.* A Metropolis series is correlated, so the plain standard error is too small by √(2τ). `mean_with_error`
+    uses Sokal's automatic windowing for τ_int; χ', C and U₄ are jackknife estimates over blocks longer than τ. The tests include a
+    coverage test (the 1σ interval should contain the truth ~68% of the time for AR(1) data, not ~30%).
+  - *Exact references.* 4×4 Ising is enumerated (65 536 states, all observables at any T, h). The Potts/Ising torus uses a column
+    transfer matrix, itself checked against the enumeration at q = 2 (J_Potts = 2 J_Ising), then used at q = 3, 4. Onsager's free
+    energy is a 1D quadrature after doing the inner integral analytically; its derivative must equal the closed-form energy.
+  - *Fast vs reference.* `sm_distributions` solves for μ with integral representations (milliseconds) and uses the polylogarithm
+    only as the independent check: the earlier version used mpmath inside the root finder and made every page rerun take 25 s.
+    Pages re-execute every tab on each interaction, so anything slow on landing is cached (`lru_cache`) or lives behind a button.
+  - *Fokker–Planck.* Scharfetter–Gummel fluxes make the Boltzmann distribution an exact null vector of the DISCRETE generator
+    (tested to 1e-9), and zero-flux ends make probability conservation exact; Rannacher starter steps remove Crank–Nicolson ringing
+    from a narrow initial pulse. The Langevin-vs-PDE comparison first checks that the reflecting walls are not felt, because the
+    walkers are unbounded: a too-narrow domain is reported, not silently compared.
+  - *Bugs the checks caught while building it* (kept as regression tests): a Landau free-energy sign error (the minimum was at the
+    wrong place), a diffusion estimator that applied the ballistic correction the wrong way round (3% low, visible only by comparing
+    with the exact MSD over several seeds), a Gibbs-entropy sum that underflowed (`p/g = 0`), an overflowing Bose integrand, and a
+    quenched XY lattice that froze vortices in (physical, so the test starts the cold run ordered).
+- **General relativity** (`modules/gr_*.py`, `ui/relativity.py`). Same principle as the quantum tools: every
+  result carries the `CheckList` that was run on it, and every check pairs the method with something it shares no
+  code with.
+  - *The simplifier is the engine.* `tensor_calculus.py` calls `sp.simplify` on each component, which is fine for a
+    sphere and hopeless for Kerr. `gr_curvature.simplify_expr` replaces sin/cos (and sinh/cosh) of a coordinate by
+    two fresh symbols, cancels to one rational function, and applies s² + c² = 1 (or c² − s² = 1) as a polynomial
+    *remainder*. That is a canonical form for the rational-trigonometric expressions GR metrics are made of, so
+    "is this exactly zero?" has an answer rather than "simplify() did not manage it", and a full Kerr curvature
+    tensor takes ~10 s. Where the canonical form does not close, zero tests fall back to sample points and the
+    result says so (`numeric_decisions`). The two curvature engines are cross-checked in the tests.
+  - *Identities as built-in tests.* Every curvature computation also evaluates identities true for any metric: ∇g = 0,
+    the Riemann symmetries, first Bianchi, the contracted second Bianchi ∇ₐGᵃ_b = 0 (the strongest single check
+    of Γ and R), traceless Weyl, and K = C² + 4Ric²/(n−2) − 2R²/((n−1)(n−2)) between four quantities computed
+    by separate contractions.
+  - *Chain-rule derivatives.* The curvature engine takes a `partial(expr, i)` hook, so components expressed in
+    another chart's variables (Kruskal–Szekeres, whose inverse needs Lambert W) get their curvature from
+    d'_a = (J⁻¹)^m_a d_m with no inversion; the result is compared with the original invariants and with the tensor
+    law R' = JᵀRJ. SymPy is first asked to invert the map, with a short time limit, and the preset list switches
+    that off where it is known to fail.
+  - *Geodesics* are integrated in chunks (the progress hook and Stop act between chunks) from lambdified
+    Christoffel symbols, and the integrator is checked against mathematics it shares no code with: the periapsis
+    advance 4K(m)/√(2M(u_c − u_a)) − 2π and the light-deflection integral (evaluated after the substitution
+    u = u₀ − w², which removes the endpoint singularity). Conserved quantities are found automatically (a Killing
+    vector is a coordinate the metric does not depend on) plus the two that are not visible that way: total L² in
+    a spherical metric and the Carter constant in Kerr. A deliberately loose tolerance is tested to be *caught*.
+  - *Singularities.* Candidate loci are zeros of denominators of g, g⁻¹, Γ and the invariants (solved in plain real
+    symbols, since SymPy says r = 0 has no solution when r is declared positive, and restricted to each
+    coordinate's range); each is then approached numerically in mpmath. Diverging invariant ⇒ curvature singularity;
+    finite invariants with misbehaving components ⇒ coordinate artefact. Sums of squares (the Kerr Σ) are
+    solved term by term, which is what finds the ring.
+  - *Hash-seed hazards found here.* `sp.factor` and `Matrix.inv` can raise `TypeError` on symbolic exponents
+    (`t**(2p)`), but only for some hash seeds; factoring is cosmetic and inversion has a pivot-free fallback
+    (`invert_metric`).
+  - *Waves.* The linearised Ricci tensor is validated against d/dε of the full nonlinear Ricci of η + εh; a TT wave
+    is a solution exactly when ω = k and the check fails otherwise; free particles in TT gauge are shown not to
+    move using the geodesic integrator on the exact TT metric; the quadrupole result is the symbolic derivative
+    chain compared with the closed forms. Scope: lowest (quadrupole) order, no post-Newtonian corrections.
+  - *Timeouts.* `GR_TIMEOUT` (default 120 s, env `GR_TIMEOUT_SECONDS`) replaces the 10 s default, which a Kerr
+    tensor would exceed; each stage is bounded separately.
 - **Quantum mechanics** (`modules/quantum_*.py`, `ui/quantum.py`). The principle is that a
   result is shown with the checks that were *run on it* (`CheckList`: label, verdict and the numbers
   behind it), never with an implied "verified". Each tool pairs its method with something it does not
