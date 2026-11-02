@@ -75,6 +75,7 @@ def test_equipartition_and_boltzmann_in_a_harmonic_trap():
     assert p > 1e-3
 
 
+@pytest.mark.slow
 def test_double_well_samples_are_boltzmann_distributed():
     pot = ss.preset_potential("double_well")
     r = ss.simulate_overdamped(pot, 0.4, 1.0, 0.0, 0.01, 200.0, 4000, 20, seed=6)

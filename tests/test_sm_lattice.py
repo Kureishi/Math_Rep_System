@@ -36,11 +36,7 @@ def test_exact_critical_temperatures():
 # ---------------------------------------------------------------- Metropolis vs exact
 def test_ising_4x4_every_observable_agrees_with_exact_enumeration():
     m = sl.LatticeModel("ising", 4)
-<<<<<<< HEAD
     pt, _ = sl.run_point(m, 2.0, np.random.default_rng(11), 500, 25000)
-=======
-    pt, _ = sl.run_point(m, 2.0, np.random.default_rng(11), 1000, 60000)
->>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
     rows = sl.compare_with_exact_ising(pt, n_sigma=4.5)
     assert all(ok for *_, ok in rows), rows
     assert pt.run_long_enough and abs(pt.drift_z) < 4
@@ -48,21 +44,13 @@ def test_ising_4x4_every_observable_agrees_with_exact_enumeration():
 
 def test_ising_with_a_field_agrees_with_exact_enumeration():
     m = sl.LatticeModel("ising", 4, h=0.3)
-<<<<<<< HEAD
     pt, _ = sl.run_point(m, 2.5, np.random.default_rng(12), 500, 25000)
-=======
-    pt, _ = sl.run_point(m, 2.5, np.random.default_rng(12), 1000, 60000)
->>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
     assert all(ok for *_, ok in sl.compare_with_exact_ising(pt, n_sigma=4.5))
 
 
 def test_potts_q3_energy_and_specific_heat_agree_with_the_transfer_matrix():
     m = sl.LatticeModel("potts", 4, q=3)
-<<<<<<< HEAD
     pt, _ = sl.run_point(m, 0.9, np.random.default_rng(5), 500, 20000)
-=======
-    pt, _ = sl.run_point(m, 0.9, np.random.default_rng(5), 800, 60000)
->>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
     e, c = sl.torus_exact(3, 4, 4, 0.9)
     assert abs(pt.e - e) < 4.5 * pt.e_err and abs(pt.C - c) < 4.5 * pt.C_err
 
@@ -142,6 +130,7 @@ def test_a_point_does_not_depend_on_which_other_temperatures_are_scanned():
     assert s1.points[0].e == s2.points[0].e
 
 
+@pytest.mark.slow
 def test_binder_crossing_and_finite_size_scaling_find_onsagers_values():
     temps = np.linspace(2.05, 2.5, 7)
     scans = {L: sl.scan_temperatures(sl.LatticeModel("ising", L), temps, 300, 3000, seed=3) for L in (8, 16)}

@@ -6,6 +6,7 @@ import time
 
 import streamlit as st
 from config import settings
+from modules import gpu
 from modules.llm_client import LMStudioClient
 from modules.command_palette import search as palette_search
 from modules.project_bundle import export_bundle, import_bundle
@@ -217,6 +218,14 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         with st.expander("⚙️ Advanced settings"):
             st.caption("Tune verification strictness and generation behavior without editing config.py "
                         "or restarting the app. Changes apply to the next problem you solve.")
+
+            gpu_choice = st.selectbox(
+                "GPU acceleration", gpu.MODES, index=gpu.MODES.index(gpu.get_mode()), key="gpu_mode",
+                help="auto: use the GPU only for jobs big enough to benefit (large Langevin ensembles, big lattices, "
+                     "large random matrices). on: use it for every supported computation. off: never. "
+                     "Needs an NVIDIA GPU and CuPy (requirements-gpu.txt); otherwise everything runs on the CPU.")
+            gpu.set_mode(gpu_choice)
+            st.caption(gpu.describe())
 
             settings.temperature_extraction = st.slider(
                 "Extraction temperature", 0.0, 1.0, settings.temperature_extraction, 0.05,

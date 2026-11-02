@@ -35,12 +35,14 @@ VERIFICATION against exact results:
     (exact on the square lattice); the XY (Kosterlitz-Thouless) T_c ~ 0.8929 J is a numerical literature value and
     is labelled as such.
 """
+import copy
 import math
 from functools import lru_cache
 from dataclasses import dataclass, field
 
 import numpy as np
 
+from modules import gpu
 from modules.progress import ProgressFn, chunk_bounds, report
 from modules.sm_common import StatMechError, integrated_autocorrelation_time, jackknife, mean_with_error, resolve_seed, spawn_rngs
 
@@ -102,58 +104,76 @@ def _masks(L: int) -> tuple[np.ndarray, np.ndarray]:
     return even, ~even
 
 
-def _neighbours(a: np.ndarray) -> list[np.ndarray]:
-    return [np.roll(a, 1, 0), np.roll(a, -1, 0), np.roll(a, 1, 1), np.roll(a, -1, 1)]
+_DEVICE_MASKS: dict[tuple[str, int], tuple] = {}
 
 
-def sweep(m: LatticeModel, s: np.ndarray, T: float, rng: np.random.Generator, step: float = 1.0) -> float:
-    """One Metropolis sweep (both sublattices), in place. Returns the acceptance rate."""
-    even, odd = _masks(m.L)
+def _masks_for(xp, L: int) -> tuple:
+    """The two sublattice masks as arrays of `xp` (the cached NumPy ones, or a cached device copy)."""
+    if xp is np:
+        return _masks(L)
+    key = (xp.__name__, L)
+    if key not in _DEVICE_MASKS:
+        _DEVICE_MASKS[key] = tuple(xp.asarray(m) for m in _masks(L))
+    return _DEVICE_MASKS[key]
+
+
+def _neighbours(a):
+    xp = gpu.array_module(a)
+    return [xp.roll(a, 1, 0), xp.roll(a, -1, 0), xp.roll(a, 1, 1), xp.roll(a, -1, 1)]
+
+
+def sweep(m: LatticeModel, s, T: float, rng, step: float = 1.0) -> float:
+    """One Metropolis sweep (both sublattices), in place. Returns the acceptance rate. `s` and `rng` are NumPy, or
+    both CuPy (see modules/gpu.py): the code is the same for either."""
+    xp = gpu.array_module(s)
+    even, odd = _masks_for(xp, m.L)
     accepted = 0
     beta = 1.0 / T
     for mask in (even, odd):
         if m.model == "ising":
-            nn = sum(n.astype(np.int16) for n in _neighbours(s))
+            nn = sum(n.astype(xp.int16) for n in _neighbours(s))
             dE = 2.0 * s * (m.J * nn + m.h)
-            acc = (dE <= 0) | (rng.random(s.shape) < np.exp(-beta * np.maximum(dE, 0.0)))
+            acc = (dE <= 0) | (rng.random(s.shape) < xp.exp(-beta * xp.maximum(dE, 0.0)))
             flip = acc & mask
             s[flip] = -s[flip]
         elif m.model == "potts":
-            new = ((s + rng.integers(1, m.q, size=s.shape)) % m.q).astype(np.int8)
+            new = ((s + rng.integers(1, m.q, size=s.shape)) % m.q).astype(xp.int8)
             nbs = _neighbours(s)
-            n_old = sum((n == s).astype(np.int16) for n in nbs)
-            n_new = sum((n == new).astype(np.int16) for n in nbs)
+            n_old = sum((n == s).astype(xp.int16) for n in nbs)
+            n_new = sum((n == new).astype(xp.int16) for n in nbs)
             dE = -m.J * (n_new - n_old) - m.h * ((new == 0).astype(float) - (s == 0).astype(float))
-            acc = (dE <= 0) | (rng.random(s.shape) < np.exp(-beta * np.maximum(dE, 0.0)))
+            acc = (dE <= 0) | (rng.random(s.shape) < xp.exp(-beta * xp.maximum(dE, 0.0)))
             flip = acc & mask
             s[flip] = new[flip]
         else:
             trial = s + step * (2 * rng.random(s.shape) - 1)
             nbs = _neighbours(s)
-            dE = -m.J * sum(np.cos(trial - n) - np.cos(s - n) for n in nbs) - m.h * (np.cos(trial) - np.cos(s))
-            acc = (dE <= 0) | (rng.random(s.shape) < np.exp(-beta * np.maximum(dE, 0.0)))
+            dE = -m.J * sum(xp.cos(trial - n) - xp.cos(s - n) for n in nbs) - m.h * (xp.cos(trial) - xp.cos(s))
+            acc = (dE <= 0) | (rng.random(s.shape) < xp.exp(-beta * xp.maximum(dE, 0.0)))
             flip = acc & mask
-            s[flip] = np.mod(trial[flip], 2 * math.pi)
+            s[flip] = xp.mod(trial[flip], 2 * math.pi)
         accepted += int(flip.sum())
     return accepted / m.N
 
 
-def energy_per_site(m: LatticeModel, s: np.ndarray) -> float:
-    right, down = np.roll(s, -1, 1), np.roll(s, -1, 0)
+def energy_per_site(m: LatticeModel, s) -> float:
+    xp = gpu.array_module(s)
+    right, down = xp.roll(s, -1, 1), xp.roll(s, -1, 0)
     if m.model == "ising":
         return float(-m.J * ((s * right).sum() + (s * down).sum()) / m.N - m.h * s.mean())
     if m.model == "potts":
         return float(-m.J * ((s == right).sum() + (s == down).sum()) / m.N - m.h * (s == 0).mean())
-    return float(-m.J * (np.cos(s - right).sum() + np.cos(s - down).sum()) / m.N - m.h * np.cos(s).mean())
+    return float(-m.J * (xp.cos(s - right).sum() + xp.cos(s - down).sum()) / m.N - m.h * xp.cos(s).mean())
 
 
-def order_parameter(m: LatticeModel, s: np.ndarray) -> float:
+def order_parameter(m: LatticeModel, s) -> float:
+    xp = gpu.array_module(s)
     if m.model == "ising":
         return float(abs(s.mean()))
     if m.model == "potts":
-        frac = np.bincount(s.ravel(), minlength=m.q) / m.N
+        frac = xp.bincount(s.ravel(), minlength=m.q) / m.N
         return float((m.q * frac.max() - 1) / (m.q - 1))
-    return float(math.hypot(np.cos(s).mean(), np.sin(s).mean()))
+    return float(math.hypot(float(xp.cos(s).mean()), float(xp.sin(s).mean())))
 
 
 # ------------------------------------------------------------------------------------------ runs
@@ -180,6 +200,7 @@ class PointResult:
     acceptance: float
     drift_z: float              # (first half mean - second half mean) / error, for the order parameter
     seed: int = 0
+    backend: str = "CPU (NumPy)"
 
     @property
     def run_long_enough(self) -> bool:
@@ -193,12 +214,26 @@ def _adapt_step(accept: float, step: float) -> float:
 def run_point(model: LatticeModel, T: float, rng: np.random.Generator, n_therm: int, n_meas: int, state: np.ndarray | None = None,
               ordered: bool = False, seed: int = 0, progress: ProgressFn | None = None, label: str = "") -> tuple[PointResult, np.ndarray]:
     """Thermalise for n_therm sweeps and measure for n_meas; returns the observables with errors and the final state
-    (so a scan can continue from it)."""
+    (so a scan can continue from it). Large lattices run on the GPU when there is one (modules/gpu.py); the state
+    that comes back is always a NumPy array."""
     if T <= 0:
         raise StatMechError("T must be positive.")
     if n_meas < 100 or n_therm < 0:
         raise StatMechError("Need at least 100 measurement sweeps.")
-    s = initial_state(model, rng, ordered) if state is None else state.copy()
+    backend = gpu.select(model.N, "lattice_sites")
+    args = (model, T, n_therm, n_meas, state, ordered, seed, progress, label)
+
+    def on_gpu():
+        probe = copy.deepcopy(rng)                      # the caller's generator is left untouched, so a CPU fallback starts clean
+        device_rng = backend.xp.random.default_rng(int(probe.integers(2 ** 62)))
+        return _run_point(backend, device_rng, probe, *args)
+
+    return gpu.attempt(backend, on_gpu, lambda: _run_point(gpu.CPU, rng, rng, *args), (StatMechError,))
+
+
+def _run_point(backend: gpu.Backend, rng, host_rng: np.random.Generator, model: LatticeModel, T: float, n_therm: int, n_meas: int,
+               state: np.ndarray | None, ordered: bool, seed: int, progress: ProgressFn | None, label: str) -> tuple[PointResult, np.ndarray]:
+    s = gpu.on_device(backend, initial_state(model, host_rng, ordered) if state is None else state)
     step = 1.0 if model.model != "xy" else min(math.pi, 1.0 + 2 * math.sqrt(T))
     for a, b in chunk_bounds(n_therm, 200):
         report(progress, f"{label}thermalising", None)
@@ -216,7 +251,9 @@ def run_point(model: LatticeModel, T: float, rng: np.random.Generator, n_therm: 
             acc_sum += sweep(model, s, T, rng, step)
             e_ser[k] = energy_per_site(model, s)
             m_ser[k] = order_parameter(model, s)
-    return _analyse(model, T, e_ser, m_ser, acc_sum / n_meas, seed), s
+    point = _analyse(model, T, e_ser, m_ser, acc_sum / n_meas, seed)
+    point.backend = backend.name
+    return point, np.array(gpu.to_host(s))
 
 
 def _analyse(model: LatticeModel, T: float, e: np.ndarray, m: np.ndarray, acc: float, seed: int) -> PointResult:
@@ -288,11 +325,24 @@ def run_single(model: LatticeModel, T: float, n_sweeps: int, snapshot_every: int
     if n_sweeps < 1 or snapshot_every < 1:
         raise StatMechError("Need at least one sweep and a positive snapshot interval.")
     seed = resolve_seed(seed)
-    rng = np.random.default_rng(seed)
-    s = initial_state(model, rng, ordered)
+    backend = gpu.select(model.N, "lattice_sites")
+    args = (model, T, n_sweeps, snapshot_every, seed, ordered, progress)
+
+    def on_gpu():
+        probe = np.random.default_rng(seed)
+        device_rng = backend.xp.random.default_rng(int(probe.integers(2 ** 62)))
+        return _run_single(backend, device_rng, probe, *args)
+
+    return gpu.attempt(backend, on_gpu, lambda: (lambda r: _run_single(gpu.CPU, r, r, *args))(np.random.default_rng(seed)),
+                       (StatMechError,))
+
+
+def _run_single(backend: gpu.Backend, rng, host_rng: np.random.Generator, model: LatticeModel, T: float, n_sweeps: int,
+                snapshot_every: int, seed: int, ordered: bool, progress: ProgressFn | None) -> SingleRun:
+    s = gpu.on_device(backend, initial_state(model, host_rng, ordered))
     step = 1.0 if model.model != "xy" else min(math.pi, 1.0 + 2 * math.sqrt(T))
     e, o = np.empty(n_sweeps), np.empty(n_sweeps)
-    snaps: list[tuple[int, np.ndarray]] = [(0, s.copy())]
+    snaps: list[tuple[int, np.ndarray]] = [(0, np.array(gpu.to_host(s)))]
     acc_sum = 0.0
     for a, b in chunk_bounds(n_sweeps, 100):
         report(progress, "Sweeping", a / n_sweeps)
@@ -303,7 +353,7 @@ def run_single(model: LatticeModel, T: float, n_sweeps: int, snapshot_every: int
                 step = _adapt_step(acc, step)
             e[k], o[k] = energy_per_site(model, s), order_parameter(model, s)
             if (k + 1) % snapshot_every == 0:
-                snaps.append((k + 1, s.copy()))
+                snaps.append((k + 1, np.array(gpu.to_host(s))))
     return SingleRun(model, T, e, o, snaps, acc_sum / n_sweeps, seed)
 
 

@@ -13,7 +13,7 @@ def test_fast_function_returns_normally():
 
 def test_slow_function_raises_computation_timeout_error():
     def slow():
-        time.sleep(2)
+        time.sleep(0.6)
         return "done"
 
     with pytest.raises(ComputationTimeoutError):
@@ -22,13 +22,13 @@ def test_slow_function_raises_computation_timeout_error():
 
 def test_timeout_returns_control_promptly_not_after_full_duration():
     def slow():
-        time.sleep(2)
+        time.sleep(0.6)
 
     t0 = time.time()
     with pytest.raises(ComputationTimeoutError):
         run_with_timeout(slow, timeout=0.2)
     elapsed = time.time() - t0
-    assert elapsed < 1.0  # should return around 0.2s, not wait for the full 2s sleep
+    assert elapsed < 0.5  # should return around 0.2s, not wait for the full 0.6s sleep
 
 
 def test_non_timeout_exception_propagates_unchanged():
@@ -51,7 +51,7 @@ def test_uses_default_timeout_from_settings(monkeypatch):
     monkeypatch.setattr(settings, "computation_timeout_seconds", 0.2)
 
     def slow():
-        time.sleep(2)
+        time.sleep(0.6)
 
     with pytest.raises(ComputationTimeoutError):
         run_with_timeout(slow)  # no explicit timeout -- should use the patched setting
@@ -59,7 +59,7 @@ def test_uses_default_timeout_from_settings(monkeypatch):
 
 def test_error_message_includes_seconds_and_label():
     def slow():
-        time.sleep(2)
+        time.sleep(0.6)
 
     try:
         run_with_timeout(slow, timeout=0.2, label="my computation")
@@ -71,7 +71,7 @@ def test_error_message_includes_seconds_and_label():
 
 def test_error_message_omits_label_when_not_given():
     def slow():
-        time.sleep(2)
+        time.sleep(0.6)
 
     try:
         run_with_timeout(slow, timeout=0.2)
@@ -191,7 +191,20 @@ import modules.timeout_utils as tu
 from modules.timeout_utils import ComputationBusyError, abandoned_computations
 
 
-def _wait_until_nothing_is_abandoned(limit: float = 6.0) -> None:
+@pytest.fixture(autouse=True)
+def _private_abandoned_registry(monkeypatch):
+    """Every test here gets its own, empty registry of abandoned threads.
+
+    The registry is process-wide, so threads abandoned by OTHER tests (the many `computation_timeout_seconds = 0`
+    tests leave real SymPy work running in the background, for as long as it takes) used to leak into the counts
+    asserted below. The old defence was to wait up to 6 s for them to finish -- which cost 6 s per test on a busy
+    machine and still failed whenever they ran longer. Isolating the registry makes the count exact and the wait
+    unnecessary; the leftover threads are daemons and harmless.
+    """
+    monkeypatch.setattr(tu, "_abandoned", set())
+
+
+def _wait_until_nothing_is_abandoned(limit: float = 2.0) -> None:
     deadline = time.time() + limit
     while abandoned_computations() and time.time() < deadline:
         time.sleep(0.02)

@@ -1,6 +1,11 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# A hung test must fail the run quickly, not occupy a CI runner until the job-level limit.
+timeout = 240
+markers = [
+    "slow: engine tests of about 10 s or more on one core (Kerr curvature, big Monte Carlo / finite-size-scaling runs); skipped with -m 'not slow' in the CI matrix, run in full by the coverage job",
+]
 
 [tool.mypy]
 # Pragmatic, not maximal, strictness: this codebase is symbolic-math-

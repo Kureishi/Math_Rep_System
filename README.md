@@ -140,15 +140,7 @@ Markdown, PDF, Python, or a Jupyter notebook.
   exploration from units alone), **Extraction diff**, **Compare solves**
   (`solve_compare.py`: two solves, or a what-if of one with some inputs changed, lined
   up on answers, inputs, equations and verification; no LLM call), **Quantum
-<<<<<<< HEAD
   mechanics** (below), **General relativity** (below), **Statistical mechanics** (below), **Numerics & verification lab** (below), and **Research journal**.
-=======
-<<<<<<< HEAD
-  mechanics** (below), **General relativity** (below), **Statistical mechanics** (below), and **Research journal**.
-=======
-  mechanics** (below), **General relativity** (below), and **Research journal**.
->>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
->>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 
 **Plots and animations**
 - Interactive 2D line, 3D surface, contour, feasible-region, ODE, recurrence and
@@ -200,7 +192,6 @@ Markdown, PDF, Python, or a Jupyter notebook.
   copy-ready LaTeX and plain-text summaries and "send to a chain". Plots go into a
   report through an explicit "Include this plot" button. Static images deliberately
   avoid `kaleido`, whose current releases need a separate Chrome install.
-<<<<<<< HEAD
 - **Numerics & verification lab** (`🧰` mode; no LLM involved). The cross-cutting tools that apply to every field. As everywhere in the
   app, results come with the checks that were run on them.
   - *Conserved quantities*: type an ODE system and the app searches for conserved quantities (polynomials, optionally with ln y terms,
@@ -232,9 +223,6 @@ Markdown, PDF, Python, or a Jupyter notebook.
   - *Reproducible notebook*: export a computation (partition function, lattice scan, Einstein relation, random matrices, geodesic precession,
     integrator comparison, convergence, nondimensionalisation, cross-validation, limit check) as a `.ipynb` or `.py` that re-runs it from its
     **parameters and seed** and then **asserts it reproduces the numbers recorded at export**; it fails loudly if they differ. Library versions are recorded.
-=======
-<<<<<<< HEAD
->>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 - **Statistical mechanics** (`🔥` mode; no LLM involved; k_B = 1). Six tools; every result is shown with the checks that
   were run on it, and nearly every check compares the method with an exact result it shares no code with.
   - *Partition functions*: Z, F, U, S and C against temperature for a two-level system, harmonic oscillator, rigid
@@ -269,11 +257,6 @@ Markdown, PDF, Python, or a Jupyter notebook.
     ratio statistic ⟨r̃⟩.
   Every stochastic result stores the **seed** that produced it (a fresh one is drawn when the seed box is empty), so any run can
   be reproduced by typing it back in.
-<<<<<<< HEAD
-=======
-=======
->>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
->>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
 - **General relativity** (`🌌` mode; no LLM involved; G = c = 1, signature (−,+,+,+), MTW sign convention). Six
   tools around the metric tensor, each shown with the checks that were run on it:
   - *Curvature & fields*: Christoffel symbols → Riemann → Ricci → Einstein → Weyl for a preset (Minkowski,
@@ -390,6 +373,25 @@ verification retries, numeric balance tolerance, independent cross-check
 tolerance, and the computation timeout. "Reset to defaults" restores
 `config.py`'s values.
 
+## GPU acceleration (optional)
+
+With an NVIDIA GPU and [CuPy](https://cupy.dev), the data-parallel kernels run on the GPU; without them nothing
+changes and everything runs on the CPU. Install the wheel matching your CUDA version (see `requirements-gpu.txt`),
+then check with `python -c "from modules import gpu; print(gpu.describe())"`.
+
+- **What uses it:** Langevin ensembles (overdamped and underdamped), Ising/Potts/XY lattice sweeps, and the
+  eigenvalue solves for random-matrix spectra. Not the symbolic work (SymPy), the adaptive ODE/geodesic
+  integrators or the small 1-D quantum/PDE grids: those are sequential or too small for a GPU to help. LM Studio
+  uses the GPU for the language model on its own (its GPU-offload setting).
+- **When:** *auto* (default) uses the GPU only for jobs big enough to benefit (at least 100,000 Langevin paths, a
+  lattice of at least 128 x 128, random matrices of at least 128 x 128); *on* uses it for everything supported;
+  *off* never. Set it under Advanced settings -> GPU acceleration, or with `MRS_GPU=auto|on|off`. The thresholds
+  are estimates (`modules/gpu.py`, `THRESHOLDS`): try *on* against *off* on your card.
+- **Reproducibility:** a seed gives statistically equivalent, not bit-identical, results on the CPU and the GPU,
+  because the GPU has its own random number generator. Each result records the backend that produced it. Random-
+  matrix spectra are the exception: their matrices are drawn on the CPU, so they match.
+- **If the GPU fails** (out of memory, a driver fault) the job is logged and repeated on the CPU.
+
 ## Running the tests
 
 ```bash
@@ -397,23 +399,18 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-<<<<<<< HEAD
-The suite (about 3,400 tests, roughly ten minutes with coverage) uses a mocked LLM client
-=======
-<<<<<<< HEAD
-The suite (about 3,000 tests, roughly eight minutes with coverage) uses a mocked LLM client
-=======
-The suite (about 2,600 tests, roughly six minutes with coverage) uses a mocked LLM client
->>>>>>> 958d913fd0d8083d8d1d713cc5a55b4b47f76822
->>>>>>> 95dab50373c8ee523b5945095b70ac8546026cdd
-(`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
+The suite (about 2,900 tests; roughly seven minutes on a single core, far less in parallel) uses a
+mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
+spread it over every core, and `pytest -m "not slow"` to skip the four engine tests that take about 10 s or more
+(Kerr curvature, the large Monte Carlo and finite-size-scaling runs).
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:
   **ubuntu-latest and windows-latest** x Python **3.12 and 3.14** (the oldest and
   newest supported) x two hash seeds. Windows is included deliberately, since this
   app targets it and some code (the timeout wrapper) exists because the obvious
   approach, `signal.alarm`, does nothing there. CI also byte-compiles the project
-  and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`.
+  and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`. One cell (ubuntu, 3.12,
+  seed 0) runs the full suite with coverage; the other seven skip the `slow` tests. All use `-n auto`.
 - **Coverage floor:** `pytest` fails below 90% line coverage of `modules/`
   (measured: mid-90s). It exists to catch new code with no tests at all, not to
   chase 100%. Coverage uses `sys.monitoring` (`core = "sysmon"`), which reports the

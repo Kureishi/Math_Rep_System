@@ -35,6 +35,7 @@ from scipy.sparse import csc_matrix, diags, identity
 from scipy.sparse.linalg import splu
 from scipy.stats import kstest
 
+from modules import gpu
 from modules.gr_metrics import _names_in, parse_in_symbols
 from modules.progress import ProgressFn, chunk_bounds, report
 from modules.quantum_common import CheckList
@@ -54,6 +55,7 @@ class Potential:
     expr: sp.Expr
     _U: object = None
     _dU: object = None
+    _dU_device: dict = field(default_factory=dict, repr=False, compare=False)     # sympy module name -> compiled dU
 
     def U(self, x: np.ndarray | float) -> np.ndarray:
         xa = np.asarray(x, dtype=float)
@@ -62,6 +64,15 @@ class Potential:
     def dU(self, x: np.ndarray | float) -> np.ndarray:
         xa = np.asarray(x, dtype=float)
         return np.array(np.broadcast_to(np.asarray(self._dU(xa), dtype=float), xa.shape))  # type: ignore[operator, type-var]
+
+
+def _device_dU(pot: Potential, backend: gpu.Backend):
+    """dU compiled for `backend`'s array module (CuPy on a GPU); it takes and returns that module's arrays."""
+    if backend.module not in pot._dU_device:
+        f = sp.lambdify(X, sp.diff(pot.expr, X), modules=backend.module)
+        xp = backend.xp
+        pot._dU_device[backend.module] = lambda x: xp.asarray(f(x), dtype=float)
+    return pot._dU_device[backend.module]
 
 
 def potential_from_text(text: str, params: dict[str, float] | None = None, name: str = "custom potential") -> Potential:
@@ -108,6 +119,7 @@ class LangevinResult:
     seed: int
     potential: Potential
     force: float = 0.0
+    backend: str = "CPU (NumPy)"            # which backend produced the run (a GPU uses its own random numbers)
 
 
 def _check_run(n_steps: int, n_paths: int, kT: float, gamma: float, dt: float) -> None:
@@ -124,19 +136,28 @@ def simulate_overdamped(pot: Potential, kT: float, gamma: float, x0: float | np.
     n_steps = int(round(t_max / dt))
     _check_run(n_steps, n_paths, kT, gamma, dt)
     seed = resolve_seed(seed)
-    rng = np.random.default_rng(seed)
-    x = np.full(n_paths, float(np.asarray(x0, dtype=float))) if np.isscalar(x0) else np.asarray(x0, dtype=float).copy()
+    backend = gpu.select(n_paths, "langevin_paths")
+    args = (pot, kT, gamma, x0, dt, n_steps, n_paths, n_out, force, seed, progress)
+    return gpu.attempt(backend, lambda: _overdamped(backend, *args), lambda: _overdamped(gpu.CPU, *args), (StatMechError,))
+
+
+def _overdamped(backend: gpu.Backend, pot: Potential, kT: float, gamma: float, x0: float | np.ndarray, dt: float, n_steps: int,
+                n_paths: int, n_out: int, force: float, seed: int, progress: ProgressFn | None) -> LangevinResult:
+    xp = backend.xp
+    dU = _device_dU(pot, backend) if backend.is_gpu else pot.dU
+    rng = xp.random.default_rng(seed)
+    x = xp.full(n_paths, float(np.asarray(x0, dtype=float))) if np.isscalar(x0) else xp.array(np.asarray(x0, dtype=float))
     noise = math.sqrt(2 * kT * dt / gamma)
     stride = max(1, n_steps // n_out)
-    t_out, x_out = [0.0], [x.copy()]
+    t_out, x_out = [0.0], [gpu.to_host(x).copy()]
     for a, b in chunk_bounds(n_steps, 2000):
         report(progress, "Simulating", a / n_steps)
         for k in range(a, b):
-            x += (-pot.dU(x) + force) / gamma * dt + noise * rng.standard_normal(n_paths)
+            x += (-dU(x) + force) / gamma * dt + noise * rng.standard_normal(n_paths)
             if (k + 1) % stride == 0:
                 t_out.append((k + 1) * dt)
-                x_out.append(x.copy())
-    return LangevinResult("overdamped", np.array(t_out), np.array(x_out), None, kT, gamma, 1.0, dt, seed, pot, force)
+                x_out.append(gpu.to_host(x).copy())
+    return LangevinResult("overdamped", np.array(t_out), np.array(x_out), None, kT, gamma, 1.0, dt, seed, pot, force, backend.name)
 
 
 def simulate_underdamped(pot: Potential, kT: float, gamma: float, mass: float, x0: float | np.ndarray, dt: float, t_max: float,
@@ -148,14 +169,24 @@ def simulate_underdamped(pot: Potential, kT: float, gamma: float, mass: float, x
     if mass <= 0:
         raise StatMechError("The mass must be positive.")
     seed = resolve_seed(seed)
-    rng = np.random.default_rng(seed)
-    x = np.full(n_paths, float(np.asarray(x0, dtype=float))) if np.isscalar(x0) else np.asarray(x0, dtype=float).copy()
-    v = rng.normal(0, math.sqrt(kT / mass), n_paths) if v0 is None else np.full(n_paths, float(v0))
+    backend = gpu.select(n_paths, "langevin_paths")
+    args = (pot, kT, gamma, mass, x0, dt, n_steps, n_paths, n_out, force, seed, v0, progress)
+    return gpu.attempt(backend, lambda: _underdamped(backend, *args), lambda: _underdamped(gpu.CPU, *args), (StatMechError,))
+
+
+def _underdamped(backend: gpu.Backend, pot: Potential, kT: float, gamma: float, mass: float, x0: float | np.ndarray, dt: float,
+                 n_steps: int, n_paths: int, n_out: int, force: float, seed: int, v0: float | None,
+                 progress: ProgressFn | None) -> LangevinResult:
+    xp = backend.xp
+    dU = _device_dU(pot, backend) if backend.is_gpu else pot.dU
+    rng = xp.random.default_rng(seed)
+    x = xp.full(n_paths, float(np.asarray(x0, dtype=float))) if np.isscalar(x0) else xp.array(np.asarray(x0, dtype=float))
+    v = rng.normal(0, math.sqrt(kT / mass), n_paths) if v0 is None else xp.full(n_paths, float(v0))
     c1 = math.exp(-gamma * dt / mass)
     c2 = math.sqrt((1 - c1 * c1) * kT / mass)
-    f = -pot.dU(x) + force
+    f = -dU(x) + force
     stride = max(1, n_steps // n_out)
-    t_out, x_out, v_out = [0.0], [x.copy()], [v.copy()]
+    t_out, x_out, v_out = [0.0], [gpu.to_host(x).copy()], [gpu.to_host(v).copy()]
     for a, b in chunk_bounds(n_steps, 2000):
         report(progress, "Simulating", a / n_steps)
         for k in range(a, b):
@@ -163,13 +194,14 @@ def simulate_underdamped(pot: Potential, kT: float, gamma: float, mass: float, x
             x += 0.5 * dt * v
             v = c1 * v + c2 * rng.standard_normal(n_paths)
             x += 0.5 * dt * v
-            f = -pot.dU(x) + force
+            f = -dU(x) + force
             v += 0.5 * dt / mass * f
             if (k + 1) % stride == 0:
                 t_out.append((k + 1) * dt)
-                x_out.append(x.copy())
-                v_out.append(v.copy())
-    return LangevinResult("underdamped", np.array(t_out), np.array(x_out), np.array(v_out), kT, gamma, mass, dt, seed, pot, force)
+                x_out.append(gpu.to_host(x).copy())
+                v_out.append(gpu.to_host(v).copy())
+    return LangevinResult("underdamped", np.array(t_out), np.array(x_out), np.array(v_out), kT, gamma, mass, dt, seed, pot, force,
+                          backend.name)
 
 
 # ------------------------------------------------------------------------------------------ analysis

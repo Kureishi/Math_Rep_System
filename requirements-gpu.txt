@@ -1,0 +1,14 @@
+# OPTIONAL: GPU acceleration (see modules/gpu.py). Everything works without this file -- the app just runs on the CPU.
+#
+# Needs an NVIDIA GPU with a CUDA driver. Install ONE CuPy wheel, the one matching your CUDA major version
+# (run `nvidia-smi` and read "CUDA Version" in the top-right corner):
+#
+#     pip install cupy-cuda12x      # CUDA 12.x
+#     pip install cupy-cuda13x      # CUDA 13.x
+#
+# (Windows and Linux wheels exist; there is no wheel for macOS.) Not pinned here because the right wheel depends on
+# your driver, and it is deliberately not part of requirements.txt or of CI, which has no GPU.
+#
+# Then check it with:   python -c "from modules import gpu; print(gpu.describe())"
+# Choose when it is used in the sidebar (Advanced settings -> GPU acceleration) or with MRS_GPU=auto|on|off.
+cupy-cuda12x

@@ -14,6 +14,7 @@ jobs:
   test:
     name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30   # a stuck job should fail in half an hour, not hold a runner for the 6-hour default
     strategy:
       # fail-fast: false so a failure on one OS/version doesn't cancel
       # the others mid-run -- seeing all the results is more useful than
@@ -87,7 +88,20 @@ jobs:
         if: matrix.hash-seed == '0'
         run: mypy modules/ ui/ app.py cli.py config.py api_server.py
 
-      - name: Run the test suite
+      - name: Run the test suite (full, with coverage)
+        # ONE cell of the matrix runs everything -- the slow engine tests included -- and measures coverage (it
+        # needs the whole suite to be meaningful, and coverage adds overhead nobody needs eight times over).
+        # `-n auto` spreads the tests over every core on the runner; `--dist worksteal` lets a worker that runs out
+        # of tests take some from a busy one, so a long test near the end cannot leave the other cores idle.
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.hash-seed == '0'
         env:
           PYTHONHASHSEED: ${{ matrix.hash-seed }}
-        run: pytest -q --cov --cov-report=term-missing
+        run: pytest -q -n auto --dist worksteal --cov --cov-report=term-missing --durations=15
+
+      - name: Run the test suite (everything except the slow engine tests)
+        # The other seven cells exist to catch platform / interpreter / hash-order bugs, which the fast tests
+        # expose just as well; the handful of tests marked `slow` only add minutes to each of them.
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.hash-seed == '0') }}
+        env:
+          PYTHONHASHSEED: ${{ matrix.hash-seed }}
+        run: pytest -q -n auto --dist worksteal -m "not slow" --durations=15

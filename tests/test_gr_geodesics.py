@@ -180,3 +180,20 @@ def test_to_cartesian_embeddings():
     assert mk[0] == pytest.approx([1.0, 2.0, 3.0])
     fallback = gg.to_cartesian(preset("schwarzschild_ef"), np.array([[0.0, 1.0, 2.0, 3.0]]))
     assert fallback.shape == (1, 3)
+
+
+def test_changing_only_a_parameter_value_reuses_the_symbolic_work():
+    """The Christoffel symbols depend on the metric's structure, not on the numbers fed to it: a new mass (or wave
+    amplitude) must not redo the SymPy work, and must still give the right numbers."""
+    import time
+    from modules.gr_geodesics import build_system
+    from modules.gr_metrics import preset
+    m = preset("schwarzschild")
+    first = build_system(m, {"M": 1.0})
+    t0 = time.time()
+    second = build_system(m, {"M": 2.0})
+    assert time.time() - t0 < 0.5
+    assert first is not second and first._gamma is second._gamma
+    x = np.array([0.0, 10.0, 1.0, 0.3])
+    assert first.gamma(x)[1, 0, 0] == pytest.approx(1.0 * (10 - 2.0) / 10 ** 3)       # Gamma^r_tt = M (r - 2M) / r^3
+    assert second.gamma(x)[1, 0, 0] == pytest.approx(2.0 * (10 - 4.0) / 10 ** 3)

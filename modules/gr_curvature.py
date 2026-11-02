@@ -29,6 +29,7 @@ import math
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 import sympy as sp
@@ -51,8 +52,16 @@ def _pair_symbols(arg: sp.Symbol, kind: str) -> tuple[sp.Symbol, sp.Symbol]:
 
 def simplify_expr(e: sp.Expr) -> sp.Expr:
     """Canonical simplification for rational-trigonometric expressions (see the module docstring). Falls back
-    to sp.simplify when the expression contains functions of something other than a bare coordinate."""
-    e = sp.sympify(e)
+    to sp.simplify when the expression contains functions of something other than a bare coordinate.
+
+    Memoised on the expression: it is a pure function, and a curvature run asks for the same expression again and
+    again (about three calls in four in the Kerr computation are repeats -- the same Christoffel combination turns
+    up in many Riemann components, in the Ricci contraction and in the invariants)."""
+    return _simplify_cached(sp.sympify(e))
+
+
+@lru_cache(maxsize=8192)
+def _simplify_cached(e: sp.Expr) -> sp.Expr:
     if e == 0:
         return sp.Integer(0)
     e = e.replace(sp.tan, lambda x: sp.sin(x) / sp.cos(x)).replace(sp.cot, lambda x: sp.cos(x) / sp.sin(x))

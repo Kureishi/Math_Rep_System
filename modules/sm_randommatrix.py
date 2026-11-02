@@ -31,6 +31,7 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.stats import kstest
 
 from modules.quantum_common import CheckList
+from modules import gpu
 from modules.sm_common import StatMechError, resolve_seed, spawn_rngs
 
 KINDS = ("GOE", "GUE", "Poisson")
@@ -66,16 +67,44 @@ def _semicircle_sample(n: int, rng: np.random.Generator) -> np.ndarray:
     return np.interp(rng.random(n), semicircle_cdf(grid), grid)
 
 
+_BATCH_BYTES = 256 * 2 ** 20       # how much matrix data one GPU batch may hold
+
+
+def _batched_eigvalsh(backend: gpu.Backend, make, n_samples: int, bytes_each: int) -> np.ndarray:
+    """Eigenvalues of `n_samples` matrices produced by make(i) on the CPU (so the random numbers are the CPU's, whatever
+    the backend), solved in batches on the device. Each row comes back sorted ascending."""
+    per = max(1, _BATCH_BYTES // max(1, bytes_each))
+    rows = []
+    for lo in range(0, n_samples, per):
+        stack = backend.xp.asarray(np.stack([make(i) for i in range(lo, min(lo + per, n_samples))]))
+        rows.append(gpu.to_host(backend.xp.linalg.eigvalsh(stack)))
+    return np.concatenate(rows)
+
+
 def spectra(kind: str, N: int, n_samples: int, seed: int | None = None) -> tuple[np.ndarray, int]:
-    """(n_samples, N) sorted eigenvalues of independent matrices, and the seed used."""
+    """(n_samples, N) sorted eigenvalues of independent matrices, and the seed used. Large matrices have their
+    eigenvalues found on the GPU when there is one (the matrices themselves are the CPU's, so the spectra do not depend
+    on the backend)."""
     if kind not in KINDS:
         raise StatMechError(f"kind must be one of {', '.join(KINDS)}.")
     if N < 4 or n_samples < 1 or N * N * n_samples > 4e8:
         raise StatMechError("Need N >= 4 and N^2 x samples <= 4e8.")
     seed = resolve_seed(seed)
+    rngs = spawn_rngs(seed, n_samples)
     out = np.empty((n_samples, N))
-    for i, rng in enumerate(spawn_rngs(seed, n_samples)):
-        out[i] = np.sort(_semicircle_sample(N, rng)) if kind == "Poisson" else np.linalg.eigvalsh(sample_matrix(kind, N, rng))
+    if kind != "Poisson":
+        backend = gpu.select(N, "matrix_dim")
+        bytes_each = N * N * (16 if kind == "GUE" else 8)
+
+        def cpu() -> np.ndarray:
+            for i, rng in enumerate(rngs):
+                out[i] = np.linalg.eigvalsh(sample_matrix(kind, N, rng))
+            return out
+
+        return gpu.attempt(backend, lambda: _batched_eigvalsh(backend, lambda i: sample_matrix(kind, N, rngs[i]), n_samples, bytes_each),
+                           cpu), seed
+    for i, rng in enumerate(rngs):
+        out[i] = np.sort(_semicircle_sample(N, rng))
     return out, seed
 
 
@@ -83,11 +112,26 @@ def wishart_spectra(p: int, n: int, n_samples: int, seed: int | None = None) -> 
     if p < 4 or n < p or n_samples < 1:
         raise StatMechError("Need p >= 4 and n >= p (so that c = p/n <= 1).")
     seed = resolve_seed(seed)
-    out = np.empty((n_samples, p))
-    for i, rng in enumerate(spawn_rngs(seed, n_samples)):
-        x = rng.standard_normal((p, n))
-        out[i] = np.linalg.eigvalsh(x @ x.T / n)
-    return out, seed
+    rngs = spawn_rngs(seed, n_samples)
+    backend = gpu.select(p, "matrix_dim")
+
+    def on_gpu() -> np.ndarray:
+        xp = backend.xp
+        per = max(1, _BATCH_BYTES // max(1, p * n * 8))
+        rows = []
+        for lo in range(0, n_samples, per):
+            x = xp.asarray(np.stack([rngs[i].standard_normal((p, n)) for i in range(lo, min(lo + per, n_samples))]))
+            rows.append(gpu.to_host(xp.linalg.eigvalsh(xp.matmul(x, x.transpose(0, 2, 1)) / n)))
+        return np.concatenate(rows)
+
+    def cpu() -> np.ndarray:
+        out = np.empty((n_samples, p))
+        for i, rng in enumerate(rngs):
+            x = rng.standard_normal((p, n))
+            out[i] = np.linalg.eigvalsh(x @ x.T / n)
+        return out
+
+    return gpu.attempt(backend, on_gpu, cpu), seed
 
 
 def marchenko_pastur_pdf(x: np.ndarray, c: float) -> np.ndarray:
