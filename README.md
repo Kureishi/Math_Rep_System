@@ -380,15 +380,18 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite (about 3,400 tests, roughly ten minutes with coverage) uses a mocked LLM client
-(`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed.
+The suite (about 2,900 tests; roughly eight minutes on a single core with coverage, far less in parallel) uses a
+mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
+spread it over every core, and `pytest -m "not slow"` to skip the five engine tests that take more than ~8 s each
+(Kerr curvature, the large Monte Carlo and finite-size-scaling runs).
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:
   **ubuntu-latest and windows-latest** x Python **3.12 and 3.14** (the oldest and
   newest supported) x two hash seeds. Windows is included deliberately, since this
   app targets it and some code (the timeout wrapper) exists because the obvious
   approach, `signal.alarm`, does nothing there. CI also byte-compiles the project
-  and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`.
+  and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`. One cell (ubuntu, 3.12,
+  seed 0) runs the full suite with coverage; the other seven skip the `slow` tests. All use `-n auto`.
 - **Coverage floor:** `pytest` fails below 90% line coverage of `modules/`
   (measured: mid-90s). It exists to catch new code with no tests at all, not to
   chase 100%. Coverage uses `sys.monitoring` (`core = "sysmon"`), which reports the
