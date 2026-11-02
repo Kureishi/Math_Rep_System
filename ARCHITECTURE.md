@@ -406,7 +406,10 @@ math-rep-system/
     ├── gr_cones.py                    # light cones, null curves, Penrose diagrams (Minkowski, Schwarzschild)
     ├── gr_waves.py                    # linearised gravity, TT plane waves, test masses, quadrupole formula, Peters inspiral
     ├── gr_plots.py                    # the Plotly figures for all of the above
+<<<<<<< HEAD
     ├── gpu.py                         # optional CuPy backend: detection, auto/on/off, size thresholds, CPU fallback
+=======
+>>>>>>> 17c9b807e28b2d1b15906bec944a6e32d26f1e7a
     ├── sm_common.py                   # StatMechError, the seed convention, autocorrelation time, jackknife
     ├── sm_partition.py                # Z, F, U, S, C from spectra with self-checks; ideal gas and the Gibbs paradox
     ├── sm_lattice.py                  # Metropolis Ising/Potts/XY, Binder crossings, FSS, exact 4x4 and transfer-matrix references
