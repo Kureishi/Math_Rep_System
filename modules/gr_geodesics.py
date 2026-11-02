@@ -44,6 +44,11 @@ KAPPA = {"timelike": -1.0, "null": 0.0, "spacelike": 1.0}
 METHODS = ("DOP853", "RK45", "LSODA", "Radau")
 _SPHERICAL = {"schwarzschild", "rn", "static", "minkowski", "frw"}
 _CACHE: dict[tuple, "GeodesicSystem"] = {}
+# The expensive, symbolic half of build_system (Christoffel symbols + lambdify), keyed on the metric's STRUCTURE only.
+# The parameter values are runtime arguments of the lambdified functions, so changing a mass, an amplitude or a
+# frequency must not redo it: with the values in the key, every slider move on a wave or Kerr page cost several
+# seconds of SymPy for no reason.
+_SYMBOLIC_CACHE: dict[tuple, tuple[Callable, Callable, list[int]]] = {}
 
 
 # ------------------------------------------------------------------------------------------ the system
@@ -89,19 +94,25 @@ def build_system(metric: GRMetric, params: dict[str, float] | None = None, timeo
     key = (metric.key, str(metric.g), tuple(sorted(merged.items())))
     if key in _CACHE:
         return _CACHE[key]
-    n = metric.dim
-    coords = metric.coords
+    skey = (metric.key, str(metric.g), tuple(sorted(metric.params)))
+    if skey not in _SYMBOLIC_CACHE:
+        n = metric.dim
+        coords = metric.coords
 
-    def build():
-        ginv = invert_metric(metric.g)
-        return _christoffel(metric.g, ginv, n, lambda e, i: sp.diff(e, coords[i]))
+        def build():
+            ginv = invert_metric(metric.g)
+            return _christoffel(metric.g, ginv, n, lambda e, i: sp.diff(e, coords[i]))
 
-    gam = run_with_timeout(build, timeout=timeout, label="Christoffel symbols")
-    syms = list(coords) + [parameter_symbol(k) for k in sorted(metric.params)]
-    gfn = sp.lambdify(syms, [[gam[k][i][j] for j in range(n)] for k in range(n) for i in range(n)], modules="numpy", cse=True)
-    metfn = sp.lambdify(syms, metric.g.tolist(), modules="numpy", cse=True)
-    killing = [i for i, c in enumerate(coords) if all(sp.diff(metric.g[a, b], c) == 0 for a in range(n) for b in range(n))]
-    system = GeodesicSystem(metric, merged, gfn, metfn, killing)
+        gam = run_with_timeout(build, timeout=timeout, label="Christoffel symbols")
+        syms = list(coords) + [parameter_symbol(k) for k in sorted(metric.params)]
+        gfn = sp.lambdify(syms, [[gam[k][i][j] for j in range(n)] for k in range(n) for i in range(n)], modules="numpy", cse=True)
+        metfn = sp.lambdify(syms, metric.g.tolist(), modules="numpy", cse=True)
+        killing = [i for i, c in enumerate(coords) if all(sp.diff(metric.g[a, b], c) == 0 for a in range(n) for b in range(n))]
+        if len(_SYMBOLIC_CACHE) > 24:
+            _SYMBOLIC_CACHE.clear()
+        _SYMBOLIC_CACHE[skey] = (gfn, metfn, killing)
+    gfn, metfn, killing = _SYMBOLIC_CACHE[skey]
+    system = GeodesicSystem(metric, merged, gfn, metfn, list(killing))
     if len(_CACHE) > 24:
         _CACHE.clear()
     _CACHE[key] = system

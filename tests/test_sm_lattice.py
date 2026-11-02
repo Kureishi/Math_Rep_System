@@ -130,6 +130,7 @@ def test_a_point_does_not_depend_on_which_other_temperatures_are_scanned():
     assert s1.points[0].e == s2.points[0].e
 
 
+@pytest.mark.slow
 def test_binder_crossing_and_finite_size_scaling_find_onsagers_values():
     temps = np.linspace(2.05, 2.5, 7)
     scans = {L: sl.scan_temperatures(sl.LatticeModel("ising", L), temps, 300, 3000, seed=3) for L in (8, 16)}

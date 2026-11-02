@@ -1,6 +1,8 @@
 -r requirements.txt
 pytest>=7.4
 pytest-cov>=4.1
+pytest-xdist>=3.5      # runs the suite on every core: `pytest -n auto` (CI does)
+pytest-timeout>=2.3    # the per-test `timeout` in pyproject.toml: a hung test fails fast instead of stalling CI
 coverage>=7.9   # for [tool.coverage.run] core = "sysmon" -- see pyproject.toml
 mypy>=1.10
 hypothesis>=6.100

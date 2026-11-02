@@ -85,6 +85,7 @@ def test_reissner_nordstrom_invariants_match_closed_forms(rn):
     assert rn.checks.passed
 
 
+@pytest.mark.slow
 def test_kerr_is_ricci_flat_with_known_kretschmann_and_passes_all_checks(kerr):
     assert kerr.is_ricci_flat
     c = sp.cos(th)
@@ -175,6 +176,7 @@ def test_schwarzschild_r0_is_singular_r2M_is_not(schw):
     assert loci["theta = 0"] == "coordinate artefact" and loci["theta = pi"] == "coordinate artefact"
 
 
+@pytest.mark.slow
 def test_kerr_ring_singularity_and_horizons(kerr):
     loci = _loci(kerr)
     assert loci["r = 0 and theta = pi/2"] == "curvature singularity"
