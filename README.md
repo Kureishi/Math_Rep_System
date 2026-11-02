@@ -399,12 +399,10 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-<<<<<<< HEAD
 The suite (about 2,900 tests; roughly seven minutes on a single core, far less in parallel) uses a
 mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
 spread it over every core, and `pytest -m "not slow"` to skip the four engine tests that take about 10 s or more
 =======
-<<<<<<< HEAD
 The suite (about 2,900 tests; roughly seven minutes on a single core, far less in parallel) uses a
 mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
 spread it over every core, and `pytest -m "not slow"` to skip the four engine tests that take about 10 s or more
@@ -412,8 +410,6 @@ spread it over every core, and `pytest -m "not slow"` to skip the four engine te
 The suite (about 2,900 tests; roughly eight minutes on a single core with coverage, far less in parallel) uses a
 mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
 spread it over every core, and `pytest -m "not slow"` to skip the five engine tests that take more than ~8 s each
->>>>>>> d95db13d68c97241e08eb7228a86210f7f019305
->>>>>>> 17c9b807e28b2d1b15906bec944a6e32d26f1e7a
 (Kerr curvature, the large Monte Carlo and finite-size-scaling runs).
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:
