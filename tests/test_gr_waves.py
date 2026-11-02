@@ -12,7 +12,7 @@ T, X, Y, Z = gw.COORDS
 
 
 # ---------------------------------------------------------------- plane waves and the field equations
-@pytest.mark.parametrize("n", [[0, 0, 1], [1, 0, 0], [1, 2, 2], [0, -1, 1]])
+@pytest.mark.parametrize("n", [[0, 0, 1], [1, 0, 0], pytest.param([1, 2, 2], marks=pytest.mark.slow), [0, -1, 1]])
 def test_null_plane_wave_in_any_direction_solves_the_vacuum_equations(n):
     w = gw.plane_wave(n, 1, 0.5, 3, cross_phase=0.7)
     ck = gw.check_plane_wave(w)

@@ -4,7 +4,11 @@ testpaths = ["tests"]
 # A hung test must fail the run quickly, not occupy a CI runner until the job-level limit.
 timeout = 240
 markers = [
+<<<<<<< HEAD
     "slow: engine tests of about 10 s or more on one core (Kerr curvature, big Monte Carlo / finite-size-scaling runs); skipped with -m 'not slow' in the CI matrix, run in full by the coverage job",
+=======
+    "slow: engine tests of more than ~8 s each on one core (Kerr curvature, big Monte Carlo / finite-size-scaling runs); skipped with -m 'not slow' in the CI matrix, run in full by the coverage job",
+>>>>>>> d95db13d68c97241e08eb7228a86210f7f019305
 ]
 
 [tool.mypy]
