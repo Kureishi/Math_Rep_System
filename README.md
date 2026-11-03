@@ -392,6 +392,32 @@ then check with `python -c "from modules import gpu; print(gpu.describe())"`.
   matrix spectra are the exception: their matrices are drawn on the CPU, so they match.
 - **If the GPU fails** (out of memory, a driver fault) the job is logged and repeated on the CPU.
 
+## Working with git
+
+Merge conflicts in this project have had one cause: the *same work committed on two lines of history* (a delivery
+committed locally while the same round, or part of it, was already on origin), which turns every shared file --
+this README, `ARCHITECTURE.md`, `app.py`, the mode registries -- into a conflict. To keep history on one line:
+
+1. **Be up to date before you apply a delivery.** `scripts/apply_delivery.py` checks for you:
+
+   ```
+   python scripts/apply_delivery.py Math_Rep_System.zip            # dry run: what would change
+   python scripts/apply_delivery.py Math_Rep_System.zip --apply    # make the changes (never commits)
+   ```
+
+   It stops if you have uncommitted work, or if origin has commits you do not (`git pull --rebase` first). It also
+   removes files the delivery deleted, which extracting a zip over the folder silently does not, and it never
+   touches `.git/` or `data/`. Then `git status`, `git add -A`, `git commit`, `git push`.
+2. **One round at a time.** Two chats working from the same snapshot at once will both edit the same shared files;
+   finish, apply and push one round before starting the next from the result.
+3. **Never commit a half-finished merge.** `scripts/check_conflict_markers.py` runs first in CI and, if you opt in
+   (`pip install pre-commit && pre-commit install`), before every commit; `pytest` checks too. To abandon a merge:
+   `git merge --abort`.
+4. **Line endings are pinned** by `.gitattributes` (LF), so Windows checkouts no longer show whole files as changed.
+
+Settings that make git's conflicts easier to read and less frequent (once per machine):
+`git config --global pull.rebase true` and `git config --global merge.conflictstyle zdiff3`.
+
 ## Running the tests
 
 ```bash
@@ -399,17 +425,9 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite (about 2,900 tests; roughly seven minutes on a single core, far less in parallel) uses a
+The suite (thousands of tests; minutes on one core, far less in parallel) uses a
 mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
 spread it over every core, and `pytest -m "not slow"` to skip the four engine tests that take about 10 s or more
-=======
-The suite (about 2,900 tests; roughly seven minutes on a single core, far less in parallel) uses a
-mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
-spread it over every core, and `pytest -m "not slow"` to skip the four engine tests that take about 10 s or more
-=======
-The suite (about 2,900 tests; roughly eight minutes on a single core with coverage, far less in parallel) uses a
-mocked LLM client (`tests/conftest.py`'s `FakeClient`), so no LM Studio server is needed. Use `pytest -n auto` to
-spread it over every core, and `pytest -m "not slow"` to skip the five engine tests that take more than ~8 s each
 (Kerr curvature, the large Monte Carlo and finite-size-scaling runs).
 
 - **CI** (`.github/workflows/tests.yml`) runs on every push and pull request:

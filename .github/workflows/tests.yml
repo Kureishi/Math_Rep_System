@@ -62,6 +62,12 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      - name: No unresolved merge-conflict markers
+        # First, because it is the cheapest check and the clearest message: a half-finished merge that was committed
+        # shows up here as "file X, lines N" instead of as a syntax error somewhere inside the test run. Needs only the
+        # standard library, so it runs before anything is installed.
+        run: python scripts/check_conflict_markers.py
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -91,26 +97,12 @@ jobs:
       - name: Run the test suite (full, with coverage)
         # ONE cell of the matrix runs everything -- the slow engine tests included -- and measures coverage (it
         # needs the whole suite to be meaningful, and coverage adds overhead nobody needs eight times over).
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> 17c9b807e28b2d1b15906bec944a6e32d26f1e7a
         # `-n auto` spreads the tests over every core on the runner; `--dist worksteal` lets a worker that runs out
         # of tests take some from a busy one, so a long test near the end cannot leave the other cores idle.
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.hash-seed == '0'
         env:
           PYTHONHASHSEED: ${{ matrix.hash-seed }}
         run: pytest -q -n auto --dist worksteal --cov --cov-report=term-missing --durations=15
-<<<<<<< HEAD
-=======
-=======
-        # `-n auto` spreads the tests over every core on the runner.
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.hash-seed == '0'
-        env:
-          PYTHONHASHSEED: ${{ matrix.hash-seed }}
-        run: pytest -q -n auto --cov --cov-report=term-missing --durations=15
->>>>>>> d95db13d68c97241e08eb7228a86210f7f019305
->>>>>>> 17c9b807e28b2d1b15906bec944a6e32d26f1e7a
 
       - name: Run the test suite (everything except the slow engine tests)
         # The other seven cells exist to catch platform / interpreter / hash-order bugs, which the fast tests
@@ -118,12 +110,4 @@ jobs:
         if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.hash-seed == '0') }}
         env:
           PYTHONHASHSEED: ${{ matrix.hash-seed }}
-<<<<<<< HEAD
         run: pytest -q -n auto --dist worksteal -m "not slow" --durations=15
-=======
-<<<<<<< HEAD
-        run: pytest -q -n auto --dist worksteal -m "not slow" --durations=15
-=======
-        run: pytest -q -n auto -m "not slow" --durations=15
->>>>>>> d95db13d68c97241e08eb7228a86210f7f019305
->>>>>>> 17c9b807e28b2d1b15906bec944a6e32d26f1e7a

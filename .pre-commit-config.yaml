@@ -1,23 +1,28 @@
-# Optional: complements the GitHub Actions workflow (.github/workflows/tests.yml)
-# with immediate LOCAL feedback before a commit even happens, rather than
-# only finding out a test broke after pushing. NOTE the full suite is over
-# sixteen hundred tests and takes about two minutes, so running it on every
-# commit is still a noticeable wait -- to run it on `git push` instead, add
-# `stages: [pre-push]` to the hook below and install with
-# `pre-commit install --hook-type pre-push`.
+# Optional local checks, to complement the GitHub Actions workflow (.github/workflows/tests.yml) with feedback BEFORE a
+# commit or push exists instead of after.
 #
-# Opt in with:
+# Opt in once:
 #   pip install pre-commit
-#   pre-commit install
+#   pre-commit install                          # the fast checks, on every `git commit`
+#   pre-commit install --hook-type pre-push     # the test suite, on every `git push`
 #
-# After that, `git commit` runs the test suite first and blocks the
-# commit if anything fails. Skip it for one commit with `git commit --no-verify`.
+# - On commit (a second): refuse to commit unresolved merge-conflict markers -- the check that would have stopped a
+#   half-finished merge from reaching origin.
+# - On push (a few minutes on one core, much less on several): the test suite, without the handful of tests marked
+#   `slow` (CI runs those). Skip for one command with `--no-verify`.
 repos:
   - repo: local
     hooks:
+      - id: no-conflict-markers
+        name: No unresolved merge-conflict markers
+        entry: python scripts/check_conflict_markers.py
+        language: system
+        types: [text]
+
       - id: pytest
-        name: Run test suite
-        entry: pytest -q
+        name: Run test suite (without the slow tests)
+        entry: pytest -q -n auto --dist worksteal -m "not slow" -x
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-push]
