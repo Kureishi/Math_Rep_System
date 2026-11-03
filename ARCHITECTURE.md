@@ -409,6 +409,12 @@ math-rep-system/
     ├── gr_waves.py                    # linearised gravity, TT plane waves, test masses, quadrupole formula, Peters inspiral
     ├── gr_plots.py                    # the Plotly figures for all of the above
     ├── gpu.py                         # optional CuPy backend: detection, auto/on/off, size thresholds, CPU fallback
+    ├── router.py                      # "Ask anything": weighted signals -> (mode, confidence, reason, prefill); optional LLM tie-break
+    ├── proof_card.py                  # trust verdict, equation audit, step badges, bundle replay (cli.py replay)
+    ├── discover.py                    # equation discovery: derivatives, library, STLSQ, BIC threshold, bootstrap, simulation check
+    ├── discover_plots.py              # Plotly figures for it
+    ├── showcase.py                    # Schwarzschild ray tracer (GPU-capable), orbits, Flamm surface, Ising critical movie
+    ├── showcase_plots.py              # Plotly figures for it
     ├── sm_common.py                   # StatMechError, the seed convention, autocorrelation time, jackknife
     ├── sm_partition.py                # Z, F, U, S, C from spectra with self-checks; ideal gas and the Gibbs paradox
     ├── sm_lattice.py                  # Metropolis Ising/Potts/XY, Binder crossings, FSS, exact 4x4 and transfer-matrix references

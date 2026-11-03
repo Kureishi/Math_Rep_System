@@ -4,6 +4,7 @@ The step-by-step solution section, split per feature: the step list, each target
 import streamlit as st
 import numpy as np
 import pandas as pd
+from modules import proof_card
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel, target_kind
 from modules.verifier import VerificationReport, _known_substitutions
@@ -35,6 +36,10 @@ from modules.workspace import Workspace
 def render_step_list(client: LMStudioClient, model: ProblemModel, report: VerificationReport, steps, target_name):
     """One target's heading, tutor-mode toggle, and the (optionally progressively revealed) steps."""
     st.markdown(f"#### Solving for `{target_name}`")
+    try:                      # a badge is an extra; failing to compute one must never hide the steps
+        audits = proof_card.audit_equations(model, report.sympy_numeric_answers)
+    except Exception:  # noqa: BLE001
+        audits = []
     if target_name in st.session_state.get("_graph_focus", ()):
         st.caption("📍 Selected in the dependency graph (Explore tab)")
 
@@ -74,6 +79,9 @@ def render_step_list(client: LMStudioClient, model: ProblemModel, report: Verifi
         if i > reveal_count:
             break
         st.markdown(f"**Step {i}: {step.description}**")
+        badge = proof_card.step_badge(step.description, target_name, report, audits)
+        if badge is not None:
+            st.caption(f"{badge.text()}" + (f" · {badge.detail}" if badge.detail else ""))
         st.latex(step.expression)
         if step.explanation:
             st.caption(step.explanation)

@@ -21,6 +21,7 @@ from ui.results.practice_tab import render_practice_tab
 from ui.results.solutions import render_ode_solution, render_recurrence_solution
 from ui.results.time_views import render_ode_time_views, render_map_views
 from ui.results.steps import render_step_by_step
+from ui.results.proof_card import render_proof_card
 
 
 def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, report: VerificationReport, problem_text: str) -> None:
@@ -30,6 +31,7 @@ def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, r
     st.divider()
     st.session_state["_graph_focus"] = []     # set again by the Explore tab if a graph node is selected
     render_confidence_banner(report)
+    render_proof_card(model, report)
     render_geometry_schematic(model)
     render_motion_diagram(model, report)
     render_share_button(model, report, st.session_state["steps"] or {})

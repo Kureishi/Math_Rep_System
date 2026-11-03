@@ -309,6 +309,29 @@ Markdown, PDF, Python, or a Jupyter notebook.
   - *Perturbation*: Rayleigh–Schrödinger corrections through third order in exact arithmetic (E¹ = 3/4,
     E² = −21/8, E³ = 333/16 for the quartic oscillator's ground state), compared with exact diagonalisation;
     the measured error slope per order is what catches a wrong coefficient.
+- **Ask anything** (the box at the top of the sidebar; `router.py`; no LLM involved). Type a question, an expression
+  or paste a table of numbers and it picks the mode, **says why**, and fills it in: the problem text, both expressions
+  to compare, the pasted data, the sides of a triangle. It jumps only when it is sure; otherwise it offers the likely
+  modes (and, if LM Studio is up, lets the model choose, accepting only a real mode). Ctrl/Cmd+Enter to submit.
+- **Proof card and Replay** (`proof_card.py`). Every solved problem opens with a trust verdict (✅ verified, 🟡 passed
+  with less behind it, ❌ failed) and a card listing what backs the answer **and what it does not establish**. An
+  equation audit substitutes the answer back into every original equation, and the solution steps carry badges where
+  something independent can be said about them. **Replay** (sidebar, Project, or `python cli.py replay bundle.json`)
+  re-runs every computed check in an exported bundle and reports any problem whose checks or answers no longer come
+  out the same; the independent re-solve asks the model, so it is not replayed. Exit code 1 on a mismatch, so it can
+  run in CI.
+- **Discover equations** (`🧭` mode; `discover.py`; no LLM involved). Give it a time series (a built-in example, a pasted
+  table or a CSV) and it finds the differential equations it obeys by sparse regression (SINDy): estimate derivatives,
+  build candidate terms, keep the sparsest combination that explains the motion, with the threshold chosen by BIC. The
+  result is checked as a hypothesis: derivative R², the discovered system **run forward against your data**, and the
+  stability of each term under resampling. Named laws are recognised (logistic growth, damped oscillator, Lotka-Volterra,
+  Lorenz). Needs the true law to be expressible with polynomial (optionally sin/cos) terms; the simulation check shows
+  when it is not.
+- **Visual showcase** (`🎬` mode; `showcase.py`; no LLM involved). A black hole's shadow and gravitational lensing
+  (every pixel's light ray traced through the Schwarzschild geometry; GPU-capable), a relativistic orbit drawn on Flamm's
+  embedding surface, and the Ising model below, at and above its critical temperature, side by side. Each is shown with
+  the number that says it is right: the shadow radius against the exact 3√3 M, the conserved quantity along the orbit and
+  its perihelion advance against 6π/p, the exact Onsager T_c.
 - **Copy buttons:** each answer, and each Monte Carlo summary, has a 📋 popover to copy
   it as plain text, with units, as LaTeX, or as Python (a value, or the function).
 - **Follow-up questions and tutor-mode guesses are saved with the problem**, so they

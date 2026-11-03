@@ -7,6 +7,7 @@ import time
 import streamlit as st
 from config import settings
 from modules import gpu
+from modules import router
 from modules.llm_client import LMStudioClient
 from modules.command_palette import search as palette_search
 from modules.project_bundle import export_bundle, import_bundle
@@ -54,6 +55,53 @@ class SidebarState:
     ok: bool
 
 
+def _go(route: "router.Route") -> None:
+    """Navigate to a route's mode and fill in what it prefills. Safe to call from a callback or before the mode radio is built
+    (the sidebar builds the box below ahead of the radio, so app_mode may be set directly)."""
+    st.session_state["app_mode"] = route.mode
+    for key, value in route.prefill.items():
+        st.session_state[key] = value
+    st.session_state["_ask_notice"] = f"→ {route.mode}: {route.reason}"
+    st.session_state.pop("_ask_last", None)
+
+
+def _ask_submitted() -> None:
+    """The 'Ask anything' box was submitted (Ctrl/Cmd+Enter): jump when sure, otherwise leave the choices for the person."""
+    query = st.session_state.get("ask_query", "")
+    if not query.strip():
+        st.session_state.pop("_ask_last", None)
+        st.session_state.pop("_ask_notice", None)
+        return
+    found = router.route(query)
+    if found.sure:
+        _go(found)
+    else:
+        st.session_state["_ask_last"] = found
+        st.session_state.pop("_ask_notice", None)
+
+
+def _render_ask_choices(client: LMStudioClient) -> None:
+    """What to show under the box: where it went and why, or (when unsure) the likely modes to pick from."""
+    notice = st.session_state.get("_ask_notice")
+    if notice and st.session_state.get("ask_query", "").strip():
+        st.caption(f"✨ {notice}")
+    found = st.session_state.get("_ask_last")
+    if found is None:
+        return
+    st.caption(f"Not sure where this belongs ({found.confidence:.0%} for the best guess: {found.reason}). Pick one:")
+    options = [found] + [router.Route(m, c, "you chose it", found.prefill if m == found.mode else {}) for m, c in found.alternatives[:2]]
+    for opt in options:
+        if st.button(f"{opt.mode}", key=f"ask_pick_{opt.mode}", width="stretch"):
+            _go(opt)
+            st.rerun()
+    if st.button("🤖 Let the language model choose", key="ask_llm", width="stretch"):
+        try:
+            _go(router.route_with_llm(st.session_state.get("ask_query", ""), client, found))
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001 -- LM Studio may be off; the choices above still work
+            st.warning(f"The language model could not be reached ({type(exc).__name__}).")
+
+
 def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
     """The whole left sidebar: command-palette jump box, dark-mode toggle, mode navigation,
     unit-system preference, LM Studio connection status, advanced settings, settings profiles,
@@ -70,6 +118,12 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         # near the top of this file. See command_palette.py for the fuzzy-
         # matching logic and why this is scoped to mode-level jumps only
         # (Streamlit's st.tabs() has no "jump to sub-tab" API to hook into).
+        st.text_area("✨ Ask anything", key="ask_query", height=68, on_change=_ask_submitted,
+                     placeholder="A question, an expression, or pasted data. Ctrl/Cmd+Enter to go.",
+                     help="Describe what you want, or paste a table of numbers: it picks the right mode and fills it in, "
+                          "and says why. When it is not sure it offers the likely modes instead of guessing. "
+                          "It works without the language model.")
+        _render_ask_choices(client)
         st.text_input("🔍 Jump to... (Ctrl/Cmd+K)", key="palette_query",
                        placeholder="e.g. heat equation, bayesian, curvature")
         palette_query = st.session_state.get("palette_query", "")
@@ -387,6 +441,15 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                 if (import_summary.history_imported or import_summary.chains_imported
                         or import_summary.workspace_imported):
                     st.rerun()
+
+            st.divider()
+            st.caption("**Replay**: re-run every computed check in a bundle and see whether each problem's checks and "
+                       "answers still come out the same (the independent re-solve asks the language model, so it is "
+                       "not replayed).")
+            replay_file = st.file_uploader("Bundle to replay", type=["json"], key="bundle_replay_upload")
+            if replay_file is not None and st.button("Replay checks", key="bundle_replay_button"):
+                from ui.results.proof_card import render_replay
+                render_replay(replay_file.getvalue().decode("utf-8"))
 
         st.divider()
         st.header("History")

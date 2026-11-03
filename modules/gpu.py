@@ -11,6 +11,8 @@ WHAT RUNS ON THE GPU (and why only these)
   * Lattice Metropolis sweeps (sm_lattice: Ising, Potts, XY): the checkerboard update is pure array arithmetic.
   * Random-matrix spectra (sm_randommatrix.spectra / wishart_spectra): batched eigenvalue solves. The matrices
     are still drawn on the CPU from the same seeded generators, so these results do not depend on the backend.
+  * Black-hole images (showcase.trace_rays): every pixel's light ray is integrated at once; deterministic, so the image
+    does not depend on the backend.
   Everything else stays on the CPU on purpose: SymPy (symbolic, single-threaded Python), adaptive ODE/geodesic
   integration (sequential), and the 1-D quantum / PDE grids (a few thousand points: the GPU would be slower than
   the launch overhead alone). LM Studio uses the GPU for the language model by itself (its own GPU-offload setting).
@@ -49,6 +51,7 @@ THRESHOLDS: dict[str, int] = {
     "langevin_paths": 100_000,        # paths in an ensemble
     "lattice_sites": 128 * 128,       # sites on the lattice
     "matrix_dim": 128,                # side of a random matrix
+    "raytrace_pixels": 250 * 250,     # rays in a black-hole image
 }
 
 

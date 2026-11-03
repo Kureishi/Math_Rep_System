@@ -14,6 +14,7 @@ Usage:
     python cli.py solve problems.json --output results.csv
     python cli.py solve --text "A car accelerates from 8 m/s to 20 m/s in 6 seconds. Find a." -o result.json
     python cli.py montecarlo problem.txt --target a --uncertain v_f:1.0 --samples 5000 --seed 42 -o samples.csv
+    python cli.py replay math_rep_project.json          # no LM Studio needed; exits 1 if any check or answer differs
 
 `problems.json` (for `solve`) is either a plain JSON array of problem-
 text strings, or an array of {"text": "...", "known_context": "..."}
@@ -185,6 +186,28 @@ def cmd_montecarlo(args) -> int:
     return 0
 
 
+def cmd_replay(args) -> int:
+    """Re-run every computed check in an exported project bundle and report whether each problem still comes out the
+    same. Needs no language model (the independent re-solve is not replayed). Exit 0 = everything reproduced."""
+    from modules.proof_card import replay_bundle
+    try:
+        text = Path(args.bundle).read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Cannot read {args.bundle}: {exc}", file=sys.stderr)
+        return 2
+    result = replay_bundle(text)
+    for err in result.errors:
+        print(f"error: {err}", file=sys.stderr)
+    for item in result.items:
+        print(f"[{item.status.upper()}] {item.title}")
+        if args.verbose or item.status != "reproduced":
+            for line in item.details:
+                print(f"    {line}")
+    counts = result.counts()
+    print(f"\n{counts['reproduced']} reproduced, {counts['differs']} differ, {counts['not replayable']} not replayable.")
+    return 0 if result.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mathrep",
@@ -215,6 +238,12 @@ def build_parser() -> argparse.ArgumentParser:
     mc_parser.add_argument("--output", "-o", help="Write the raw samples to this file (CSV or JSON).")
     mc_parser.add_argument("--format", choices=["csv", "json"], default="csv")
     mc_parser.set_defaults(func=cmd_montecarlo)
+
+    replay_parser = subparsers.add_parser(
+        "replay", help="Re-run the computed checks in an exported project bundle and report any difference.")
+    replay_parser.add_argument("bundle", help="Path to a project bundle (the JSON from Project -> Export).")
+    replay_parser.add_argument("--verbose", "-v", action="store_true", help="Also list the details of problems that reproduced.")
+    replay_parser.set_defaults(func=cmd_replay)
 
     return parser
 

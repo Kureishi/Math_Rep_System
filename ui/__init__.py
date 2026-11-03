@@ -53,6 +53,8 @@ PAGE_TARGETS: dict[str, tuple[str, str, bool]] = {
     "🌌 General relativity": ("ui.relativity", "render_relativity_tab", False),
     "🔥 Statistical mechanics": ("ui.statmech", "render_statmech_tab", False),
     "🧰 Numerics & verification lab": ("ui.lab", "render_lab_tab", False),
+    "🧭 Discover equations": ("ui.discover", "render_discover_tab", False),
+    "🎬 Visual showcase": ("ui.showcase", "render_showcase_tab", False),
     "📔 Research journal": ("ui.journal", "render_research_journal_tab", False),
     "🚀 Quick start": ("ui.quick_start", "render_quick_start_tab", False),
     "📐 Geometry": ("ui.geometry", "render_geometry_tab", False),
