@@ -33,6 +33,7 @@ RELATIVITY = "🌌 General relativity"
 STATMECH = "🔥 Statistical mechanics"
 QUANTUM = "⚛️ Quantum mechanics"
 DIMENSIONAL = "📐 Dimensional analysis"
+RECALL = "🔎 Have I solved this?"
 
 # Words naming a mode outright (heavier than an incidental keyword).
 _MODE_WORDS: dict[str, list[str]] = {
@@ -172,6 +173,11 @@ def route(query: str) -> Route:
     subject = re.search(r"black hole|lensing|shadow|photon ring|orbit|precess\w*|ising|critical point|embedding|flamm", text)
     if show and subject:
         add(SHOWCASE, 2.5, "asks to see a black hole, an orbit or the critical point")
+
+    if re.search(r"(?:have|did) i (?:already |ever )?(?:solved?|done|seen)|solved (?:this|that|it|something like)[^.?!]{0,20}before|"
+                 r"seen this (?:problem|before)|(?:similar|duplicate|old) (?:problems?|questions?) (?:to|in|from) (?:this|my)", text):
+        add(RECALL, 3.0, "asks whether you have solved something like this before")
+        prefill[RECALL] = {"recall_query": raw}
 
     if re.search(r"\bconvert\b|\bunits?\b|dimensionless|dimension of", text):
         add(DIMENSIONAL, 0.8, "about units")

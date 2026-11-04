@@ -244,6 +244,10 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         ok, msg, loaded_models = _lm_status(client)
         with st.expander("LM Studio", expanded=not ok):
             (st.success if ok else st.error)(msg)
+            if not ok:
+                st.button("🩺 Diagnose this", key="lm_diagnose", type="tertiary",
+                          on_click=lambda: st.session_state.update(app_mode="🩺 Health check"),
+                          help="Step-by-step checks with what to do about each problem.")
             st.button("Re-check connection", key="lm_recheck", type="tertiary",
                        icon=":material/refresh:",
                        on_click=lambda: st.session_state.pop("_lm_status", None))

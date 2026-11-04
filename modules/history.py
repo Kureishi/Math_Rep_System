@@ -307,6 +307,23 @@ def find_similar(model: ProblemModel, exclude_id: int | None = None,
     return [{**row_by_id[rid], "similarity": score} for rid, score in ranked]
 
 
+def list_corpus(limit: int = 2000) -> list[dict]:
+    """Every past problem as {id, timestamp, problem_text, domain, shape} (newest first), for searching the history. `shape` is
+    the stored equation-shape fingerprint as a frozenset, or None for rows saved before it existed."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, timestamp, problem_text, domain, equation_shapes FROM problems ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    out = []
+    for rid, ts, text, domain, shapes_json in rows:
+        try:
+            shape = frozenset(json.loads(shapes_json)) if shapes_json else None
+        except (TypeError, ValueError):
+            shape = None
+        out.append({"id": rid, "timestamp": ts, "problem_text": text, "domain": domain, "shape": shape or None})
+    return out
+
+
 def list_concepts(limit: int = 100) -> list[dict]:
     """Every distinct concept tag across all of history, with how many
     saved problems carry it, most-common first -- the browsable index

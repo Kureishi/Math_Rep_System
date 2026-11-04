@@ -8,6 +8,7 @@ reuse the official `openai` python SDK and just repoint base_url.
 """
 import base64
 import json
+import os
 import socket
 from urllib.parse import urlparse
 
@@ -48,6 +49,21 @@ def _server_reachable(base_url: str, timeout: float = _TCP_PROBE_TIMEOUT_S) -> b
             return True
     except OSError:
         return False
+
+
+# Model-name fragments that mark an embedding model (as opposed to a chat model) among what LM Studio has loaded.
+_EMBEDDING_HINTS = ("embed", "nomic", "bge-", "gte-", "e5-", "minilm", "mxbai", "arctic-embed")
+
+
+def pick_embedding_model(loaded: list[str], configured: str | None = None) -> str | None:
+    """The embedding model to use among the loaded models: the one named by LM_EMBEDDING_MODEL (or `configured`) if it is
+    loaded, else the first loaded model whose name looks like an embedding model, else None (semantic search is then
+    skipped and only the lexical and structural parts run). A configured name that is NOT loaded is not silently
+    swapped for another model: the person asked for a specific one."""
+    want = os.getenv("LM_EMBEDDING_MODEL", "").strip() if configured is None else configured.strip()
+    if want:
+        return want if want in loaded else None
+    return next((m for m in loaded if any(h in m.lower() for h in _EMBEDDING_HINTS)), None)
 
 
 class LMStudioClient:
@@ -92,6 +108,15 @@ class LMStudioClient:
             return sorted(m.id for m in self._probe.models.list().data)
         except Exception:  # noqa: BLE001
             return []
+
+    def embed(self, texts: list[str], model: str, batch_size: int = 32) -> list[list[float]]:
+        """Embedding vectors for `texts` from LM Studio's OpenAI-compatible /embeddings endpoint (needs an embedding model
+        loaded). Raises on failure: callers treat embeddings as an optional extra and fall back."""
+        out: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            resp = self._client.embeddings.create(model=model, input=texts[i:i + batch_size])
+            out.extend(list(d.embedding) for d in sorted(resp.data, key=lambda d: d.index))
+        return out
 
     def validate_model(self, model_name: str) -> tuple[bool, str]:
         """Checks model_name against what's actually loaded, distinguishing

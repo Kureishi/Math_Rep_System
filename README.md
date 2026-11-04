@@ -332,6 +332,34 @@ Markdown, PDF, Python, or a Jupyter notebook.
   embedding surface, and the Ising model below, at and above its critical temperature, side by side. Each is shown with
   the number that says it is right: the shadow radius against the exact 3√3 M, the conserved quantity along the orbit and
   its perihelion advance against 6π/p, the exact Onsager T_c.
+- **Problem sets** (`🧑‍🏫` mode; `problem_sets.py`; no LLM involved). Turns one solved problem into a set of practice problems
+  with different numbers, each with an answer key that **passed the app's own verification** (a variant that fails a check,
+  gives a negative time, or blows up is discarded and replaced). Values are drawn so the set really spans the range, written
+  the way the original writes them (a whole number stays whole, "2.0" keeps its decimal, "5%" stays a percentage), and the
+  wording is rewritten only when every changed number is unambiguous; otherwise the new values are listed under it, so a
+  statement can never disagree with its key. Export a worksheet (HTML/Markdown), an answer key, a re-gradable set file, and a
+  submissions template. **Grading** reads "12.5 m/s", "1.25e1", "1.25 x 10^1" or "12,5", scores by tolerance with partial credit
+  for "close", names the likely slip behind a wrong answer (sign, a missing ½, a power of ten, degrees against radians, the
+  answer to a different quantity, the original problem's numbers), and reports per student and per problem (share correct,
+  commonest mistake). A starter library of seven problems works with no history and no model.
+- **Posterior sampling (MCMC)** (`🎲` mode; `mcmc.py`; no LLM involved). The full uncertainty of a nonlinear fit, not just a
+  symmetric ±: an affine-invariant ensemble sampler (the algorithm behind emcee) started from a nonlinear least-squares fit,
+  with flat, bounded, normal or positive priors, the noise level sampled or given, a corner plot, walker traces, a
+  posterior-predictive band and CSV/Markdown export. Verification-first: it reports the acceptance fraction, the
+  autocorrelation time and effective sample size, split R-hat, and calls a run converged only when it is at least 50
+  autocorrelation times long; it checks that the model describes the data (residual structure, and predictive coverage when
+  the noise is known); it flags parameters whose posterior is visibly non-Gaussian; and it **detects an unbounded posterior**
+  (data that fix only a combination such as V/K) and says to bound the prior rather than reporting meaningless intervals.
+  Tested against an exactly known Gaussian posterior.
+- **Have I solved this before?** (`🔎` mode; `recall.py`). Searches your history by **meaning** (embeddings from an embedding
+  model loaded in LM Studio, cached so each problem is embedded once), by **wording** (numbers ignored, so the same problem
+  with different numbers matches) and by **equation shape**; each signal is optional, the score uses the ones available, and
+  each result says which matched. Without LM Studio it still works on wording and shape.
+- **Health check** (`🩺` mode; `health.py`). One page that checks Python, the packages against `requirements.txt`, the
+  symbolic engine, an end-to-end solve-and-verify self-test, the data folder and databases, LM Studio, the reasoning, vision
+  and embedding models, and GPU and LaTeX availability (and, if you ask, times a one-word model request), and for every problem
+  says what to do about it. A failure inside one check never stops the others; the sidebar offers it when LM Studio cannot be
+  reached; the plain-text report can be pasted into a bug report.
 - **Copy buttons:** each answer, and each Monte Carlo summary, has a 📋 popover to copy
   it as plain text, with units, as LaTeX, or as Python (a value, or the function).
 - **Follow-up questions and tutor-mode guesses are saved with the problem**, so they

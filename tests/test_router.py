@@ -135,3 +135,25 @@ def test_quantum_questions_that_name_no_quantum_word_still_find_quantum():
 def test_a_sentence_with_no_signal_does_not_get_a_fuzzy_name_match():
     r = rt.route("plot the function sin of x please")
     assert r.reason != "closest match by name" and not r.sure
+
+
+@pytest.mark.parametrize("query", ["have I solved this before? a car accelerates from 8 m/s to 20 m/s in 6 s",
+                                   "did I already solve something like this", "is there a similar problem in my history"])
+def test_questions_about_the_history_go_to_recall_with_the_text_prefilled(query):
+    r = rt.route(query)
+    assert r.mode == rt.RECALL and r.prefill == {"recall_query": query}
+
+
+@pytest.mark.parametrize("query, mode", [
+    ("make a worksheet of 10 practice problems with an answer key", "🧑‍🏫 Problem sets"),
+    ("posterior of my nonlinear fit with a corner plot", "🎲 Posterior sampling (MCMC)"),
+    ("what is the credible interval of the decay rate", "🎲 Posterior sampling (MCMC)"),
+    ("lm studio is not working, diagnose it", "🩺 Health check"),
+])
+def test_the_newer_modes_are_reachable_by_asking(query, mode):
+    assert mode in MODE_LABELS and modes(query) == mode
+
+
+def test_a_quiz_request_at_least_offers_problem_sets_among_its_choices():
+    r = rt.route("generate a quiz on kinematics")
+    assert "🧑‍🏫 Problem sets" in [r.mode] + [m for m, _ in r.alternatives]

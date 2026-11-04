@@ -415,6 +415,12 @@ math-rep-system/
     ├── discover_plots.py              # Plotly figures for it
     ├── showcase.py                    # Schwarzschild ray tracer (GPU-capable), orbits, Flamm surface, Ising critical movie
     ├── showcase_plots.py              # Plotly figures for it
+    ├── problem_sets.py                # verified problem-set generator + answer parsing + grading with mistake diagnosis
+    ├── problem_library.py             # starter solved problems so the generator needs no history or model
+    ├── mcmc.py                        # affine-invariant ensemble sampler, convergence + model-adequacy diagnostics
+    ├── mcmc_plots.py                  # corner / trace / predictive figures
+    ├── recall.py                      # 'Have I solved this?': wording + meaning (cached embeddings) + equation shape
+    ├── health.py                      # first-run health check: every check isolated, each failure with a fix
     ├── sm_common.py                   # StatMechError, the seed convention, autocorrelation time, jackknife
     ├── sm_partition.py                # Z, F, U, S, C from spectra with self-checks; ideal gas and the Gibbs paradox
     ├── sm_lattice.py                  # Metropolis Ising/Potts/XY, Binder crossings, FSS, exact 4x4 and transfer-matrix references
