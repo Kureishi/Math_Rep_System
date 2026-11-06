@@ -2,6 +2,7 @@
 Result sections that live in the main column of a solved problem: confidence banner, geometry schematic, send-to-chain, similar past problems, derived equations, matrix view, assumptions, variables, vector summary, follow-up Q&A, scenarios, export.
 """
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel, target_kind
@@ -82,7 +83,7 @@ def render_geometry_schematic(model: ProblemModel):
                             "triangles match these measurements.")
                     anim_fig = build_ssa_ambiguity_animation(geom_result.solutions[0], geom_result.solutions[1])
                     if anim_fig is not None:
-                        st.plotly_chart(anim_fig, width="stretch", key="word_problem_ssa_animation")
+                        show_figure(anim_fig, width="stretch", key="word_problem_ssa_animation")
                 for i, sol in enumerate(geom_result.solutions):
                     if len(geom_result.solutions) > 1:
                         st.markdown(f"**Solution {i + 1}**")
@@ -93,7 +94,7 @@ def render_geometry_schematic(model: ProblemModel):
                             st.metric(label, f"{val:.4g}")
                     fig = render_triangle(sol, title=f"Solution {i + 1}" if len(geom_result.solutions) > 1
                                            else "Triangle")
-                    st.plotly_chart(fig, width="stretch", key=f"word_problem_triangle_fig_{i}")
+                    show_figure(fig, width="stretch", key=f"word_problem_triangle_fig_{i}")
 
 
 def render_motion_diagram(model: ProblemModel, report: VerificationReport):
@@ -128,7 +129,7 @@ def render_motion_diagram(model: ProblemModel, report: VerificationReport):
             lambda: build_motion_diagram(trajectory.t_values, trajectory.x_values, trajectory.v_values,
                                          x_label=trajectory.x_label, x_unit=trajectory.x_unit,
                                          t_unit=trajectory.t_unit, a_values=a_values, n_strobes=n_strobes))
-        st.plotly_chart(fig, width="stretch", key="word_problem_motion_diagram")
+        show_figure(fig, width="stretch", key="word_problem_motion_diagram")
         gif_download_button(
             key="motion_diagram",
             file_stem="motion_diagram",
@@ -260,7 +261,7 @@ def render_derived_equations(model: ProblemModel):
                                             (min(xs_p) - pad_x, max(xs_p) + pad_x),
                                             (min(ys_p) - pad_y, max(ys_p) + pad_y),
                                             x_label=free_vars[0], y_label=free_vars[1])
-                                        st.plotly_chart(descent_fig, width="stretch",
+                                        show_figure(descent_fig, width="stretch",
                                                           key=f"descent_{'_'.join(free_vars)}")
                                 except Exception:  # noqa: BLE001
                                     pass
@@ -373,7 +374,7 @@ def render_vector_summary(model: ProblemModel, edited_values):
 
         for dim, vecs in plottable_by_dim.items():
             fig = build_vector_plot(vecs)
-            st.plotly_chart(fig, width='stretch')
+            show_figure(fig, width='stretch')
             snapshot_button(
                 key=f"vectors_{dim}d",
                 figure=fig,

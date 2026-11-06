@@ -3,6 +3,7 @@ import io
 
 import numpy as np
 import streamlit as st
+from ui.a11y import show_figure
 
 from modules import curve_fitting, mcmc
 from modules import mcmc_plots as mp
@@ -137,14 +138,14 @@ def render_posterior_tab() -> None:
     with tabs[0]:
         if len(r.names) > 6:
             st.caption("Showing the first 6 parameters.")
-        st.plotly_chart(mp.corner_figure(r, run["truth"]), width="stretch")
+        show_figure(mp.corner_figure(r, run["truth"]), width="stretch")
         st.caption("Contours: joint posterior of each pair. Red ×: the least-squares fit" + ("; green ◆: the true values." if run["truth"] else "."))
     with tabs[1]:
-        st.plotly_chart(mp.predictive_figure(r), width="stretch")
+        show_figure(mp.predictive_figure(r), width="stretch")
         st.caption(f"Residual structure along x: lag-1 correlation {r.residual_lag1:+.2f} (z = {r.residual_z:+.1f}; |z| above 3 means the model "
                    "leaves a pattern unexplained).")
     with tabs[2]:
-        st.plotly_chart(mp.trace_figure(r), width="stretch")
+        show_figure(mp.trace_figure(r), width="stretch")
     with tabs[3]:
         st.download_button("⬇️ Samples (CSV)", data=_samples_csv(r), file_name="posterior_samples.csv", key="post_dl_csv")
         st.download_button("⬇️ Summary (Markdown)", data=_summary_markdown(r, run["expr"]), file_name="posterior_summary.md", key="post_dl_md")

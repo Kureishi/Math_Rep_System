@@ -4,6 +4,7 @@ The Explore tab of a solved problem: dependency graph, bulk uncertainty, paramet
 from typing import Any
 
 import streamlit as st
+from ui.a11y import show_figure
 import numpy as np
 import pandas as pd
 from modules.equation_engine import ProblemModel, Variable, target_kind
@@ -111,7 +112,7 @@ def render_dependency_and_sweeps(model: ProblemModel, tab_explore):
                                 "implied by the dependencies -- the earliest each quantity can be found "
                                 "from the givens -- rather than a trace of the solver's own internal steps.")
                     frames = replay_frames(dep_nodes, dep_edges, stages)
-                    st.plotly_chart(cached("solve_order_replay", (dep_nodes, dep_edges, frames),
+                    show_figure(cached("solve_order_replay", (dep_nodes, dep_edges, frames),
                                            lambda: build_solve_order_replay(dep_nodes, dep_edges, frames)),
                                      width="stretch", key="solve_order_replay")
                     st.markdown("\n".join(f"{i}. {describe_stage(s, dep_nodes)}" for i, s in enumerate(stages, 1)))
@@ -382,7 +383,7 @@ def _interactive_plot_panel(model: ProblemModel, edited_values):
                           help="A static 3D view can be hard to read from one fixed angle -- "
                                 "orbiting it makes which bumps are peaks vs. dips much clearer."):
                 fig = add_camera_rotation(fig)
-            st.plotly_chart(fig, width='stretch')
+            show_figure(fig, width='stretch')
 
             surf_caption = (
                 f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}] | "
@@ -453,7 +454,7 @@ def _interactive_plot_panel(model: ProblemModel, edited_values):
 
             fig = build_contour_plot(eq_choice, x_symbol, y_symbol, param_values, x_range, y_range,
                                        z_target=z_target)
-            st.plotly_chart(fig, width='stretch')
+            show_figure(fig, width='stretch')
             st.caption("Same relationship as the 3D surface, viewed from directly above as level "
                         "lines -- often easier to read exact values off of, with no rotation needed.")
 
@@ -522,7 +523,7 @@ def _interactive_plot_panel(model: ProblemModel, edited_values):
 
             fig = build_plot(model, eq_choice, x_symbol, param_values, x_range, y_target=y_target,
                                x_log=x_log, y_log=y_log)
-            st.plotly_chart(fig, width='stretch')
+            show_figure(fig, width='stretch')
 
             line_caption = (
                 f"Equation: {eq_choice.name} | x={x_symbol} [{x_range[0]:g}, {x_range[1]:g}]"
@@ -589,7 +590,7 @@ def _interactive_plot_panel(model: ProblemModel, edited_values):
             if chosen:
                 fig = build_feasible_region_plot(chosen, region_x, region_y, region_params,
                                                    region_x_range, region_y_range)
-                st.plotly_chart(fig, width='stretch')
+                show_figure(fig, width='stretch')
 
                 region_caption = (
                     f"Constraints: {', '.join(c.name for c in chosen)} | x={region_x} "

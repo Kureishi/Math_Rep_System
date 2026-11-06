@@ -1,6 +1,7 @@
 """
 Plotly figures for the cross-cutting numerics tools -- Streamlit-free. Each takes a result object of its module and returns a plain go.Figure.
 """
+from modules.palette import CATEGORICAL
 import math
 
 import numpy as np
@@ -11,7 +12,7 @@ from modules.cc_convergence import ConvergenceResult
 from modules.cc_conservation import IntegratorComparison
 from modules.cc_hamiltonian import PhasePortrait, PoincareSection
 
-_PAL = ["#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#B279A2", "#FF9DA6", "#9D755D"]
+_PAL = CATEGORICAL
 
 
 def drift_figure(reports: list[DriftReport], title: str = "Drift of the monitored quantities") -> go.Figure:

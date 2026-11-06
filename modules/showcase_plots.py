@@ -1,4 +1,5 @@
 """Plotly figures for the visual showpieces -- Streamlit-free, plain go.Figure like modules/sm_plots.py."""
+from modules.palette import BLUE, PURPLE, VERMILLION
 import math
 
 import numpy as np
@@ -8,7 +9,7 @@ from plotly.subplots import make_subplots
 from modules.plotter import _frame_indices, _play_layout
 from modules.showcase import CriticalMovie, LensImage, Orbit, flamm_surface, flamm_z
 
-_PAL = ["#4C78A8", "#F58518", "#E45756"]
+_PAL = [BLUE, PURPLE, VERMILLION]          # cold / orbit / hot or body: three colours that stay apart for every reader
 
 
 def lens_figure(img: LensImage, with_hole: bool = True, show_shadow_edge: bool = True) -> go.Figure:
@@ -30,7 +31,7 @@ def orbit_figure(orb: Orbit, n_frames: int = 60) -> go.Figure:
     sx, sy, sz = flamm_surface(r_max, orb.M)
     z = flamm_z(orb.r, orb.M)
     fig = go.Figure([
-        go.Surface(x=sx, y=sy, z=-sz, opacity=0.55, showscale=False, colorscale=[[0, "#B8C4D6"], [1, "#4C78A8"]],
+        go.Surface(x=sx, y=sy, z=-sz, opacity=0.55, showscale=False, colorscale=[[0, "#B8C4D6"], [1, "#0072B2"]],
                    contours=dict(x=dict(show=False), y=dict(show=False), z=dict(show=False)), name="space"),
         go.Scatter3d(x=orb.x, y=orb.y, z=-z, mode="lines", line=dict(color=_PAL[1], width=5), name="orbit"),
         go.Scatter3d(x=[orb.x[0]], y=[orb.y[0]], z=[-z[0]], mode="markers", marker=dict(size=7, color=_PAL[2]), name="body"),

@@ -243,6 +243,18 @@ def check_gpu() -> Check:
                  "" if backend.is_gpu else "Optional: see requirements-gpu.txt")
 
 
+def check_plugins() -> Check:
+    """Mode files that failed to load (a broken plugin is skipped, never fatal) and how many plugin modes are active."""
+    from modules.mode_registry import REGISTRY
+    if REGISTRY.errors:
+        return Check("plugins", "Mode files", "warn", f"{len(REGISTRY.errors)} problem(s): " + " | ".join(REGISTRY.errors[:4]) +
+                     (" ..." if len(REGISTRY.errors) > 4 else ""),
+                     "Fix or delete the named file; the rest of the app is unaffected. See plugins/README.md.")
+    n = len(REGISTRY.plugin_labels)
+    return Check("plugins", "Mode files", "ok" if n else "info",
+                 f"{len(REGISTRY.specs)} modes loaded" + (f", {n} from plugins/ ({', '.join(REGISTRY.plugin_labels)})" if n else " (no plugins installed)"))
+
+
 def check_latex() -> Check:
     found = shutil.which("pdflatex") or shutil.which("xelatex") or shutil.which("lualatex")
     return Check("latex", "LaTeX (PDF reports)", "ok" if found else "info", f"found {Path(found).name}" if found else
@@ -272,6 +284,7 @@ def run_checks(client: Any = None, include_llm_round_trip: bool = False, data_di
         ("pipeline", "Solve-and-verify pipeline", check_pipeline),
         ("data", "Data folder", lambda: check_data_folder(data_dir)),
         ("databases", "Databases", check_databases),
+        ("plugins", "Mode files", check_plugins),
         ("lm_studio", "LM Studio", lambda: check_lm_studio(client)),
     ):
         checks += _guard(check_id, title, fn)

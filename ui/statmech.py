@@ -17,12 +17,14 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 
 from modules import (sm_distributions, sm_lattice, sm_meanfield, sm_partition, sm_plots, sm_randommatrix, sm_stochastic)
 from modules.sm_common import StatMechError
 from ui.common import persist_on_click
 from ui.quantum import render_checks
+from ui.theme import backend_chip
 
 
 def _num(label: str, value: float, key: str, **kw) -> float:
@@ -136,8 +138,8 @@ def _partition_tab() -> None:
         return
     st.caption(sm_partition.tail_report(spec, hi) + f". Ground-state energy {th.ground:g}, degeneracy {th.g0:g}.")
     render_checks(sm_partition.verify_thermo(spec, th))
-    st.plotly_chart(sm_plots.thermo_figure(th, spec), width="stretch")
-    st.plotly_chart(sm_plots.populations_figure(th), width="stretch")
+    show_figure(sm_plots.thermo_figure(th, spec), width="stretch")
+    show_figure(sm_plots.populations_figure(th), width="stretch")
     if spec.closed_form is not None:
         with st.expander("Closed forms"):
             for k, v in spec.closed_form.latex.items():
@@ -169,7 +171,7 @@ def _ideal_gas_panel() -> None:
     fig.add_trace(go.Scatter(x=gas.kT, y=gas.S_sackur_tetrode, name="Sackur–Tetrode", line=dict(dash="dash")))
     fig.add_trace(go.Scatter(x=gas.kT, y=gas.S_without_gibbs_factor, name="without the 1/N! factor", line=dict(dash="dot")))
     fig.update_layout(xaxis_title="kT", yaxis_title="S / k", title="Entropy of the ideal gas (the Gibbs paradox)", height=380)
-    st.plotly_chart(fig, width="stretch")
+    show_figure(fig, width="stretch")
 
 
 # ================================================================================ 2. lattice Monte Carlo
@@ -229,8 +231,9 @@ def _live_lattice() -> None:
         st.error(res)
     else:
         st.caption(f"Seed {res.seed}, acceptance rate {res.acceptance:.3f}.")
-        st.plotly_chart(sm_plots.lattice_animation_figure(res), width="stretch")
-        st.plotly_chart(sm_plots.series_figure(res), width="stretch")
+        backend_chip(res.backend)
+        show_figure(sm_plots.lattice_animation_figure(res), width="stretch")
+        show_figure(sm_plots.series_figure(res), width="stretch")
 
 
 def _lattice_scan() -> None:
@@ -284,7 +287,8 @@ def _lattice_scan() -> None:
         return
     lm0 = sm_lattice.LatticeModel(model, 4, 1.0, h, q)
     tc, src = sm_lattice.critical_temperature(lm0)
-    st.plotly_chart(sm_plots.lattice_scan_figure(scans, tc), width="stretch")
+    backend_chip(next(iter(scans.values())).backend)
+    show_figure(sm_plots.lattice_scan_figure(scans, tc), width="stretch")
     short = [(L, p.T) for L, sc in scans.items() for p in sc.points if not p.run_long_enough]
     if short:
         st.warning(f"{len(short)} point(s) have fewer than 50 autocorrelation times of data (near T_c the autocorrelation time grows like L^z): "
@@ -304,7 +308,7 @@ def _lattice_scan() -> None:
                 ge = f" ± {fit.gamma_err:.3f}" if fit.gamma_err is not None else ""
                 be = f" ± {fit.beta_err:.3f}" if fit.beta_err is not None else ""
                 st.write(f"**Finite-size scaling at T_c = {est.tc:.3f}:**  γ/ν = {fit.gamma_over_nu:.3f}{ge} (exact 7/4 = 1.75),  β/ν = {fit.beta_over_nu:.3f}{be} (exact 1/8 = 0.125)")
-                st.plotly_chart(sm_plots.fss_figure(fit), width="stretch")
+                show_figure(sm_plots.fss_figure(fit), width="stretch")
     st.caption("Seeds: " + ", ".join(f"L={L}: {sc.seed}" for L, sc in sorted(scans.items())))
 
 
@@ -363,7 +367,7 @@ def _meanfield_tab() -> None:
         tmax = _num("Plot up to T / J", 5.0, "smm_tmax", min_value=1.0)
     T = np.linspace(0.3, tmax, 120)
     cv = sm_meanfield.compare_curves(T, z)
-    st.plotly_chart(sm_plots.meanfield_figure(cv, sm_meanfield.mf_tc(z), sm_meanfield.bethe_tc(z), sm_meanfield.onsager_tc(), None), width="stretch")
+    show_figure(sm_plots.meanfield_figure(cv, sm_meanfield.mf_tc(z), sm_meanfield.bethe_tc(z), sm_meanfield.onsager_tc(), None), width="stretch")
     fs = sm_meanfield.failure_summary(z)
     st.dataframe(pd.DataFrame(fs.rows, columns=["quantity", "mean field", "Bethe", "exact"]), hide_index=True, width="stretch")
     render_checks(fs.checks, "Cross-checks of the exact solutions and the approximations")
@@ -372,7 +376,7 @@ def _meanfield_tab() -> None:
     with st.expander("Landau free energy f(m) of mean field"):
         ts = [0.5 * sm_meanfield.mf_tc(z), 0.9 * sm_meanfield.mf_tc(z), sm_meanfield.mf_tc(z), 1.3 * sm_meanfield.mf_tc(z)]
         m = np.linspace(-0.999, 0.999, 800)
-        st.plotly_chart(sm_plots.landau_figure(m, {t: sm_meanfield.mf_landau_free_energy(m, t, 0.0, z) for t in ts}), width="stretch")
+        show_figure(sm_plots.landau_figure(m, {t: sm_meanfield.mf_landau_free_energy(m, t, 0.0, z) for t in ts}), width="stretch")
     st.write("---")
     st.write("**Overlay a Monte Carlo scan** on the same axes (Ising, L = 16, zero field):")
     seed = _seed("smm_seed")
@@ -385,7 +389,7 @@ def _meanfield_tab() -> None:
     out = persist_on_click("Run Monte Carlo overlay", "smm_run", "smm_result", True, run, run_label="Monte Carlo overlay", stoppable=True)
     mc = _fresh(out, sig)
     if mc is not None:
-        st.plotly_chart(sm_plots.meanfield_figure(cv, sm_meanfield.mf_tc(z), sm_meanfield.bethe_tc(z), sm_meanfield.onsager_tc(), mc), width="stretch")
+        show_figure(sm_plots.meanfield_figure(cv, sm_meanfield.mf_tc(z), sm_meanfield.bethe_tc(z), sm_meanfield.onsager_tc(), mc), width="stretch")
         st.caption(f"Seed {mc.seed}. The 16×16 data rounds the transition; they follow the exact curve, not mean field.")
 
 
@@ -400,7 +404,7 @@ def _distributions_tab() -> None:
         with c2:
             T = _num("T", 1.0, "smd_T", min_value=0.01, step=0.1)
         eps = np.linspace(max(mu, -2) + 1e-3, 10.0 * T + max(mu, 0), 500)
-        st.plotly_chart(sm_plots.occupation_figure(eps, mu, T), width="stretch")
+        show_figure(sm_plots.occupation_figure(eps, mu, T), width="stretch")
         st.caption("Bose–Einstein is drawn only for ε > μ. Far above μ all three coincide: that is the classical limit.")
     with sub[1]:
         c1, c2, c3 = st.columns(3)
@@ -421,9 +425,9 @@ def _distributions_tab() -> None:
                                         "condensate fraction": s.condensate_fraction} for k, s in rep.states.items()]), hide_index=True, width="stretch")
             render_checks(rep.checks, "Consistency checks")
             temps, mus = _cached_mu_curves(n, 0.2 * T, 3 * T, g)
-            st.plotly_chart(sm_plots.mu_figure(temps, mus, sm_distributions.bec_critical_temperature(n, g)), width="stretch")
+            show_figure(sm_plots.mu_figure(temps, mus, sm_distributions.bec_critical_temperature(n, g)), width="stretch")
             x, eos = _cached_eos(g)
-            st.plotly_chart(sm_plots.eos_figure(x, eos), width="stretch")
+            show_figure(sm_plots.eos_figure(x, eos), width="stretch")
     with sub[2]:
         c1, c2 = st.columns(2)
         with c1:
@@ -442,7 +446,7 @@ def _distributions_tab() -> None:
             render_checks(ck)
         v = np.linspace(0, 6 * math.sqrt(T), 400)
         rng = np.random.default_rng(sm_distributions.resolve_seed(seed if seed is not None else 0))
-        st.plotly_chart(sm_plots.mb_figure(v, T, np.linalg.norm(rng.normal(0, math.sqrt(T), (20000, 3)), axis=1)), width="stretch")
+        show_figure(sm_plots.mb_figure(v, T, np.linalg.norm(rng.normal(0, math.sqrt(T), (20000, 3)), axis=1)), width="stretch")
 
 
 # ================================================================================ 5. stochastic dynamics
@@ -521,8 +525,9 @@ def _langevin_panel() -> None:
         st.error(res)
         return
     st.caption(f"Seed {res.seed}.")
-    st.plotly_chart(sm_plots.paths_figure(res), width="stretch")
-    st.plotly_chart(sm_plots.msd_figure(res), width="stretch")
+    backend_chip(res.backend)
+    show_figure(sm_plots.paths_figure(res), width="stretch")
+    show_figure(sm_plots.msd_figure(res), width="stretch")
     ck = sm_stochastic.equipartition_checks(res, k)
     if pot.text.strip() != "0" and res.t[-1] > 5 * gamma / (k or 1.0):
         d, p = sm_stochastic.boltzmann_ks(res.x[-1], pot, kT)
@@ -624,7 +629,7 @@ def _fp_panel() -> None:
         exact = {j: sm_stochastic.ou_exact(sol.x, float(sol.t[j]), x0, s0, kT, gamma, k) for j in range(len(sol.t))}
         err = max(float(np.max(np.abs(sol.P[j] - exact[j]))) for j in range(len(sol.t)))
         ck.add("Fokker–Planck solution = exact Ornstein–Uhlenbeck Gaussian at every output time", err < 5e-3 * float(sol.P.max()), f"max |P_FP − P_exact| = {err:.2e}")
-    st.plotly_chart(sm_plots.fp_figure(sol, res, exact), width="stretch")
+    show_figure(sm_plots.fp_figure(sol, res, exact), width="stretch")
     render_checks(sol.checks, "Fokker–Planck solver checks")
     render_checks(ck, "Fokker–Planck against Langevin")
     st.caption(f"Langevin seed {res.seed}.")
@@ -648,12 +653,13 @@ def _rmt_tab() -> None:
             st.error(err)
             return
         st.caption(f"Seed {rep.seed}. {len(rep.spacings)} unfolded spacings from the central 80% of each spectrum.")
+        backend_chip(rep.backend)
         render_checks(rep.checks)
         c1, c2 = st.columns(2)
         with c1:
-            st.plotly_chart(sm_plots.density_figure(rep.eigenvalues, kind), width="stretch")
+            show_figure(sm_plots.density_figure(rep.eigenvalues, kind), width="stretch")
         with c2:
-            st.plotly_chart(sm_plots.spacing_figure(rep.spacings, kind), width="stretch")
+            show_figure(sm_plots.spacing_figure(rep.spacings, kind), width="stretch")
         st.dataframe(pd.DataFrame([{"reference law": k, "KS distance": d, "nearest": "◀" if k == rep.nearest else ""} for k, d in rep.distances.items()]),
                      hide_index=True, width="stretch")
         st.write(f"**Ratio statistic** ⟨r̃⟩ = {rep.ratio:.4f}  (Poisson 0.3863 exact, GOE 0.5307, GUE 0.5996 literature)")
@@ -675,7 +681,7 @@ def _rmt_tab() -> None:
         ck, eigs, used = out
         st.caption(f"Seed {used}.")
         render_checks(ck)
-        st.plotly_chart(sm_plots.wishart_figure(eigs, p / n), width="stretch")
+        show_figure(sm_plots.wishart_figure(eigs, p / n), width="stretch")
 
 
 # ================================================================================ page

@@ -5,6 +5,7 @@ module and nothing else, so the same figure appears in the app and in an exporte
 They are plain `go.Figure`s with no styling beyond what makes them readable, because the app's theme and the
 HTML report each apply their own.
 """
+from modules.palette import CATEGORICAL, INK
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -15,7 +16,7 @@ from modules.quantum_operators import BCHResult
 from modules.quantum_perturbation import Comparison
 from modules.quantum_qubits import QubitRun, bloch_to_density
 
-_PALETTE = ["#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#B279A2", "#FF9DA6", "#9D755D", "#BAB0AC", "#EECA3B"]
+_PALETTE = CATEGORICAL
 
 
 # ------------------------------------------------------------------------------------------ eigenstates
@@ -147,7 +148,7 @@ def transmission_figure(result: DynamicsResult, hbar: float = 1.0, mass: float =
                                  marker=dict(size=13, symbol="diamond", color=_PALETTE[1])))
         if "right" in result.final_probabilities:
             fig.add_trace(go.Scatter(x=[e_centre], y=[result.final_probabilities["right"]], mode="markers", name="T from the simulation",
-                                     marker=dict(size=12, symbol="x", color="black")))
+                                     marker=dict(size=12, symbol="x", color=INK)))
     fig.update_layout(title="Transmission through the potential", xaxis_title="energy E", yaxis_title="probability", yaxis=dict(range=[-0.02, 1.05]))
     return fig
 
@@ -256,7 +257,7 @@ def relaxation_figure(times: np.ndarray, t1_values: np.ndarray, ramsey_values: n
 
 def perturbation_energy_figure(comp: Comparison) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=comp.lambdas, y=comp.exact, name="exact", mode="lines+markers", line=dict(color="black", width=3)))
+    fig.add_trace(go.Scatter(x=comp.lambdas, y=comp.exact, name="exact", mode="lines+markers", line=dict(color=INK, width=3)))
     for k, color in zip(sorted(comp.series), (_PALETTE[0], _PALETTE[1], _PALETTE[2])):
         fig.add_trace(go.Scatter(x=comp.lambdas, y=comp.series[k], name=f"through order {k}", mode="lines", line=dict(color=color, dash="dash")))
     fig.update_layout(title=f"Level {comp.level}: exact energy and perturbative orders", xaxis_title="λ", yaxis_title="E")

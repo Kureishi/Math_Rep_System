@@ -18,6 +18,7 @@ import math
 import numpy as np
 import pandas as pd
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 
 from modules import (cc_common, cc_conservation, cc_convergence, cc_crossval, cc_hamiltonian, cc_limits, cc_nondim, cc_notebook, cc_plots)
@@ -114,8 +115,8 @@ def _invariants_panel() -> None:
         st.caption(("✅ " if inv.verified_exactly else "⚠️ ") + inv.note)
     st.dataframe(pd.DataFrame([{"quantity": r.name, "max |drift|": r.max_abs, "relative": r.max_rel, "behaviour": r.kind} for r in mon.reports]), hide_index=True, width="stretch")
     render_checks(cc_common.reports_to_checks(mon.reports, 10.0 ** -(tol_exp - 2)), "Drift along the numerical solution")
-    st.plotly_chart(cc_plots.drift_figure(mon.reports), width="stretch")
-    st.plotly_chart(cc_plots.trajectory_figure(mon.t, mon.y, names), width="stretch")
+    show_figure(cc_plots.drift_figure(mon.reports), width="stretch")
+    show_figure(cc_plots.trajectory_figure(mon.t, mon.y, names), width="stretch")
 
 
 def _symplectic_panel() -> None:
@@ -162,7 +163,7 @@ def _symplectic_panel() -> None:
                                 "RHS evaluations": r.n_rhs, "error at t_end": r.end_error} for r in cmp.runs]), hide_index=True, width="stretch")
     for note in cmp.notes:
         st.caption(note)
-    st.plotly_chart(cc_plots.integrator_figure(cmp), width="stretch")
+    show_figure(cc_plots.integrator_figure(cmp), width="stretch")
     st.caption("The error at t_end is the distance in phase space from a DOP853 reference at rtol 1e-13. A symplectic method may have a larger PHASE error and "
                "a much better ENERGY behaviour: the two are different questions.")
 
@@ -205,7 +206,7 @@ def _existing_panel() -> None:
     reps, tol, note = reps
     st.caption(note)
     render_checks(cc_common.reports_to_checks(reps, tol), f"Drift (tolerance {tol:g}, relative)")
-    st.plotly_chart(cc_plots.drift_figure(reps), width="stretch")
+    show_figure(cc_plots.drift_figure(reps), width="stretch")
 
 
 def _conserved_tab() -> None:
@@ -291,7 +292,7 @@ def _convergence_tab() -> None:
              "at rounding floor": "yes" if res.at_floor[k] else ""} for k in range(len(res.h))]
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     render_checks(res.checks)
-    st.plotly_chart(cc_plots.convergence_figure(res), width="stretch")
+    show_figure(cc_plots.convergence_figure(res), width="stretch")
     st.caption("The 'pairwise order' needs no exact answer: it comes from the ratio of successive differences. Error basis: " + res.error_basis + ".")
 
 
@@ -374,7 +375,7 @@ def _hamiltonian_tab() -> None:
         if e4:
             st.error(e4)
         elif pp is not None:
-            st.plotly_chart(cc_plots.phase_portrait_figure(pp, sys_.coords[0]), width="stretch")
+            show_figure(cc_plots.phase_portrait_figure(pp, sys_.coords[0]), width="stretch")
     elif n == 2:
         _poincare_panel(sys_)
 
@@ -422,7 +423,7 @@ def _poincare_panel(sys_) -> None:
     if skipped:
         st.caption("Not accessible at this energy: " + ", ".join(f"{v:g}" for v in skipped))
     st.caption(f"Largest energy error over all crossings: {max(ps.energy_errors):.1e} (a measure of integration accuracy).")
-    st.plotly_chart(cc_plots.poincare_figure(ps), width="stretch")
+    show_figure(cc_plots.poincare_figure(ps), width="stretch")
 
 
 # ================================================================================ 4. nondimensionalise
@@ -535,7 +536,7 @@ def _limits_tab() -> None:
         st.write("**Expansion**")
         st.code(rep.series_text, language="text")
     render_checks(rep.checks)
-    st.plotly_chart(cc_plots.limit_figure(rep.table, "0" if choice == "custom" and to == "0" else cc_limits.LIMITS[choice].to if choice != "custom" else "oo"), width="stretch")
+    show_figure(cc_plots.limit_figure(rep.table, "0" if choice == "custom" and to == "0" else cc_limits.LIMITS[choice].to if choice != "custom" else "oo"), width="stretch")
     st.write("---")
     st.write("**Large-N limits**")
     key = st.selectbox("Check", list(cc_limits.LARGE_N), key="lab_ln_key", format_func=lambda k: cc_limits.LARGE_N[k].title)
@@ -650,7 +651,7 @@ def _crossval_tab() -> None:
         st.caption(f"Numerical route: {r.numeric_method}. " + r.detail)
         if r.task == "ode" and r.symbolic_value is not None and r.numeric_value is not None:
             num = np.asarray(r.numeric_value)
-            st.plotly_chart(cc_plots.crossval_figure(np.linspace(0, 1, len(num)), np.asarray(r.symbolic_value), num), width="stretch")
+            show_figure(cc_plots.crossval_figure(np.linspace(0, 1, len(num)), np.asarray(r.symbolic_value), num), width="stretch")
         if isinstance(r.symbolic_value, list) and r.task == "roots":
             st.write("Symbolic roots in range:", r.symbolic_value, " Numerical roots:", r.numeric_value)
         render_checks(r.checks)

@@ -106,6 +106,7 @@ math-rep-system/
 │                              #   every one of the Streamlit app's modes, see its
 │                              #   own module docstring for which and why
 ├── config.py                 # LM Studio endpoint/model settings, tunables
+├── plugins/                   # your own modes, one file each (git-ignored; see plugins/README.md)
 ├── scripts/                   # repository hygiene, stdlib only: check_conflict_markers.py (CI, pre-commit, tests)
 │                              #   and apply_delivery.py (apply a delivered snapshot without forking history)
 ├── requirements.txt
@@ -127,9 +128,11 @@ math-rep-system/
 │   │                          #   app.py falls through to), built lazily -- a page's own
 │   │                          #   module is only imported the first time its mode is
 │   │                          #   selected, so opening the app doesn't pay for every
-│   │                          #   page's imports up front; command_palette.MODE_LABELS
-│   │                          #   is the actual source of truth for the mode list itself,
-│   │                          #   with tests/test_app_modes.py enforcing the two can't drift
+│   │                          #   page's imports up front. The mode list itself is declared
+│   │                          #   one file per mode in modules/modes/ (see mode_registry.py);
+│   │                          #   this table, the sidebar and the palette are derived from it
+│   ├── a11y.py                  # show_figure: every chart goes through it (theme, colour-blind-safe
+│   │                          #   colours, text description for screen readers)
 │   ├── common.py                # helpers shared by several pages (upload-size guard,
 │   │                          #   snapshot/download buttons, query-param syncing, ...)
 │   ├── cache.py                 # per-session cache keyed by the CONTENT of a result's inputs, so
@@ -362,9 +365,12 @@ math-rep-system/
     │                                 #   live in the browser
     ├── templates.py                   # named, savable/loadable presets of a mode's INPUT
     │                                 #   fields (SQLite-backed, like history.py)
-    ├── command_palette.py             # fuzzy search over the app's navigable targets;
-    │                                 #   MODE_LABELS here is the single source of truth for
-    │                                 #   the sidebar's mode list (see ui/__init__.py)
+    ├── command_palette.py             # fuzzy search over the app's navigable targets; its entries and
+    │                                 #   MODE_LABELS are DERIVED from the mode declarations (mode_registry.py)
+    ├── mode_spec.py                   # ModeSpec: the declaration of one mode (label, keywords, page, order)
+    ├── mode_registry.py               # discovers modules/modes/*.py and plugins/*.py; a broken file is skipped and reported
+    ├── modes/                         # one tiny declaration file per built-in mode: add a mode by adding a file
+    ├── palette.py                     # colour-blind-safe palette, contrast / colour-difference tools, chart descriptions
     ├── db_migrations.py               # lightweight, dependency-free schema-migration
     │                                 #   framework: a numbered, idempotent migration list
     │                                 #   applied to every SQLite-backed module (history,

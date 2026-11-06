@@ -238,15 +238,18 @@ class RandomMatrixReport:
     moments: dict[int, tuple[float, float]]
     seed: int
     checks: CheckList = field(default_factory=CheckList)
+    backend: str = "CPU (NumPy)"           # where the eigenvalues were computed
 
 
 def analyse(kind: str, N: int, n_samples: int, seed: int | None = None) -> RandomMatrixReport:
+    gpu.reset_last()
     eigs, seed = spectra(kind, N, n_samples, seed)
+    used = gpu.last_used() or gpu.CPU.name
     sp = unfolded_spacings(eigs)
     nearest, dist = classify(sp)
     ratio = ratio_statistic(eigs)
     mom = empirical_moments(eigs)
-    rep = RandomMatrixReport(kind, N, eigs, sp, dist, nearest, ratio, mom, seed)
+    rep = RandomMatrixReport(kind, N, eigs, sp, dist, nearest, ratio, mom, seed, backend=used)
     ck = rep.checks
     pooled = np.sort(eigs.ravel())
     ks = kstest(pooled, lambda x: semicircle_cdf(x))

@@ -1,6 +1,7 @@
 """The Discover mode: find the differential equations a time series obeys (modules/discover.py). No language model."""
 import numpy as np
 import streamlit as st
+from ui.a11y import show_figure
 
 from modules import discover as dc
 from modules import discover_plots as dp
@@ -104,20 +105,20 @@ def render_discover_tab() -> None:
 
     tabs = st.tabs(["Fit against data", "Terms", "Sparsity path", "Stability", "Export"])
     with tabs[0]:
-        st.plotly_chart(dp.fit_figure(result, run["sim"]), width="stretch")
+        show_figure(dp.fit_figure(result, run["sim"]), width="stretch")
         st.caption("Derivative R² per state: " + ", ".join(f"{n} {r:.3f}" for n, r in zip(result.names, result.r2)))
     with tabs[1]:
         rows = result.term_table()
         st.dataframe(rows, hide_index=True, width="stretch") if rows else st.warning("No terms survived; lower the threshold.")
     with tabs[2]:
-        st.plotly_chart(dp.path_figure(result), width="stretch")
+        show_figure(dp.path_figure(result), width="stretch")
         st.caption("Raising the threshold removes terms; the automatic choice is the point with the lowest BIC, which "
                    "balances fit against the number of terms.")
     with tabs[3]:
         if result.inclusion is None:
             st.info("Set 'Stability resamples' above 0 to see how often each term is selected when the data is resampled.")
         else:
-            st.plotly_chart(dp.inclusion_figure(result), width="stretch")
+            show_figure(dp.inclusion_figure(result), width="stretch")
     with tabs[4]:
         st.markdown("**Python (for `scipy.integrate.solve_ivp`)**")
         code = dc.to_python(result)

@@ -2,6 +2,7 @@
 The Verify tab of a solved problem.
 """
 import streamlit as st
+from ui.a11y import show_figure
 from config import settings
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import ProblemModel, target_kind
@@ -129,7 +130,7 @@ def render_verify_tab(client: LMStudioClient, model: ProblemModel, report: Verif
                     spread_values = numeric_answer_spread(sc_result, sc_target)
                     if len(spread_values) >= 2:
                         fig = build_spread_plot(spread_values, sc_target)
-                        st.plotly_chart(fig, width='stretch')
+                        show_figure(fig, width='stretch')
                         st.caption(f"{sc_target}: mean {sum(spread_values) / len(spread_values):.4g}, "
                                     f"min {min(spread_values):.4g}, max {max(spread_values):.4g} "
                                     f"across {len(spread_values)} runs.")

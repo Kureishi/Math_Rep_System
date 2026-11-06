@@ -360,6 +360,15 @@ Markdown, PDF, Python, or a Jupyter notebook.
   and embedding models, and GPU and LaTeX availability (and, if you ask, times a one-word model request), and for every problem
   says what to do about it. A failure inside one check never stops the others; the sidebar offers it when LM Studio cannot be
   reached; the plain-text report can be pasted into a bug report.
+- **Accessible charts** (`ui/a11y.py`, `modules/palette.py`). Every chart is drawn through one wrapper that follows the app's light/dark
+  switch, uses a colour-blind-safe palette, and gives the chart a text description (title, axes, series, ranges, panels, animation) that
+  screen readers read and that **Advanced settings → Show a text description under every chart** shows on screen. The palette is held
+  to measured criteria, enforced by tests: at least 3:1 contrast against both a white page and the dark background, and the first four
+  colours at least ΔE 15 apart under simulated protanopia, deuteranopia and tritanopia (the palette it replaced had a green and a red at
+  ΔE 1.7 for deuteranopia). Beyond four series colour alone cannot do the job, so line style changes too, and status badges carry a
+  ✓ / ! / ✕ as well as a colour.
+- **Where it ran:** results that can use the GPU show a small chip, ⚡ GPU or 🖥️ CPU, recording what actually produced them (a GPU job that
+  fell back to the CPU says CPU).
 - **Copy buttons:** each answer, and each Monte Carlo summary, has a 📋 popover to copy
   it as plain text, with units, as LaTeX, or as Python (a value, or the function).
 - **Follow-up questions and tutor-mode guesses are saved with the problem**, so they
@@ -401,10 +410,13 @@ Markdown, PDF, Python, or a Jupyter notebook.
 
 ## Extending it
 
-- **A new sidebar mode:** add a `PaletteEntry` to `modules/command_palette.py`'s
-  `_ENTRIES` (it builds `MODE_LABELS`, which the sidebar radio uses), write the
-  page as `ui/<name>.py`, and add it to `ui/__init__.py`'s `PAGES`.
-  `tests/test_app_modes.py` fails if either half is missing.
+- **A new sidebar mode: one file, nothing else.** Create `modules/modes/<name>.py` containing a `MODE = ModeSpec(label=..., keywords=...,
+  module="ui.<name>", function="render_<name>_tab", needs_client=False, order=250)` and write the page in `ui/<name>.py`. The sidebar,
+  the command palette, the "Ask anything" router and the page dispatch are all derived from those files
+  (`modules/mode_registry.py`), so no shared file is edited and two people adding modes cannot conflict. `order` sets the position
+  (built-ins are 10, 20, 30...; pick a number in between).
+- **Your own modes, outside the repository:** the same declaration in `plugins/<name>.py` (git-ignored; copy
+  `plugins/_example_mode.py`). A broken plugin never stops the app: it is skipped and the reason appears on the Health check page.
 - **A different front end:** `modules/` has no Streamlit dependency, so a desktop
   shell or another UI can call it as-is.
 - **Tuning:** verification tolerance, retry count and temperatures are in

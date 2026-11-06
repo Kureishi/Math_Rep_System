@@ -16,17 +16,14 @@ Neither function touches Streamlit's [theme] section in .streamlit/config.toml
 Streamlit's theme system has no knobs for (card borders, badge pills, button
 hover motion).
 """
+from modules.palette import BADGE_COLORS
 import streamlit as st
 
 # Small, reusable color tokens for the status badges below -- kept in one
 # place rather than repeated per call site, and distinct from the
 # Streamlit-level theme colors in config.toml.
-_BADGE_COLORS = {
-    "pass": ("#E6F4EA", "#1E7E34"),
-    "warn": ("#FFF4E0", "#A85D00"),
-    "fail": ("#FDEAEA", "#C0392B"),
-    "neutral": ("#EEF1F6", "#3B4252"),
-}
+_BADGE_COLORS = BADGE_COLORS       # (tint, text) per kind: chosen for text contrast and colour-blind distinguishability (modules/palette.py)
+_SYMBOL = {"pass": "✓", "warn": "!", "fail": "✕"}      # a cue that does not depend on colour
 
 
 def inject_base_styles() -> None:
@@ -134,6 +131,11 @@ def inject_base_styles() -> None:
             font-weight: 600;
             white-space: nowrap;
         }
+        /* chart descriptions for screen readers: invisible, but read out (the usual "visually hidden" pattern) */
+        .mrs-sr-only {
+            position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+            clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+        }
         .mrs-badge-row {
             display: flex;
             flex-wrap: wrap;
@@ -184,6 +186,15 @@ def render_hero(title: str, subtitle: str) -> None:
     """, unsafe_allow_html=True)
 
 
+def _with_symbol(text: str, kind: str) -> str:
+    """Prefix a status symbol unless the text already starts with a symbol or emoji, so pass / warn / fail never depend on colour alone."""
+    symbol = _SYMBOL.get(kind)
+    first = text.lstrip()[:1]
+    if symbol is None or not first or (ord(first) > 127 and not first.isalpha()):
+        return text
+    return f"{symbol} {text}"
+
+
 def badge(text: str, kind: str = "neutral") -> str:
     """Returns the HTML for one .mrs-badge pill. Callers batch several
     into one st.markdown(..., unsafe_allow_html=True) call (see
@@ -192,7 +203,14 @@ def badge(text: str, kind: str = "neutral") -> str:
     several separate calls would stack vertically instead of forming a row.
     `kind` is one of "pass", "warn", "fail", "neutral"."""
     bg, fg = _BADGE_COLORS.get(kind, _BADGE_COLORS["neutral"])
-    return f'<span class="mrs-badge" style="background:{bg};color:{fg};">{text}</span>'
+    return f'<span class="mrs-badge mrs-badge-{kind}" style="background:{bg};color:{fg};">{_with_symbol(text, kind)}</span>'
+
+
+def backend_chip(backend: str) -> None:
+    """A small chip saying where a result was computed: the GPU (highlighted) or the CPU. Results record this themselves
+    (modules/gpu.py), so it is what actually ran, not what was requested: a GPU job that fell back to the CPU shows CPU."""
+    on_gpu = backend.startswith("GPU")
+    badge_row([(f"⚡ {backend}" if on_gpu else f"🖥️ {backend}", "pass" if on_gpu else "neutral")])
 
 
 def badge_row(badges: list[tuple[str, str]]) -> None:

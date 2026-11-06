@@ -249,7 +249,7 @@ def render_triangle(solution: TriangleSolution, title: str = "Triangle") -> go.F
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", fill="toself",
-                               fillcolor="rgba(46,94,170,0.08)", line=dict(width=3, color="#2E5EAA"),
+                               fillcolor="rgba(46,94,170,0.08)", line=dict(width=3, color="#0072B2"),
                                showlegend=False, hoverinfo="skip"))
 
     # vertex labels, offset slightly outward from the triangle's centroid
@@ -261,7 +261,7 @@ def render_triangle(solution: TriangleSolution, title: str = "Triangle") -> go.F
         norm = math.hypot(dx, dy) or 1.0
         label_x, label_y = vx + 0.12 * dx / norm, vy + 0.12 * dy / norm
         fig.add_annotation(x=label_x, y=label_y, text=f"<b>{p}</b>", showarrow=False,
-                             font=dict(size=16, color="#2E5EAA"))
+                             font=dict(size=16, color="#0072B2"))
 
     # side length labels at each edge's midpoint
     side_of = {"A": ("b", "c"), "B": ("a", "c"), "C": ("a", "b")}  # unused; explicit pairs below
@@ -283,14 +283,14 @@ def render_triangle(solution: TriangleSolution, title: str = "Triangle") -> go.F
         steps = [a1 + diff * t / 20 for t in range(21)]
         arc_x = [vx + scale * math.cos(t) for t in steps]
         arc_y = [vy + scale * math.sin(t) for t in steps]
-        fig.add_trace(go.Scatter(x=arc_x, y=arc_y, mode="lines", line=dict(width=2, color="#C0392B"),
+        fig.add_trace(go.Scatter(x=arc_x, y=arc_y, mode="lines", line=dict(width=2, color="#D55E00"),
                                    showlegend=False, hoverinfo="skip"))
         mid_angle = a1 + diff / 2
         label_r = scale * 1.5
         angle_value = getattr(solution, p)
         fig.add_annotation(x=vx + label_r * math.cos(mid_angle), y=vy + label_r * math.sin(mid_angle),
                              text=f"{angle_value:.1f}°", showarrow=False,
-                             font=dict(size=11, color="#C0392B"))
+                             font=dict(size=11, color="#D55E00"))
 
     fig.update_layout(title=title, xaxis=dict(scaleanchor="y", showgrid=False, zeroline=False,
                                                  visible=False),
@@ -396,9 +396,9 @@ def build_ssa_ambiguity_animation(sol1: TriangleSolution, sol2: TriangleSolution
         return [
             go.Scatter(x=[P[0], Q[0], Rf[0], P[0]], y=[P[1], Q[1], Rf[1], P[1]],
                         mode="lines", fill="toself", fillcolor="rgba(46,94,170,0.12)",
-                        line=dict(width=3, color="#2E5EAA"), name="triangle", hoverinfo="skip"),
+                        line=dict(width=3, color="#0072B2"), name="triangle", hoverinfo="skip"),
             go.Scatter(x=[P[0], Q[0], Rf[0]], y=[P[1], Q[1], Rf[1]], mode="markers+text",
-                        marker=dict(size=12, color="#2E5EAA"),
+                        marker=dict(size=12, color="#0072B2"),
                         text=[pivot, neighbor, swinging], textposition="top center",
                         name="vertices", hoverinfo="skip"),
         ]

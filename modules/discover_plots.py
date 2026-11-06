@@ -1,11 +1,12 @@
 """Plotly figures for equation discovery -- Streamlit-free, plain go.Figure like modules/sm_plots.py."""
+from modules.palette import ATTENTION, CATEGORICAL, GOOD
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from modules.discover import DiscoverResult
 
-_PAL = ["#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#B279A2"]
+_PAL = CATEGORICAL
 
 
 def fit_figure(result: DiscoverResult, sim: np.ndarray) -> go.Figure:
@@ -50,7 +51,7 @@ def inclusion_figure(result: DiscoverResult) -> go.Figure:
     labels = [f"d{r['equation'][1:-3]}/dt: {r['term']}" for r in rows]
     freq = [r["selected in resamples"] for r in rows]
     fig = go.Figure(go.Bar(x=freq, y=labels, orientation="h",
-                           marker_color=[_PAL[2] if f >= 0.8 else _PAL[3] for f in freq]))
+                           marker_color=[GOOD if f >= 0.8 else ATTENTION for f in freq]))
     fig.add_vline(x=0.8, line_dash="dash", line_color="gray")
     fig.update_xaxes(range=[0, 1.02], title_text="fraction of resamples in which the term was selected")
     fig.update_layout(height=max(240, 40 * len(rows) + 120), title="Stability of the selected terms",

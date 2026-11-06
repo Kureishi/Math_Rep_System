@@ -2,6 +2,7 @@
 Problem-chains mode: feed one solved problem's result into the next as an input.
 """
 import streamlit as st
+from ui.a11y import show_figure
 import numpy as np
 from modules.llm_client import LMStudioClient
 from modules.equation_engine import extract_model, target_kind
@@ -133,7 +134,7 @@ def render_chains_tab(client: LMStudioClient):
                                 step_labels = {s.position: f"step {s.position + 1}: {s.output_symbol}"
                                                 for s in chain.steps}
                                 sweep_fig = build_chain_sweep_plot(sweep_rows, edit_symbol, step_labels)
-                                st.plotly_chart(sweep_fig, width='stretch')
+                                show_figure(sweep_fig, width='stretch')
                                 format_download_button(
                                     key=f"chain_sweep_{step.position}_{edit_symbol}",
                                     file_stem=f"chain_sweep_{edit_symbol}",
@@ -151,7 +152,7 @@ def render_chains_tab(client: LMStudioClient):
             st.caption("Each step as a node, with the value it handed to later steps written on the link, and "
                         "inputs typed in by hand shown as small squares above their step. Press Play to watch "
                         "the chain resolve one step at a time.")
-            st.plotly_chart(cached(f"chain_flow:{chosen_id}", (flow,), lambda: build_chain_flow_plot(flow)),
+            show_figure(cached(f"chain_flow:{chosen_id}", (flow,), lambda: build_chain_flow_plot(flow)),
                              width="stretch", key=f"chain_flow_{chosen_id}")
             for s in flow.steps:
                 st.write(f"- {step_caption(flow, s.position)}")

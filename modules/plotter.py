@@ -4,6 +4,7 @@ Plots any derived equation/expression that has exactly one free
 parameters are substituted in. Streamlit reruns the script on every
 slider move, so the figure is recomputed live -- no manual callback wiring.
 """
+from modules.palette import INK
 import numpy as np
 import plotly.graph_objects as go
 import sympy as sp
@@ -422,9 +423,9 @@ def build_histogram_plot(samples: list[float], target_symbol: str,
     5-95% band 3.7 to 4.7"."""
     fig = go.Figure()
     fig.add_trace(go.Histogram(x=samples, nbinsx=min(60, max(10, len(samples) // 20)),
-                                 marker=dict(color="#2a9d8f")))
+                                 marker=dict(color="#4A9BC8")))
     if mean is not None:
-        fig.add_vline(x=mean, line_color="black", line_width=2,
+        fig.add_vline(x=mean, line_color=INK, line_width=2,
                        annotation_text="mean", annotation_position="top")
     if p5 is not None:
         fig.add_vline(x=p5, line_dash="dash", line_color="gray",
@@ -526,11 +527,11 @@ def build_phase_portrait(dx_dt, dy_dt, x_range: tuple[float, float], y_range: tu
     if trajectory is not None:
         tx, ty = trajectory
         fig.add_trace(go.Scatter(x=tx, y=ty, mode="lines", name="trajectory",
-                                    line=dict(color="#2E5EAA", width=3)))
+                                    line=dict(color="#0072B2", width=3)))
         fig.add_trace(go.Scatter(x=[tx[0]], y=[ty[0]], mode="markers", name="start",
-                                    marker=dict(symbol="circle", size=11, color="#1E7E34")))
+                                    marker=dict(symbol="circle", size=11, color="#009E73")))
         fig.add_trace(go.Scatter(x=[tx[-1]], y=[ty[-1]], mode="markers", name="end",
-                                    marker=dict(symbol="star", size=14, color="#C0392B")))
+                                    marker=dict(symbol="star", size=14, color="#D55E00")))
     fig.update_layout(xaxis_title=x_label, yaxis_title=y_label,
                         title=f"Phase portrait: {x_label}\u2013{y_label}")
     return fig
@@ -562,10 +563,10 @@ def build_cobweb_plot(g, x0: float, x_range: tuple[float, float], n_steps: int =
 
     base = [
         go.Scatter(x=curve_xs, y=curve_ys, mode="lines", name="y = g(x)",
-                    line=dict(color="#2E5EAA", width=2.5)),
+                    line=dict(color="#0072B2", width=2.5)),
         go.Scatter(x=curve_xs, y=curve_xs, mode="lines", name="y = x",
                     line=dict(color="rgba(100,100,100,0.5)", dash="dash")),
-        go.Scatter(x=[], y=[], mode="lines", name="path", line=dict(color="#C0392B", width=2)),
+        go.Scatter(x=[], y=[], mode="lines", name="path", line=dict(color="#D55E00", width=2)),
     ]
     frames = [go.Frame(data=[go.Scatter(x=path_x[:2 * i + 1], y=path_y[:2 * i + 1])],
                          traces=[2], name=f"{i}") for i in range(n_steps + 1)]
@@ -624,7 +625,7 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
                         fill="toself", fillcolor="rgba(46,94,170,0.15)",
                         line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip"),
             go.Scatter(x=idx[:k], y=running_mean[:k], mode="lines", name="running mean",
-                        line=dict(color="#2E5EAA", width=3)),
+                        line=dict(color="#0072B2", width=3)),
         ]
 
     frames = [go.Frame(data=frame_data(k), name=f"{k}") for k in checkpoints]
@@ -674,9 +675,9 @@ def build_descent_path_plot(f, path: list[tuple[float, float]], x_range: tuple[f
         go.Contour(x=xs, y=ys, z=Z, colorscale="Blues", showscale=False,
                     contours=dict(coloring="fill"), opacity=0.85),
         go.Scatter(x=[], y=[], mode="lines+markers", name="descent path",
-                    line=dict(color="#C0392B", width=2), marker=dict(size=5, color="#C0392B")),
+                    line=dict(color="#D55E00", width=2), marker=dict(size=5, color="#D55E00")),
         go.Scatter(x=[px[-1]], y=[py[-1]], mode="markers", name="critical point",
-                    marker=dict(symbol="star", size=16, color="#1E7E34")),
+                    marker=dict(symbol="star", size=16, color="#009E73")),
     ]
     frames = [go.Frame(data=[go.Scatter(x=px[:i + 1], y=py[:i + 1])], traces=[1], name=f"{i}")
               for i in range(len(path))]
@@ -702,7 +703,7 @@ def build_descent_path_plot(f, path: list[tuple[float, float]], x_range: tuple[f
     return fig
 
 
-_VEL_COLOR, _ACC_COLOR = "#C0392B", "#1E7E34"
+_VEL_COLOR, _ACC_COLOR = "#D55E00", "#009E73"
 _ARROW_OFFSET = 0.32           # vertical distance of the velocity/acceleration arrows of a strobe ghost from its track
 
 
@@ -817,14 +818,14 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
                         line=dict(color="rgba(150,150,150,0.35)", width=2), showlegend=False,
                         hoverinfo="skip"),
             go.Scatter(x=[x, arrow_end], y=[0, 0], mode="lines+markers",
-                        line=dict(color="#C0392B", width=3),
-                        marker=dict(size=[0, 11], symbol=["circle", arrow_symbol], color="#C0392B"),
+                        line=dict(color="#D55E00", width=3),
+                        marker=dict(size=[0, 11], symbol=["circle", arrow_symbol], color="#D55E00"),
                         name="velocity", showlegend=False, hoverinfo="skip"),
-            go.Scatter(x=[x], y=[0], mode="markers", marker=dict(size=18, color="#2E5EAA"),
+            go.Scatter(x=[x], y=[0], mode="markers", marker=dict(size=18, color="#0072B2"),
                         name="object", showlegend=False),
             go.Scatter(x=t_values[:i + 1], y=x_values[:i + 1], mode="lines",
-                        line=dict(color="#2E5EAA", width=2), showlegend=False, hoverinfo="skip"),
-            go.Scatter(x=[t_values[i]], y=[x], mode="markers", marker=dict(size=11, color="#C0392B"),
+                        line=dict(color="#0072B2", width=2), showlegend=False, hoverinfo="skip"),
+            go.Scatter(x=[t_values[i]], y=[x], mode="markers", marker=dict(size=11, color="#D55E00"),
                         showlegend=False),
         ] + extra_traces(i)
 
@@ -908,7 +909,7 @@ def add_camera_rotation(fig: go.Figure, n_frames: int = 60, elevation_deg: float
 # All four use the same Play/Pause + slider mechanism as the cobweb diagram
 # above; their matplotlib GIF/PNG counterparts live in plot_snapshot.py.
 # ---------------------------------------------------------------------------
-_PALETTE = ["#2E5EAA", "#C0392B", "#1E7E34", "#8E44AD", "#D68910", "#117A8B"]
+_PALETTE = ["#0072B2", "#D55E00", "#009E73", "#8E44AD", "#D68910", "#117A8B"]
 
 
 def _frame_indices(n: int, max_frames: int) -> list[int]:
@@ -968,7 +969,7 @@ def build_ode_error_plot(comparison) -> go.Figure:
         fig.add_trace(go.Scatter(x=t, y=np.maximum(comparison.rel_error[i], 1e-16), mode="lines",
                                    name=f"{name} error", line=dict(color=color, width=2), showlegend=False),
                       row=2, col=1)
-    fig.add_hline(y=comparison.tolerance, line=dict(color="#C0392B", dash="dash"), row=2, col=1,
+    fig.add_hline(y=comparison.tolerance, line=dict(color="#D55E00", dash="dash"), row=2, col=1,
                    annotation_text=f"tolerance {comparison.tolerance:g}", annotation_position="top left")
     fig.update_yaxes(type="log", row=2, col=1, title_text="|numeric \u2212 closed form| / |closed form|")
     fig.update_xaxes(title_text="t", row=2, col=1)
@@ -1129,7 +1130,7 @@ def build_partial_sum_animation(partial_sums, title: str = "") -> go.Figure:
                                    name="expansion point", line=dict(color="rgba(100,100,100,0.5)", dash="dot")))
     dyn = len(fig.data)
     fig.add_trace(go.Scatter(x=ps.xs, y=ps.sums[0], mode="lines", name="partial sum",
-                               line=dict(color="#C0392B", width=2.5)))
+                               line=dict(color="#D55E00", width=2.5)))
 
     def frame_title(k: int) -> str:
         return f"{title + ' \u2014 ' if title else ''}{ps.labels[k]}   (RMS error {ps.errors[k]:.3g} {ps.error_region})"
@@ -1208,7 +1209,7 @@ def build_parameter_morph(morph) -> go.Figure:
                                    line=dict(color="#222222", width=2, dash="dash")))
     dyn = len(fig.data)
     fig.add_trace(go.Scatter(x=t, y=morph.curves[0], mode="lines", name=f"{morph.function}(t)",
-                               line=dict(color="#C0392B", width=3.5)))
+                               line=dict(color="#D55E00", width=3.5)))
 
     def title(i: int) -> str:
         tp = morph.turning_points[i]
@@ -1244,7 +1245,7 @@ def build_bifurcation_plot(result, marker: float | None = None) -> go.Figure:
                            annotation_text=f"period {period}", annotation_position="top",
                            annotation_font_size=9)
     if marker is not None and result.params[0] <= marker <= result.params[-1]:
-        fig.add_vline(x=marker, line=dict(color="#1E7E34", dash="dash", width=2),
+        fig.add_vline(x=marker, line=dict(color="#009E73", dash="dash", width=2),
                        annotation_text="current", annotation_position="bottom right")
     fig.update_layout(xaxis=dict(title=result.param_name, range=[float(result.params[0]), float(result.params[-1])]),
                         yaxis=dict(title="long-run value"), showlegend=False,
@@ -1268,7 +1269,7 @@ def build_space_time_view(field, y_label: str = "u") -> go.Figure:
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.42, 0.58], vertical_spacing=0.1,
                          subplot_titles=(f"Profile {y_label}(x, t)", "Whole evolution"))
-    fig.add_trace(go.Scatter(x=xs, y=u[0], mode="lines", line=dict(color="#C0392B", width=3), showlegend=False),
+    fig.add_trace(go.Scatter(x=xs, y=u[0], mode="lines", line=dict(color="#D55E00", width=3), showlegend=False),
                   row=1, col=1)
     fig.add_trace(go.Heatmap(x=xs, y=ts, z=u, colorbar=dict(title=y_label, len=0.55, y=0.28), **heat),
                   row=2, col=1)
@@ -1298,7 +1299,7 @@ def build_space_time_view(field, y_label: str = "u") -> go.Figure:
 # ---------------------------------------------------------------------------
 _STATE_ALPHA = {"known": 1.0, "done": 1.0, "current": 1.0, "pending": 0.16, "blocked": 0.45}
 _CURRENT_RING = "#F39C12"
-_BLOCKED_RING = "#C0392B"
+_BLOCKED_RING = "#D55E00"
 
 
 def build_solve_order_replay(nodes, edges, frames) -> go.Figure:
@@ -1369,7 +1370,7 @@ def build_chain_flow_plot(flow) -> go.Figure:
         raise ValueError("This chain has no steps.")
     from modules.chain_flow import step_caption
     pos = {s.position: s for s in flow.steps}
-    status_colour = {"ok": "#2E5EAA", "error": "#C0392B", "stale": "#8A8F98"}
+    status_colour = {"ok": "#0072B2", "error": "#D55E00", "stale": "#8A8F98"}
 
     def shown(k: int):
         steps = [s for s in flow.steps if s.position <= k]
@@ -1403,7 +1404,7 @@ def build_chain_flow_plot(flow) -> go.Figure:
             go.Scatter(x=ok_x, y=ok_y, mode="lines", showlegend=False, hoverinfo="skip",
                         line=dict(color="rgba(46,94,170,0.7)", width=4)),
             go.Scatter(x=bad_x, y=bad_y, mode="lines", showlegend=False, hoverinfo="skip",
-                        line=dict(color="#C0392B", width=3, dash="dash")),
+                        line=dict(color="#D55E00", width=3, dash="dash")),
             go.Scatter(x=mid_x, y=mid_y, mode="text", text=mid_t, showlegend=False, hoverinfo="skip",
                         textfont=dict(size=12, color="#1B2A41")),
             go.Scatter(x=lit_x, y=lit_y, mode="lines", showlegend=False, hoverinfo="skip",

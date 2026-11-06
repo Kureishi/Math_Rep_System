@@ -21,6 +21,8 @@ scanning the mode list by eye, especially once a query's keywords
 import difflib
 from dataclasses import dataclass
 
+from modules.mode_registry import REGISTRY
+
 
 @dataclass
 class PaletteEntry:
@@ -32,63 +34,13 @@ class PaletteEntry:
 # don't appear in the mode's own label -- e.g. "heat"/"robin" for the
 # PDE solver, so a person thinking in domain terms (not this app's menu
 # labels) still finds the right mode.
-_ENTRIES = [
-    PaletteEntry("📝 Word problem solver", ("solve", "kinematics", "physics", "word problem", "extract")),
-    PaletteEntry("📈 Curve fitting", ("regression", "fit", "statistics", "bayesian", "confidence interval")),
-    PaletteEntry("🔁 Check equivalence", ("proof", "identity", "same", "equal")),
-    PaletteEntry("📚 Batch solver", ("multiple", "worksheet", "many problems")),
-    PaletteEntry("🔗 Problem chains", ("chain", "sequence", "multi-step", "pipeline")),
-    PaletteEntry("🔬 Extraction diff", ("wording", "compare", "rephrase")),
-    PaletteEntry("⚛️ Quantum mechanics", ("schrodinger", "schrödinger", "wavefunction", "eigenstates", "tunneling", "tunnelling",
-                                          "wavepacket", "qubit", "bloch", "commutator", "operator", "perturbation", "hamiltonian",
-                                          "uncertainty", "bch", "density matrix", "decoherence", "t1", "t2",
-                                          "particle in a box", "energy levels", "infinite well", "square well", "barrier")),
-    PaletteEntry("🆚 Compare solves", ("diff", "versus", "difference", "what if", "side by side",
-                                        "two problems")),
-    PaletteEntry("📐 Dimensional analysis", ("units", "dimensions", "si", "imperial")),
-    PaletteEntry("🔄 Transforms & series", ("laplace", "fourier", "taylor", "asymptotic", "expansion")),
-    PaletteEntry("🌡️ PDE solver", ("heat", "wave", "laplace equation", "robin", "neumann", "dirichlet",
-                                    "partial differential")),
-    PaletteEntry("🧮 Tensor calculus", ("metric", "christoffel", "ricci", "curvature", "riemann", "covariant derivative")),
-    PaletteEntry("🔥 Statistical mechanics", ("partition function", "free energy", "entropy", "heat capacity", "ising", "potts", "xy model",
-                                              "metropolis", "monte carlo lattice", "binder cumulant", "critical point", "onsager",
-                                              "mean field", "fermi-dirac", "bose-einstein", "maxwell-boltzmann", "bec",
-                                              "chemical potential", "langevin", "brownian", "fokker-planck", "diffusion",
-                                              "fluctuation dissipation", "random matrix", "wigner semicircle", "level spacing")),
-    PaletteEntry("🧰 Numerics & verification lab", ("conserved quantity", "invariant", "symplectic", "leapfrog", "verlet", "energy drift", "convergence",
-                                                    "order of convergence", "richardson", "lagrangian", "hamiltonian", "euler-lagrange", "noether", "poincare",
-                                                    "phase portrait", "nondimensionalize", "dimensionless", "buckingham", "limiting case", "large n",
-                                                    "cross-validation", "closed form", "notebook", "reproducible", "seed")),
-    PaletteEntry("🌌 General relativity", ("geodesic", "schwarzschild", "kerr", "black hole", "einstein", "kretschmann", "precession",
-                                            "light bending", "effective potential", "isco", "horizon", "penrose", "light cone",
-                                            "gravitational waves", "quadrupole", "eddington", "kruskal", "singularity", "weyl")),
-    PaletteEntry("🧭 Discover equations", ("sindy", "equation discovery", "discover", "system identification", "data driven", "find the law",
-                                           "identify dynamics", "time series", "sparse regression", "differential equation from data")),
-    PaletteEntry("🎬 Visual showcase", ("black hole shadow", "gravitational lensing", "lensing", "photon ring", "orbit", "perihelion advance",
-                                        "embedding diagram", "flamm", "critical point movie", "ising animation", "visualization",
-                                        "visualisation", "animation", "showcase", "3d")),
-    PaletteEntry("🩺 Health check", ("health check", "diagnose", "diagnostics", "not working", "troubleshoot", "setup", "lm studio",
-                                     "cannot connect", "first run", "model not loaded", "broken")),
-    PaletteEntry("🔎 Have I solved this?", ("solved before", "have i solved", "did i already", "similar problem", "similar problems", "past problems",
-                                           "history search", "search history", "find an old problem", "seen this", "recall", "duplicate")),
-    PaletteEntry("🎲 Posterior sampling (MCMC)", ("mcmc", "posterior", "bayesian fit", "corner plot", "credible interval", "markov chain",
-                                                    "emcee", "parameter uncertainty", "nonlinear fit uncertainty", "sampling", "walkers")),
-    PaletteEntry("🧑‍🏫 Problem sets", ("problem set", "worksheet", "quiz", "practice problems", "homework", "answer key", "grade", "grading",
-                                       "exam", "assignment", "teacher", "variants", "auto-grade")),
-    PaletteEntry("📔 Research journal", ("history", "concepts", "journal", "past problems")),
-    PaletteEntry("🚀 Quick start", ("examples", "tutorial", "gallery", "getting started")),
-    PaletteEntry("📐 Geometry", ("triangle", "circle", "angle", "law of sines", "law of cosines",
-                                  "schematic", "sss", "sas", "asa")),
-]
+# The palette entries are DERIVED from the mode declarations in modules/modes/ (and the optional plugins/ folder), in display
+# order; nothing here is edited to add a mode. See modules/mode_registry.py.
+_ENTRIES = [PaletteEntry(spec.label, spec.keywords) for spec in REGISTRY.specs]
 
 
-# The single source of truth for the sidebar's mode list, in display order.
-# app.py's mode radio is built from this (not from its own copy of the
-# labels), and ui/__init__.py's dispatch table is checked against it in
-# tests/test_app_modes.py -- so adding a mode means adding one
-# PaletteEntry here plus one dispatch entry, and forgetting either fails
-# a test instead of silently shipping a mode the palette can't find (or a
-# palette entry that jumps to a mode with no page behind it).
+# The single source of truth for the sidebar's mode list, in display order. The sidebar radio is built from this, ui/__init__.py's
+# dispatch table comes from the same declarations, and tests/test_app_modes.py checks that every mode has a page that resolves.
 MODE_LABELS: list[str] = [e.mode for e in _ENTRIES]
 
 

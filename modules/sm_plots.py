@@ -2,6 +2,7 @@
 Plotly figures for the statistical-mechanics tools -- Streamlit-free. Each takes a result object of its module and returns a
 plain go.Figure (the app's theme and the HTML report each apply their own styling), as in modules/quantum_plots.py.
 """
+from modules.palette import CATEGORICAL, INK
 import math
 
 import numpy as np
@@ -16,7 +17,7 @@ from modules.sm_meanfield import ComparisonCurves
 from modules.sm_partition import Spectrum, Thermo
 from modules.sm_stochastic import FPSolution, LangevinResult, msd, msd_exact_free
 
-_PAL = ["#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#B279A2", "#FF9DA6", "#9D755D"]
+_PAL = CATEGORICAL
 
 
 # ------------------------------------------------------------------------------------------ partition functions
@@ -117,10 +118,10 @@ def meanfield_figure(cv: ComparisonCurves, tc_mf: float, tc_bethe: float, tc_exa
     fig.add_trace(go.Scatter(x=cv.T, y=cv.c_mf, name="mean field", showlegend=False, line=dict(color=_PAL[3])), row=1, col=3)
     fig.add_trace(go.Scatter(x=cv.T, y=np.clip(cv.c_exact_2d, 0, 6), name="Onsager", showlegend=False, line=dict(color=_PAL[0], width=3)), row=1, col=3)
     if mc is not None:
-        fig.add_trace(go.Scatter(x=mc.temps, y=mc.column("m"), mode="markers", name=f"Monte Carlo L = {mc.model.L}", marker=dict(color="black", size=6),
+        fig.add_trace(go.Scatter(x=mc.temps, y=mc.column("m"), mode="markers", name=f"Monte Carlo L = {mc.model.L}", marker=dict(color=INK, size=6),
                                  error_y=dict(type="data", array=mc.column("m_err"), visible=True)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=mc.temps, y=mc.column("e"), mode="markers", showlegend=False, marker=dict(color="black", size=6)), row=1, col=2)
-        fig.add_trace(go.Scatter(x=mc.temps, y=mc.column("C"), mode="markers", showlegend=False, marker=dict(color="black", size=6)), row=1, col=3)
+        fig.add_trace(go.Scatter(x=mc.temps, y=mc.column("e"), mode="markers", showlegend=False, marker=dict(color=INK, size=6)), row=1, col=2)
+        fig.add_trace(go.Scatter(x=mc.temps, y=mc.column("C"), mode="markers", showlegend=False, marker=dict(color=INK, size=6)), row=1, col=3)
     for col in (1, 2, 3):
         for x, color in ((tc_mf, _PAL[3]), (tc_bethe, _PAL[1]), (tc_exact, _PAL[0])):
             fig.add_vline(x=x, line=dict(color=color, dash="dot", width=1), row=1, col=col)
@@ -205,7 +206,7 @@ def fp_figure(sol: FPSolution, res: LangevinResult | None = None, exact: dict[in
     for k, j in enumerate(idx):
         fig.add_trace(go.Scatter(x=sol.x, y=sol.P[j], mode="lines", name=f"Fokker–Planck, t = {sol.t[j]:.3g}", line=dict(color=_PAL[k % len(_PAL)], width=2)))
         if exact and j in exact:
-            fig.add_trace(go.Scatter(x=sol.x, y=exact[j], mode="lines", name="exact Gaussian", showlegend=(k == 0), line=dict(color="black", dash="dot")))
+            fig.add_trace(go.Scatter(x=sol.x, y=exact[j], mode="lines", name="exact Gaussian", showlegend=(k == 0), line=dict(color=INK, dash="dot")))
     if res is not None:
         hist, edges = np.histogram(res.x[-1], bins=bins, range=(float(sol.x[0]), float(sol.x[-1])), density=True)
         fig.add_trace(go.Bar(x=0.5 * (edges[1:] + edges[:-1]), y=hist, name=f"Langevin ensemble, t = {res.t[-1]:.3g}", marker_color="rgba(0,0,0,0.25)"))

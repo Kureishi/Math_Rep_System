@@ -2,6 +2,7 @@
 Geometry mode: triangle solving (SSS/SAS/ASA/AAS/SSA) with a labeled schematic.
 """
 import streamlit as st
+from ui.a11y import show_figure
 from modules.geometry_solver import solve_triangle, render_triangle, build_ssa_ambiguity_animation
 from ui.common import persist_on_click, render_template_bar
 
@@ -65,7 +66,7 @@ def render_geometry_tab():
                         "match these measurements. Both are shown below.")
                 anim_fig = build_ssa_ambiguity_animation(result.solutions[0], result.solutions[1])
                 if anim_fig is not None:
-                    st.plotly_chart(anim_fig, width="stretch", key="geometry_mode_ssa_animation")
+                    show_figure(anim_fig, width="stretch", key="geometry_mode_ssa_animation")
             for i, sol in enumerate(result.solutions):
                 if len(result.solutions) > 1:
                     st.markdown(f"#### Solution {i + 1}")
@@ -82,4 +83,4 @@ def render_geometry_tab():
                                 f"residual {sol.law_of_cosines_residual:.3g}).")
                 fig = render_triangle(sol, title=f"Solution {i + 1}" if len(result.solutions) > 1
                                        else "Triangle")
-                st.plotly_chart(fig, width="stretch", key=f"triangle_fig_{i}")
+                show_figure(fig, width="stretch", key=f"triangle_fig_{i}")

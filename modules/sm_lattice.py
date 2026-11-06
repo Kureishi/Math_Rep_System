@@ -284,6 +284,11 @@ class ScanResult:
     def column(self, name: str) -> np.ndarray:
         return np.array([getattr(p, name) for p in self.points])
 
+    @property
+    def backend(self) -> str:
+        """The backend the points were computed on (the same for every point of a scan)."""
+        return self.points[0].backend if self.points else "CPU (NumPy)"
+
 
 def scan_temperatures(model: LatticeModel, temps: list[float] | np.ndarray, n_therm: int = 500, n_meas: int = 4000,
                       seed: int | None = None, progress: ProgressFn | None = None) -> ScanResult:
@@ -317,6 +322,7 @@ class SingleRun:
     snapshots: list[tuple[int, np.ndarray]]
     acceptance: float
     seed: int
+    backend: str = "CPU (NumPy)"           # which backend produced the run (see modules/gpu.py)
 
 
 def run_single(model: LatticeModel, T: float, n_sweeps: int, snapshot_every: int, seed: int | None = None, ordered: bool = False,
@@ -354,7 +360,7 @@ def _run_single(backend: gpu.Backend, rng, host_rng: np.random.Generator, model:
             e[k], o[k] = energy_per_site(model, s), order_parameter(model, s)
             if (k + 1) % snapshot_every == 0:
                 snaps.append((k + 1, np.array(gpu.to_host(s))))
-    return SingleRun(model, T, e, o, snaps, acc_sum / n_sweeps, seed)
+    return SingleRun(model, T, e, o, snaps, acc_sum / n_sweeps, seed, backend.name)
 
 
 # ------------------------------------------------------------------------------------------ critical point, FSS

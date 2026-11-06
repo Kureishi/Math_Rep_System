@@ -4,10 +4,12 @@ import io
 import math
 
 import streamlit as st
+from ui.a11y import show_figure
 
 from modules import gpu
 from modules import showcase as sc
 from modules import showcase_plots as sp
+from ui.theme import backend_chip
 
 
 def _png(rgb) -> bytes:
@@ -40,9 +42,9 @@ def _lens_tab() -> None:
     if img is None:
         st.info("Choose a view and press Render.")
         return
-    st.plotly_chart(sp.lens_figure(img, True, edge), width="stretch")
+    show_figure(sp.lens_figure(img, True, edge), width="stretch")
     if compare:
-        st.plotly_chart(sp.lens_figure(img, False), width="stretch")
+        show_figure(sp.lens_figure(img, False), width="stretch")
     if img.shadow_px_measured is not None:
         err = img.shadow_error or 0.0
         (st.success if err < 0.02 else st.warning)(
@@ -50,7 +52,8 @@ def _lens_tab() -> None:
             f"b_c = 3√3 M, is {img.shadow_px_expected:.1f} px ({err:.2%} apart).")
     for note in img.notes:
         st.warning(note)
-    st.caption(f"Computed on: {img.backend}. {int((img.status == sc.WINDING).sum()):,} pixels are light still orbiting the photon sphere.")
+    backend_chip(img.backend)
+    st.caption(f"{int((img.status == sc.WINDING).sum()):,} pixels are light still orbiting the photon sphere.")
     st.download_button("⬇️ Download the image (PNG)", data=_png(img.rgb), file_name="black_hole.png", mime="image/png", key="showcase_lens_dl")
 
 
@@ -68,7 +71,7 @@ def _orbit_tab() -> None:
     except sc.ShowcaseError as exc:
         st.error(str(exc))
         return
-    st.plotly_chart(sp.orbit_figure(orb), width="stretch")
+    show_figure(sp.orbit_figure(orb), width="stretch")
     m1, m2, m3 = st.columns(3)
     second = orb.precession_weak_field * (1 + (18 + e * e) / (4 * p))
     m1.metric("Periapsis advance per orbit", f"{orb.precession:.4f} rad" if orb.precession is not None else "—",
@@ -99,8 +102,9 @@ def _critical_tab() -> None:
     if movie is None:
         st.info("Choose a size and press Run.")
         return
-    st.plotly_chart(sp.critical_figure(movie), width="stretch")
-    st.plotly_chart(sp.magnetisation_figure(movie), width="stretch")
+    backend_chip(movie.runs[0].backend)
+    show_figure(sp.critical_figure(movie), width="stretch")
+    show_figure(sp.magnetisation_figure(movie), width="stretch")
     cold, hot = movie.runs[0].order[-30:].mean(), movie.runs[2].order[-30:].mean()
     st.caption(f"Check: T_c = {movie.tc:.4f} is the exact (Onsager) value. Mean |m| over the last 30 sweeps: {cold:.2f} below T_c, "
                f"{hot:.2f} above. (On a finite lattice |m| above T_c is a small positive number of order 1/L, not exactly zero.)")

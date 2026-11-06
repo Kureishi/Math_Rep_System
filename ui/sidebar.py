@@ -284,6 +284,8 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                      "Needs an NVIDIA GPU and CuPy (requirements-gpu.txt); otherwise everything runs on the CPU.")
             gpu.set_mode(gpu_choice)
             st.caption(gpu.describe())
+            st.checkbox("Show a text description under every chart", key="a11y_show_descriptions",
+                        help="Every chart always has a text description for screen readers. Turn this on to see it on screen too.")
 
             settings.temperature_extraction = st.slider(
                 "Extraction temperature", 0.0, 1.0, settings.temperature_extraction, 0.05,

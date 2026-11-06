@@ -2,6 +2,7 @@
 PDE solver mode: first-order PDEs, heat/wave (Dirichlet/Neumann/Robin), Laplace on a rectangle, 2D finite-difference and 2D heat.
 """
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 import numpy as np
 import plotly.graph_objects as go
@@ -39,7 +40,7 @@ def _render_pde_time_animation(solution_expr, length: float, t_max: float, key_p
     if field.error:
         st.caption(f"Could not build an animated view: {field.error}")
         return
-    st.plotly_chart(cached(f"space_time:{key_prefix}", (field, y_label),
+    show_figure(cached(f"space_time:{key_prefix}", (field, y_label),
                            lambda: build_space_time_view(field, y_label=y_label)),
                      width="stretch", key=f"{key_prefix}_anim")
     gif_download_button(key=f"{key_prefix}_anim", file_stem=f"{key_prefix}_evolution",
@@ -250,7 +251,7 @@ def render_pde_tab():
                     Z = np.array([[np.real(complex(f_uv(xv, yv))) for xv in xs_grid] for yv in ys_grid])
                     heat_fig = go.Figure(data=go.Heatmap(z=Z, x=xs_grid, y=ys_grid, colorscale="Viridis"))
                     heat_fig.update_layout(title="u(x, y)", xaxis_title="x", yaxis_title="y")
-                    st.plotly_chart(heat_fig, width="stretch", key="laplace_heatmap")
+                    show_figure(heat_fig, width="stretch", key="laplace_heatmap")
                 except Exception as exc:  # noqa: BLE001
                     st.caption(f"Could not render a heatmap: {exc}")
 
@@ -299,7 +300,7 @@ def render_pde_tab():
                 fig = go.Figure(data=go.Heatmap(z=result.solution_grid.T, x=result.grid_x,
                                                  y=result.grid_y, colorscale="Viridis"))
                 fig.update_layout(title="Solution u(x, y)", xaxis_title="x", yaxis_title="y")
-                st.plotly_chart(fig, width='stretch', key="fd_heatmap")
+                show_figure(fig, width='stretch', key="fd_heatmap")
                 if result.converged:
                     st.success(f"{result.note} (max discrepancy vs. doubled resolution: "
                                 f"{result.convergence_error:.3g})")
@@ -380,7 +381,7 @@ def _render_2d_heat_animation(result) -> None:
         ),
         frames=plotly_frames,
     )
-    st.plotly_chart(fig, width="stretch", key="heat2d_anim")
+    show_figure(fig, width="stretch", key="heat2d_anim")
 
 
 def _render_fourier_pde_result(result):

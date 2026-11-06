@@ -3,6 +3,7 @@ value flow, and the motion-diagram upgrades (strobe ghosts, acceleration
 arrows). Structure is asserted -- what each frame updates, which node is
 ringed, where each arrow starts and ends -- because that is what makes the
 animation correct; GIFs are checked for validity and frame count."""
+from modules import palette
 import io
 
 import numpy as np
@@ -118,7 +119,7 @@ def test_flow_figure_reveals_one_step_per_frame_and_rings_the_current_one(flow):
 def test_flow_step_nodes_show_the_value_or_the_failure(flow):
     steps = pl.build_chain_flow_plot(flow).frames[2].data[5]
     assert list(steps.text) == ["Step 1<br>a = 2", "Step 2<br>d = 20", "Step 3<br>e"]    # a failed step shows no number
-    assert list(steps.marker.color) == ["#2E5EAA", "#2E5EAA", "#C0392B"]                 # ok, ok, error
+    assert list(steps.marker.color) == [palette.BLUE, palette.BLUE, palette.VERMILLION]                 # ok, ok, error
 
 
 def test_flow_labels_carried_values_and_draws_broken_links_dashed(flow):

@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import sympy as sp
 import streamlit as st
+from ui.a11y import show_figure
 
 from modules.quantum_1d import POTENTIALS, analytic_table, solve_eigenstates, tunnelling_splitting
 from modules.quantum_common import CheckList, ExpressionError, check_expression_syntax
@@ -137,9 +138,9 @@ def _eigenstates_tab() -> None:
 
     show = st.radio("Draw", ["wavefunction", "density"], horizontal=True, key="q1_show", format_func=lambda s: {"wavefunction": "ψ", "density": "|ψ|²"}[s])
     chosen = st.multiselect("Levels to draw", list(range(result.n_levels)), default=list(range(min(result.n_levels, 6))), key="q1_draw")
-    st.plotly_chart(eigenstates_figure(result, show, chosen), width="stretch", key="q1_fig")
+    show_figure(eigenstates_figure(result, show, chosen), width="stretch", key="q1_fig")
     if result.analytic is not None:
-        st.plotly_chart(convergence_figure(result), width="stretch", key="q1_conv")
+        show_figure(convergence_figure(result), width="stretch", key="q1_conv")
 
     with st.expander("Per-state observables"):
         st.dataframe(pd.DataFrame([{"n": i, "E": o.energy, "⟨x⟩": o.mean_x, "Δx": o.std_x, "Δp": o.std_p, "Δx·Δp / (ħ/2)": o.std_x * o.std_p / (result.hbar / 2),
@@ -223,12 +224,12 @@ def _wavepacket_tab() -> None:
                   f"{result.final_probabilities['right'] - result.predicted['transmitted']:+.4f} vs exact", delta_color="off")
         m2.metric("Transmitted (exact scattering)", f"{result.predicted['transmitted']:.4f}")
         m3.metric("Reflected (simulation)", f"{result.final_probabilities['left']:.4f}")
-    st.plotly_chart(wavepacket_animation_figure(result), width="stretch", key="q2_anim")
+    show_figure(wavepacket_animation_figure(result), width="stretch", key="q2_anim")
     if result.predicted is not None:
-        st.plotly_chart(transmission_figure(result, result.hbar, result.mass), width="stretch", key="q2_T")
-        st.plotly_chart(region_probability_figure(result), width="stretch", key="q2_region")
+        show_figure(transmission_figure(result, result.hbar, result.mass), width="stretch", key="q2_T")
+        show_figure(region_probability_figure(result), width="stretch", key="q2_region")
     with st.expander("Conservation laws and Ehrenfest's theorem"):
-        st.plotly_chart(dynamics_diagnostics_figure(result), width="stretch", key="q2_diag")
+        show_figure(dynamics_diagnostics_figure(result), width="stretch", key="q2_diag")
 
 
 # ------------------------------------------------------------------------------------------ 3. operators
@@ -391,7 +392,7 @@ def _bch_section(env) -> None:
     for k, term in result.latex_terms:
         st.latex(("" if k == 1 else "+\\ ") + term)
     render_checks(result.checks, "Numerical verification of the expansion")
-    st.plotly_chart(bch_error_figure(result), width="stretch", key="q3_bch_fig")
+    show_figure(bch_error_figure(result), width="stretch", key="q3_bch_fig")
 
 
 # ------------------------------------------------------------------------------------------ 4. qubit
@@ -444,13 +445,13 @@ def _qubit_tab() -> None:
     m[1].metric("Fidelity with the ideal state", f"{result.fidelity[-1]:.4f}")
     m[2].metric("|r| at the end", f"{np.linalg.norm(result.bloch[-1]):.4f}")
     m[3].metric("Total time", f"{result.times[-1]:.4g}")
-    st.plotly_chart(bloch_sphere_figure(result), width="stretch", key="q4_bloch")
-    st.plotly_chart(qubit_timeseries_figure(result), width="stretch", key="q4_ts")
+    show_figure(bloch_sphere_figure(result), width="stretch", key="q4_bloch")
+    show_figure(qubit_timeseries_figure(result), width="stretch", key="q4_ts")
     d1, d2 = st.columns(2)
     with d1:
-        st.plotly_chart(density_matrix_figure(bloch_to_density(result.initial), "Initial ρ"), width="stretch", key="q4_rho0")
+        show_figure(density_matrix_figure(bloch_to_density(result.initial), "Initial ρ"), width="stretch", key="q4_rho0")
     with d2:
-        st.plotly_chart(density_matrix_figure(result.final_density, "Final ρ"), width="stretch", key="q4_rho1")
+        show_figure(density_matrix_figure(result.final_density, "Final ρ"), width="stretch", key="q4_rho1")
     with st.expander("Each gate as a rotation of the sphere"):
         st.dataframe(pd.DataFrame([{"gate": g.label, "axis (x, y, z)": ", ".join(f"{v:.3f}" for v in g.axis),
                                     "angle (rad)": g.angle, "angle (°)": np.degrees(g.angle)} for g in result.gates]),
@@ -463,7 +464,7 @@ def _qubit_tab() -> None:
             z_eq = noise.gamma1 / noise.rate_z if noise.rate_z else 0.0
             fit1 = fit_exponential_time(times, t1v, floor=z_eq)
             fit2 = fit_exponential_time(times, rv)
-            st.plotly_chart(relaxation_figure(times, t1v, rv, noise.t1, noise.t2, fit1, fit2), width="stretch", key="q4_relax")
+            show_figure(relaxation_figure(times, t1v, rv, noise.t1, noise.t2, fit1, fit2), width="stretch", key="q4_relax")
 
 
 # ------------------------------------------------------------------------------------------ 5. perturbation
@@ -495,8 +496,8 @@ def _show_levels(levels, comparison, checks, notes=()) -> None:
                 st.latex(rf"|{lv.index}^{{(1)}}\rangle = {sp.latex(lv.state_correction.T)}\,\text{{ (in the unperturbed basis)}}")
     if comparison is not None:
         st.caption(f"Comparison with {comparison.exact_method}.")
-        st.plotly_chart(perturbation_energy_figure(comparison), width="stretch", key="q5_e")
-        st.plotly_chart(perturbation_error_figure(comparison), width="stretch", key="q5_err")
+        show_figure(perturbation_energy_figure(comparison), width="stretch", key="q5_e")
+        show_figure(perturbation_error_figure(comparison), width="stretch", key="q5_err")
 
 
 def _oscillator_perturbation_ui() -> None:

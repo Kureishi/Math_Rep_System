@@ -5,8 +5,8 @@ Kept out of plotter.py (already very large) and out of the page so they can be t
 """
 import plotly.graph_objects as go
 
-_A_COLOR = "#4C78A8"
-_B_COLOR = "#F58518"
+_A_COLOR = "#0072B2"
+_B_COLOR = "#C48700"
 
 
 def build_relative_change_chart(rows: list[tuple[str, float]]) -> go.Figure:

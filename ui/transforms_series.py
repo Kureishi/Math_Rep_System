@@ -4,6 +4,7 @@ Transforms & series mode: Laplace/Fourier and Taylor/asymptotic expansions, each
 import numpy as np
 import pandas as pd
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 from modules.transforms import (
     laplace_transform_expr,
@@ -168,7 +169,7 @@ def _render_taylor_animation(result):
             st.caption(frames.error)
             return
         title = sp.sstr(result.input_expr)
-        st.plotly_chart(cached("series_anim", (frames, title), lambda: build_partial_sum_animation(frames, title=title)),
+        show_figure(cached("series_anim", (frames, title), lambda: build_partial_sum_animation(frames, title=title)),
                          width="stretch", key="series_anim")
         gif_download_button(key="series_anim", file_stem="taylor_partial_sums",
                              render_fn=lambda: snapshot_partial_sum_gif(frames, title))
@@ -184,7 +185,7 @@ def _render_fourier_series_result(result, expr_str):
     else:
         st.warning("The RMS error INCREASED when a harmonic was added, which a correct Fourier series "
                     "can't do -- treat these coefficients with suspicion.")
-    st.plotly_chart(cached("fseries_anim", (result, expr_str), lambda: build_partial_sum_animation(result, title=expr_str)),
+    show_figure(cached("fseries_anim", (result, expr_str), lambda: build_partial_sum_animation(result, title=expr_str)),
                      width="stretch", key="fseries_anim")
     gif_download_button(key="fseries_anim", file_stem="fourier_partial_sums",
                          render_fn=lambda: snapshot_partial_sum_gif(result, expr_str))

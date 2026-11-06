@@ -3,8 +3,8 @@ The Streamlit front end. app.py used to be one ~4,000-line script; it is now a t
 this package:
 
     app.py                    page config, session defaults, sidebar, dispatch
-    ui/__init__.py            PAGES: mode label -> page function (this file). Pages are imported
-                              LAZILY, on first use -- see the note below
+    ui/__init__.py            PAGES: mode label -> page function, derived from modules/modes/. Pages are
+                              imported LAZILY, on first use -- see the note below
     ui/common.py              helpers shared by several pages (upload guard, snapshot buttons, ...)
     ui/sidebar.py             the sidebar
     ui/word_problem.py        the default page: input, Solve, pipeline, then the results view
@@ -12,8 +12,8 @@ this package:
     ui/<mode>.py              one module per standalone mode
 
 Nothing in modules/ imports from here (modules/ stays Streamlit-free), and the mode list itself lives
-in modules/command_palette.py (MODE_LABELS) so the sidebar radio, the palette and this dispatch table
-cannot drift apart -- tests/test_app_modes.py fails if they do.
+in modules/modes/ (one declaration file per mode, discovered by modules/mode_registry.py), from which the sidebar radio, the
+palette, the router and this dispatch table are all derived, so they cannot drift apart.
 
 Why lazy: this file used to import all twelve page modules up front, and those pull in pandas
 (-> pyarrow), openai, matplotlib, scipy, ... -- several seconds of imports that all had to finish
@@ -27,6 +27,8 @@ import importlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from modules.mode_registry import REGISTRY
+
 if TYPE_CHECKING:  # annotation only -- importing it for real would drag in the openai SDK
     from modules.llm_client import LMStudioClient
 
@@ -36,32 +38,11 @@ WORD_PROBLEM_MODE = "📝 Word problem solver"
 
 Page = Callable[["LMStudioClient"], None]
 
-# mode label -> (module, function, takes_client). takes_client is False for pages that never talk to the
-# model, so which pages DO use the LLM stays visible in this one table.
+# mode label -> (module, function, takes_client), DERIVED from the mode declarations in modules/modes/ (and plugins/): to add a mode
+# you add a file there, not a line here. The default mode has no page entry. takes_client is False for pages that never talk to the
+# model; `grep needs_client=True modules/modes` lists the ones that do.
 PAGE_TARGETS: dict[str, tuple[str, str, bool]] = {
-    "📈 Curve fitting": ("ui.curve_fitting", "render_curve_fitting_tab", False),
-    "🔁 Check equivalence": ("ui.equivalence", "render_equivalence_tab", False),
-    "📚 Batch solver": ("ui.batch", "render_batch_solver_tab", True),
-    "🔗 Problem chains": ("ui.chains", "render_chains_tab", True),
-    "🔬 Extraction diff": ("ui.extraction_diff", "render_extraction_diff_tab", True),
-    "🆚 Compare solves": ("ui.compare", "render_compare_tab", False),
-    "⚛️ Quantum mechanics": ("ui.quantum", "render_quantum_tab", False),
-    "📐 Dimensional analysis": ("ui.dimensional", "render_dimensional_analysis_tab", False),
-    "🔄 Transforms & series": ("ui.transforms_series", "render_transforms_series_tab", False),
-    "🌡️ PDE solver": ("ui.pde", "render_pde_tab", False),
-    "🧮 Tensor calculus": ("ui.tensor", "render_tensor_calculus_tab", False),
-    "🌌 General relativity": ("ui.relativity", "render_relativity_tab", False),
-    "🔥 Statistical mechanics": ("ui.statmech", "render_statmech_tab", False),
-    "🧰 Numerics & verification lab": ("ui.lab", "render_lab_tab", False),
-    "🧭 Discover equations": ("ui.discover", "render_discover_tab", False),
-    "🎬 Visual showcase": ("ui.showcase", "render_showcase_tab", False),
-    "🩺 Health check": ("ui.health", "render_health_tab", True),
-    "🔎 Have I solved this?": ("ui.recall", "render_recall_tab", True),
-    "🎲 Posterior sampling (MCMC)": ("ui.posterior", "render_posterior_tab", False),
-    "🧑‍🏫 Problem sets": ("ui.problem_sets", "render_problem_sets_tab", False),
-    "📔 Research journal": ("ui.journal", "render_research_journal_tab", False),
-    "🚀 Quick start": ("ui.quick_start", "render_quick_start_tab", False),
-    "📐 Geometry": ("ui.geometry", "render_geometry_tab", False),
+    spec.label: (spec.module, spec.function, spec.needs_client) for spec in REGISTRY.specs if spec.module
 }
 
 

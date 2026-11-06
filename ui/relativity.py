@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 
 from modules import gr_cones, gr_curvature, gr_geodesics, gr_plots, gr_potential, gr_transforms, gr_waves
@@ -244,10 +245,10 @@ def _integration_options(prefix: str) -> dict:
 def _show_geodesic(res: gr_geodesics.GeodesicResult, key: str) -> None:
     st.caption(f"{res.reason}. {len(res.lam)} samples, {res.n_rhs} derivative evaluations, {res.method}, rtol {res.rtol:g}.")
     render_checks(res.checks, "Conserved quantities and run checks")
-    st.plotly_chart(gr_plots.orbit_figure_2d(res, animate=st.checkbox("Animate the path", key=f"{key}_anim")), width="stretch")
+    show_figure(gr_plots.orbit_figure_2d(res, animate=st.checkbox("Animate the path", key=f"{key}_anim")), width="stretch")
     with st.expander("3D view"):
-        st.plotly_chart(gr_plots.orbit_figure_3d(res), width="stretch")
-    st.plotly_chart(gr_plots.conserved_figure(res), width="stretch")
+        show_figure(gr_plots.orbit_figure_3d(res), width="stretch")
+    show_figure(gr_plots.conserved_figure(res), width="stretch")
 
 
 def _general_geodesic() -> None:
@@ -423,7 +424,7 @@ def _bending_tab() -> None:
     st.caption("Radians; 'exact' is the integral between radius R and R (what a ray starting at R actually sweeps), the weak-field "
                "value is the infinite-distance deflection, so they differ by about 2b/R at finite R.")
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    st.plotly_chart(gr_plots.deflection_figure(rays, 2 * M), width="stretch")
+    show_figure(gr_plots.deflection_figure(rays, 2 * M), width="stretch")
 
 
 # ================================================================================ 3. potentials
@@ -470,7 +471,7 @@ def _potential_tab() -> None:
         curves = [(f"L = {L:g}", gr_potential.veff_static(st_sp, L, r, params, light)) for L in Ls]
         shown = [m for m in markers if not (light and m.kind in ("ISCO", "stability limit", "marginally bound"))]
         e_sq = st.number_input("Optional: show a particle energy E²", value=0.0, key="grv_E2", format="%.5g")
-        st.plotly_chart(gr_plots.veff_figure(r, curves, shown, e_sq if e_sq > 0 else None,
+        show_figure(gr_plots.veff_figure(r, curves, shown, e_sq if e_sq > 0 else None,
                                              "V(r) = f (κ + L²/r²)", "Effective potential"), width="stretch")
         st.dataframe(pd.DataFrame([{"Feature": m.kind, "r": round(m.r, 6), "stable": "" if m.stable is None else ("yes" if m.stable else "no")}
                                    for m in markers]), hide_index=True, width="stretch")
@@ -506,7 +507,7 @@ def _potential_tab() -> None:
         if not light:
             markers += [gr_potential.Marker("ISCO (prograde)", kc.isco_prograde, "ISCO", True),
                         gr_potential.Marker("ISCO (retrograde)", kc.isco_retrograde, "ISCO", True)]
-        st.plotly_chart(gr_plots.veff_figure(r, curves, markers, None, "E₊(r; L)", "Kerr equatorial effective potential (motion needs E ≥ E₊)"),
+        show_figure(gr_plots.veff_figure(r, curves, markers, None, "E₊(r; L)", "Kerr equatorial effective potential (motion needs E ≥ E₊)"),
                         width="stretch")
         st.caption("Negative a is a retrograde disc; the figure uses L > 0, so a < 0 and L > 0 is the counter-rotating case. "
                    "Radii below are for |a|.")
@@ -647,7 +648,7 @@ def _cones_tab() -> None:
         st.error(str(e))
         return
     scale = 0.35 * (a_hi - a_lo) / n_a
-    st.plotly_chart(gr_plots.cones_figure(cones, (ta, tb), curves, scale=scale, aspect=aspect,
+    show_figure(gr_plots.cones_figure(cones, (ta, tb), curves, scale=scale, aspect=aspect,
                                           title=f"Light cones of {metric.name}"), width="stretch")
     n_closed = sum(1 for c in cones if not c.open)
     if n_closed:
@@ -659,10 +660,10 @@ def _cones_tab() -> None:
     st.write("**Penrose diagram**")
     kind = gr_cones.penrose_supported(metric)
     if kind == "minkowski":
-        st.plotly_chart(gr_plots.penrose_figure(gr_cones.minkowski_penrose(), "Penrose diagram of Minkowski space"), width="stretch")
+        show_figure(gr_plots.penrose_figure(gr_cones.minkowski_penrose(), "Penrose diagram of Minkowski space"), width="stretch")
     elif kind == "schwarzschild":
         M = params.get("M", 1.0)
-        st.plotly_chart(gr_plots.penrose_figure(gr_cones.schwarzschild_penrose(M), "Maximally extended Schwarzschild"), width="stretch")
+        show_figure(gr_plots.penrose_figure(gr_cones.schwarzschild_penrose(M), "Maximally extended Schwarzschild"), width="stretch")
         st.caption("Computed from Kruskal–Szekeres coordinates: horizons at 45°, singularities r = 0 at the top and bottom, "
                    "two asymptotic regions. Radial light rays are 45° lines.")
     else:
@@ -713,7 +714,7 @@ def _plane_wave_tab() -> None:
     if abs(n_vec[0]) + abs(n_vec[1]) < 1e-12:
         times = np.linspace(0, 4 * math.pi / om, 120)
         pos = gr_waves.ring_positions(om, ap, ac, times, cross_phase=delta)
-        st.plotly_chart(gr_plots.ring_animation_figure(pos, times), width="stretch")
+        show_figure(gr_plots.ring_animation_figure(pos, times), width="stretch")
         pos_num, err = gr_waves.geodesic_deviation_ring(om, ap, ac, times, cross_phase=delta)
         rc = gr_waves.free_particle_check(min(ap, 0.05), min(ac, 0.05), om, 4 * math.pi / om)
         ck = CheckList()
@@ -777,7 +778,7 @@ def _quadrupole_tab() -> None:
         render_checks(rad.checks, "Symbolic quadrupole vs textbook closed forms")
         t = sp.Symbol("t", real=True)
         ts = np.linspace(0, 4 * 2 * math.pi / rad.omega, 600)
-        st.plotly_chart(gr_plots.waveform_figure(ts, gr_waves.sample_series(rad.quad.h_plus, t, ts),
+        show_figure(gr_plots.waveform_figure(ts, gr_waves.sample_series(rad.quad.h_plus, t, ts),
                                                  gr_waves.sample_series(rad.quad.h_cross, t, ts)), width="stretch")
     else:
         st.caption("One line per mass:  mass; x(t); y(t); z(t)   (t is the retarded time; example: a rotating dumbbell)")
@@ -798,7 +799,7 @@ def _quadrupole_tab() -> None:
         st.latex(rf"h_\times = {sp.latex(q.h_cross)}")
         st.latex(rf"P = {sp.latex(q.power)}")
         ts = np.linspace(0, 8.0, 500)
-        st.plotly_chart(gr_plots.waveform_figure(ts, gr_waves.sample_series(q.h_plus, t, ts),
+        show_figure(gr_plots.waveform_figure(ts, gr_waves.sample_series(q.h_plus, t, ts),
                                                  gr_waves.sample_series(q.h_cross, t, ts)), width="stretch")
 
 
@@ -820,7 +821,7 @@ def _inspiral_tab() -> None:
         return
     st.caption(f"G = c = 1. Time to merger from a₀: {ins.merger_time:.6g}. Chirp mass 𝓜 = {ins.chirp_mass:.6g}.")
     render_checks(ins.checks, "Numerical vs closed-form inspiral")
-    st.plotly_chart(gr_plots.inspiral_figure(ins), width="stretch")
+    show_figure(gr_plots.inspiral_figure(ins), width="stretch")
 
 
 # ================================================================================ page

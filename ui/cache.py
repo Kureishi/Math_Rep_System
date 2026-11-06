@@ -16,7 +16,8 @@ dataclass fields), never by identity or `repr`, and anything that cannot be
 fingerprinted makes the call fall back to computing -- slower, never wrong.
 
 The results are shared between reruns, so the caller must treat them as read-only
-(pass a cached figure to st.plotly_chart; do not call update_layout on it).
+(pass a cached figure to ui.a11y.show_figure; do not change it yourself: show_figure only applies the app's theme, which is
+idempotent, so a cached figure stays correct when the theme is switched).
 """
 import dataclasses
 import hashlib

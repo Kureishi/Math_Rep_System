@@ -30,6 +30,7 @@ FAILURE IS NOT FATAL. If a GPU run fails for any reason that is not the user's i
 fault, a function CuPy cannot run), `attempt()` logs it and repeats the job on the CPU.
 """
 import os
+import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -66,6 +67,7 @@ class Backend:
 CPU = Backend(np, "CPU (NumPy)", False, "numpy")
 
 _mode = "auto"
+_last = threading.local()                  # the backend the most recent attempt() actually ran on, per thread
 _override: Backend | None = None          # tests only: pretend this backend is the GPU
 
 
@@ -162,18 +164,33 @@ def on_device(backend: Backend, a: Any) -> Any:
     return backend.xp.array(a)
 
 
+def reset_last() -> None:
+    """Forget which backend ran last (call before an operation whose backend you want to report)."""
+    _last.name = None
+
+
+def last_used() -> str | None:
+    """The name of the backend that ran the most recent attempt() in this thread since reset_last(), or None if none did."""
+    return getattr(_last, "name", None)
+
+
 def attempt(backend: Backend, on_gpu: Callable[[], T], on_cpu: Callable[[], T],
             passthrough: tuple[type[BaseException], ...] = ()) -> T:
     """Run `on_gpu` when `backend` is a GPU; if it fails for a reason other than the user's input (the exception
-    types in `passthrough`, which are re-raised), log it and repeat the job with `on_cpu`."""
+    types in `passthrough`, which are re-raised), log it and repeat the job with `on_cpu`. Records which one produced the
+    result (`last_used`)."""
     if backend.is_gpu:
         try:
-            return on_gpu()
+            result = on_gpu()
+            _last.name = backend.name
+            return result
         except passthrough:
             raise
         except Exception as exc:  # noqa: BLE001 -- out of memory, driver fault, unsupported function...
             logger.warning("GPU run failed (%s: %s); repeating it on the CPU", type(exc).__name__, exc)
-    return on_cpu()
+    result = on_cpu()
+    _last.name = CPU.name
+    return result
 
 
 @contextmanager

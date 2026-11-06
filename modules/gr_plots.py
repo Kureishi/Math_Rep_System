@@ -3,6 +3,7 @@ Plotly figures for the General-Relativity tools -- Streamlit-free. Each takes th
 returns a plain go.Figure (the app's theme and the HTML report each apply their own styling), the same arrangement
 as modules/quantum_plots.py.
 """
+from modules.palette import CATEGORICAL, INK
 import math
 
 import numpy as np
@@ -13,9 +14,9 @@ from modules.gr_geodesics import GeodesicResult, to_cartesian
 from modules.gr_potential import Marker
 from modules.plotter import _frame_indices, _play_layout
 
-_PALETTE = ["#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#B279A2", "#FF9DA6", "#9D755D"]
-_MARKER_STYLE = {"horizon": ("black", "solid"), "photon sphere": ("#E45756", "dash"), "ISCO": ("#54A24B", "dash"),
-                 "stability limit": ("#9D755D", "dot"), "marginally bound": ("#B279A2", "dot")}
+_PALETTE = CATEGORICAL
+_MARKER_STYLE = {"horizon": ("black", "solid"), "photon sphere": ("#D55E00", "dash"), "ISCO": ("#009E73", "dash"),
+                 "stability limit": ("#8A8F98", "dot"), "marginally bound": ("#CC79A7", "dot")}
 
 
 # ------------------------------------------------------------------------------------------ geodesics
@@ -35,19 +36,19 @@ def orbit_figure_2d(result: GeodesicResult, animate: bool = False, max_frames: i
     for rh in _horizon_radii(result):
         ang = np.linspace(0, 2 * math.pi, 200)
         fig.add_trace(go.Scatter(x=rh * np.cos(ang), y=rh * np.sin(ang), mode="lines", fill="toself", name=f"horizon r = {rh:.3g}",
-                                 line=dict(color="black"), fillcolor="rgba(0,0,0,0.85)"))
+                                 line=dict(color=INK, width=1.5), fillcolor="rgba(0,0,0,0.85)"))
     fig.add_trace(go.Scatter(x=xyz[:, 0], y=xyz[:, 1], mode="lines", name="path", line=dict(color=_PALETTE[0], width=2)))
     fig.add_trace(go.Scatter(x=[xyz[0, 0]], y=[xyz[0, 1]], mode="markers", name="start", marker=dict(size=9, color="green")))
     if result.periapses:
         pe = to_cartesian(metric, np.array([s[:metric.dim] for _, s in result.periapses]), result.system.params)
         fig.add_trace(go.Scatter(x=pe[:, 0], y=pe[:, 1], mode="markers+text", name="periapsis", text=[str(i + 1) for i in range(len(pe))],
-                                 textposition="top center", marker=dict(size=8, color="#E45756", symbol="diamond")))
+                                 textposition="top center", marker=dict(size=8, color="#D55E00", symbol="diamond")))
     fig.update_layout(xaxis=dict(title="x", scaleanchor="y"), yaxis=dict(title="y"), title=f"{metric.name}: path ({result.kind})",
                       height=520)
     if animate:
         idx = _frame_indices(len(xyz), max_frames)
         base = len(fig.data)
-        fig.add_trace(go.Scatter(x=[xyz[0, 0]], y=[xyz[0, 1]], mode="markers", name="particle", marker=dict(size=12, color="#F58518")))
+        fig.add_trace(go.Scatter(x=[xyz[0, 0]], y=[xyz[0, 1]], mode="markers", name="particle", marker=dict(size=12, color="#C48700")))
         fig.frames = [go.Frame(data=[go.Scatter(x=[xyz[i, 0]], y=[xyz[i, 1]])], traces=[base], name=str(k)) for k, i in enumerate(idx)]
         fig.update_layout(**_play_layout([f"λ = {result.lam[i]:.4g}" for i in idx], "", 40))
     return fig
@@ -90,7 +91,7 @@ def deflection_figure(rays: list[tuple[float, GeodesicResult]], horizon: float |
     if horizon:
         ang = np.linspace(0, 2 * math.pi, 200)
         fig.add_trace(go.Scatter(x=horizon * np.cos(ang), y=horizon * np.sin(ang), fill="toself", mode="lines", name="horizon",
-                                 line=dict(color="black"), fillcolor="rgba(0,0,0,0.85)"))
+                                 line=dict(color=INK, width=1.5), fillcolor="rgba(0,0,0,0.85)"))
     fig.update_layout(xaxis=dict(title="x", scaleanchor="y"), yaxis_title="y", title="Light bending", height=520)
     return fig
 
@@ -150,9 +151,9 @@ def cones_figure(cones: list[LightCone], plane: tuple[str, str], curves: list[np
 
 
 def penrose_figure(curves: dict[str, list[np.ndarray]], title: str = "Penrose diagram") -> go.Figure:
-    style = {"horizon": ("black", 3, "solid"), "singularity": ("#E45756", 4, "solid"), "infinity": ("gray", 2, "solid"),
-             "boundary": ("gray", 2, "solid"), "const_r": ("#4C78A8", 1, "solid"), "const_t": ("#54A24B", 1, "dot"),
-             "rays": ("#F58518", 1, "dash")}
+    style = {"horizon": ("black", 3, "solid"), "singularity": ("#D55E00", 4, "solid"), "infinity": ("gray", 2, "solid"),
+             "boundary": ("gray", 2, "solid"), "const_r": ("#0072B2", 1, "solid"), "const_t": ("#009E73", 1, "dot"),
+             "rays": ("#C48700", 1, "dash")}
     labels = {"horizon": "horizons", "singularity": "singularity r = 0", "infinity": "null infinity", "boundary": "boundary",
               "const_r": "r = const", "const_t": "t = const", "rays": "radial light rays"}
     fig = go.Figure()

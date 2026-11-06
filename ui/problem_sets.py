@@ -4,6 +4,7 @@ import copy
 
 import plotly.graph_objects as go
 import streamlit as st
+from ui.a11y import show_figure
 
 from modules import history
 from modules import problem_sets as ps
@@ -158,9 +159,9 @@ def _grade_tab() -> None:
                  hide_index=True, width="stretch")
     st.markdown("#### By problem")
     labels = [f"{p.problem} ({p.target})" for p in report.problems]
-    fig = go.Figure(go.Bar(x=labels, y=[p.facility * 100 for p in report.problems], marker_color="#4C78A8"))
+    fig = go.Figure(go.Bar(x=labels, y=[p.facility * 100 for p in report.problems], marker_color="#0072B2"))
     fig.update_layout(height=300, yaxis_title="% fully correct", xaxis_title="problem (quantity)", margin=dict(t=20))
-    st.plotly_chart(fig, width="stretch")
+    show_figure(fig, width="stretch")
     mistakes = [p for p in report.problems if p.common_mistake]
     if mistakes:
         st.markdown("**Commonest mistakes**")

@@ -6,6 +6,7 @@ diagram (with a cobweb) for a first-order map.
 """
 import numpy as np
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 
 from modules.bifurcation import bifurcation_diagram, lambdify_map
@@ -107,7 +108,7 @@ def _render_fan(model, group, symbolic, params, label, t0) -> None:
         if not fan.applicable:
             st.warning(fan.reason)
             return
-        st.plotly_chart(cached(f"fan:{label}", (fan,), lambda: build_uncertainty_fan(fan)),
+        show_figure(cached(f"fan:{label}", (fan,), lambda: build_uncertainty_fan(fan)),
                          width="stretch", key=f"fan_{label}")
         for i, name in enumerate(fan.names):
             st.write(f"**{name}** at t = {fan.t[-1]:g}: nominal {fan.nominal[i][-1]:.4g}, 90% of samples in "
@@ -152,7 +153,7 @@ def _render_morph(symbolic, params, names, label, t0, t_sym) -> None:
         if not morph.applicable:
             st.warning(morph.reason)
             return
-        st.plotly_chart(cached(f"morph:{label}", (morph,), lambda: build_parameter_morph(morph)),
+        show_figure(cached(f"morph:{label}", (morph,), lambda: build_parameter_morph(morph)),
                          width="stretch", key=f"morph_{label}_{chosen}")
         change = first_regime_change(morph)
         if change is None:
@@ -242,7 +243,7 @@ def _render_bifurcation(model, func_name, g_expr, g_var, free, known) -> None:
             st.warning(result.reason)
             return
         marker = current if current is not None else None
-        st.plotly_chart(cached(f"bifurcation:{func_name}", (result, marker),
+        show_figure(cached(f"bifurcation:{func_name}", (result, marker),
                                 lambda: build_bifurcation_plot(result, marker=marker)),
                          width="stretch", key=f"bif_{func_name}")
         if result.transitions:
@@ -277,7 +278,7 @@ def _render_cobweb_without_closed_form(model, func_name, g_expr, g_var, known) -
             x_range = st.slider("Plot range", -10.0 * span, 10.0 * span, (min(-0.1, x0 - span), max(1.1, x0 + span)),
                                  key=f"cobweb2_range_{func_name}")
             steps = st.slider("Steps to show", 2, 60, 25, key=f"cobweb2_steps_{func_name}")
-            st.plotly_chart(build_cobweb_plot(g_numeric, x0, x_range, n_steps=steps, x_label=func_name),
+            show_figure(build_cobweb_plot(g_numeric, x0, x_range, n_steps=steps, x_label=func_name),
                              width="stretch", key=f"cobweb2_{func_name}")
             gif_download_button(
                 key=f"cobweb2_{func_name}", file_stem=f"cobweb_{func_name}",

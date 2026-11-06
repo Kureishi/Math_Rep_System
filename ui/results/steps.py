@@ -2,6 +2,7 @@
 The step-by-step solution section, split per feature: the step list, each target's answer extras, and the per-target analysis expanders.
 """
 import streamlit as st
+from ui.a11y import show_figure
 import numpy as np
 import pandas as pd
 from modules import proof_card
@@ -308,7 +309,7 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                 hist_fig = build_histogram_plot(mc_result.samples, target_name,
                                                    mean=mc_result.mean, p5=mc_result.p5,
                                                    p95=mc_result.p95)
-                st.plotly_chart(hist_fig, width='stretch', key=f"mc_hist_{target_name}")
+                show_figure(hist_fig, width='stretch', key=f"mc_hist_{target_name}")
                 format_download_button(
                     key=f"mc_hist_{target_name}",
                     file_stem=f"monte_carlo_{target_name}_seed{mc_result.seed}",
@@ -323,7 +324,7 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                                     "at the right edge means more samples would still help; "
                                     "one that's flat well before the end means it's converged.")
                         conv_fig = build_monte_carlo_convergence_plot(mc_result.samples, target_name)
-                        st.plotly_chart(conv_fig, width="stretch", key=f"mc_conv_{target_name}")
+                        show_figure(conv_fig, width="stretch", key=f"mc_conv_{target_name}")
             elif mc_result is not None:
                 st.warning("No samples produced a real result -- try smaller std values.")
 
@@ -546,7 +547,7 @@ def render_sensitivity(model: ProblemModel, target_name):
                                          _known_substitutions(model), pct_range)
             if sweep_result:
                 sweep_fig = build_sweep_chart(sweep_result)
-                st.plotly_chart(sweep_fig, width='stretch', key=f"sweep_{target_name}")
+                show_figure(sweep_fig, width='stretch', key=f"sweep_{target_name}")
                 snapshot_button(
                     key=f"sweep_{target_name}_{sweep_symbol}",
                     figure=sweep_fig,

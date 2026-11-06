@@ -2,6 +2,7 @@
 Curve/data fitting mode (CSV or pasted (x, y) -> fitted symbolic model + fit-quality + statistical inference).
 """
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 import numpy as np
 from modules.statistical_inference import (
@@ -236,7 +237,7 @@ def render_curve_fitting_tab():
                     series.append({"x": x_grid, "y": y_fit, "name": f"{fam} (R²={res.r_squared:.3f})"})
                 overlay_fig = build_overlay_plot(series, x_label=x_label, y_label=y_label,
                                                    title="All candidate fits vs. data")
-                st.plotly_chart(overlay_fig, width='stretch')
+                show_figure(overlay_fig, width='stretch')
                 format_download_button(
                     key="fit_overlay", file_stem="curve_fit_comparison",
                     render_fn=lambda fmt, s=series: snapshot_overlay_plot(
@@ -268,7 +269,7 @@ def render_curve_fitting_tab():
                     "the chosen family actually matches the data's shape.")
 
     fig = build_fit_plot(xs, ys, result.expr, x_label, y_label, x_log=fit_x_log, y_log=fit_y_log)
-    st.plotly_chart(fig, width='stretch')
+    show_figure(fig, width='stretch')
 
     with st.expander("Residuals"):
         for x, y, r in zip(xs, ys, result.residuals):

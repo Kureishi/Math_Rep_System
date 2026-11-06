@@ -15,10 +15,11 @@ from typing import Any
 
 import plotly.graph_objects as go
 import streamlit as st
+from ui.a11y import show_figure
 
 
 def selectable_chart(fig: go.Figure, key: str) -> Any:
     """Draw `fig` full-width with click-to-select points; returns the selection state (an attribute-style
     dict with ["selection"]["points"]), or whatever Streamlit returns when selection is unavailable."""
     fig.update_layout(clickmode="event+select")
-    return st.plotly_chart(fig, width="stretch", key=key, on_select="rerun", selection_mode=("points",))
+    return show_figure(fig, width="stretch", key=key, on_select="rerun", selection_mode=("points",))

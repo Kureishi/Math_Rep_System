@@ -2,6 +2,7 @@
 ODE and recurrence closed-form solution sections (plot + evaluate-at-a-point).
 """
 import streamlit as st
+from ui.a11y import show_figure
 import sympy as sp
 import numpy as np
 import plotly.graph_objects as go
@@ -57,7 +58,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name=f"{func_name}({indep_sym})"))
                 fig.update_layout(xaxis_title=str(indep_sym), yaxis_title=func_name)
-                st.plotly_chart(fig, width='stretch')
+                show_figure(fig, width='stretch')
 
                 ode_caption = (
                     f"ODE solution for {func_name}({indep_sym}) | range: {indep_sym} in "
@@ -112,7 +113,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
             if not cmp_.applicable:
                 st.caption(f"Couldn't compare over that range: {cmp_.reason}")
             else:
-                st.plotly_chart(cached(f"odeerr:{label}", (cmp_,), lambda: build_ode_error_plot(cmp_)),
+                show_figure(cached(f"odeerr:{label}", (cmp_,), lambda: build_ode_error_plot(cmp_)),
                                  width="stretch", key=f"odeerr_{label}")
                 if cmp_.ok:
                     st.success(f"Agreement everywhere shown (max relative error {cmp_.max_rel_error:.2e}).")
@@ -209,7 +210,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                         (float(txs.min() - pad_x), float(txs.max() + pad_x)),
                         (float(tys.min() - pad_y), float(tys.max() + pad_y)),
                         x_label=fname_x, y_label=fname_y, trajectory=(txs, tys)))
-                st.plotly_chart(phase_fig, width="stretch", key=f"phase_{fname_x}_{fname_y}")
+                show_figure(phase_fig, width="stretch", key=f"phase_{fname_x}_{fname_y}")
 
                 # ---- the same system as a MOVIE: points flowing along the field, trailing behind them
                 x_rng = (float(txs.min() - pad_x), float(txs.max() + pad_x))
@@ -228,7 +229,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                     f"phase_trail:{fname_x}:{fname_y}", (dx_expr, dy_expr, x_rng, y_rng, paths, ts, fname_x, fname_y),
                     lambda: build_phase_trail_animation(dx_f, dy_f, x_rng, y_rng, paths, ts, x_label=fname_x,
                                                           y_label=fname_y))
-                st.plotly_chart(trail_fig, width="stretch", key=f"phase_trail_{fname_x}_{fname_y}")
+                show_figure(trail_fig, width="stretch", key=f"phase_trail_{fname_x}_{fname_y}")
                 gif_download_button(
                     key=f"phase_trail_{fname_x}_{fname_y}", file_stem=f"phase_flow_{fname_x}_{fname_y}",
                     render_fn=lambda pa=paths, xr=x_rng, yr=y_rng, fx_=fname_x, fy_=fname_y, tt=ts:
@@ -241,7 +242,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                 linked_fig = cached(
                     f"phase_linked:{fname_x}:{fname_y}", (dx_expr, dy_expr, ts, fname_x, fname_y, txs, tys),
                     lambda: build_time_linked_view(ts, [(fname_x, txs), (fname_y, tys)], field=(dx_f, dy_f)))
-                st.plotly_chart(linked_fig, width="stretch", key=f"phase_linked_{fname_x}_{fname_y}")
+                show_figure(linked_fig, width="stretch", key=f"phase_linked_{fname_x}_{fname_y}")
                 gif_download_button(
                     key=f"phase_linked_{fname_x}_{fname_y}", file_stem=f"time_linked_{fname_x}_{fname_y}",
                     render_fn=lambda fx_=fname_x, fy_=fname_y, xs_=txs, ys_=tys, tt=ts:
@@ -315,7 +316,7 @@ def render_recurrence_solution(ws: Workspace, model: ProblemModel):
                 fig.add_trace(go.Scatter(x=ns, y=ys, mode="markers", name=f"{func_name}({indep_sym})",
                                            marker=dict(size=8)))
                 fig.update_layout(xaxis_title=str(indep_sym), yaxis_title=func_name)
-                st.plotly_chart(fig, width='stretch')
+                show_figure(fig, width='stretch')
 
                 rec_caption = (
                     f"Recurrence solution for {func_name}({indep_sym}) | range: {indep_sym} in "
@@ -356,7 +357,7 @@ def render_recurrence_solution(ws: Workspace, model: ProblemModel):
                                                     key=f"cobweb_steps_{func_name}")
                             cob_fig = build_cobweb_plot(g_numeric, x0, cob_range, n_steps=cob_steps,
                                                           x_label=f"{func_name}({indep_sym})")
-                            st.plotly_chart(cob_fig, width="stretch", key=f"cobweb_{func_name}")
+                            show_figure(cob_fig, width="stretch", key=f"cobweb_{func_name}")
                             gif_download_button(
                                 key=f"cobweb_{func_name}",
                                 file_stem=f"cobweb_{func_name}",

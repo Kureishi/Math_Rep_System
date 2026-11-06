@@ -8,6 +8,7 @@ changing an input and comparing is instant and never touches the model server.
 """
 import pandas as pd
 import streamlit as st
+from ui.a11y import show_figure
 
 from modules import history
 from modules.compare_plots import build_category_chart, build_relative_change_chart
@@ -185,13 +186,13 @@ def _render_result(c: SolveComparison) -> None:
     with t_chart:
         charts = chart_rows(c)
         if charts["relative_change_pct"]:
-            st.plotly_chart(build_relative_change_chart(charts["relative_change_pct"]), width="stretch",
+            show_figure(build_relative_change_chart(charts["relative_change_pct"]), width="stretch",
                             key="compare_rel_chart")
         else:
             st.caption("No answer is present on both sides with a non-zero A value, so there is "
                        "nothing to chart as a change.")
         if charts["category_pass_fraction"]:
-            st.plotly_chart(build_category_chart(charts["category_pass_fraction"]), width="stretch",
+            show_figure(build_category_chart(charts["category_pass_fraction"]), width="stretch",
                             key="compare_cat_chart")
 
     st.download_button("⬇️ Download comparison (Markdown)", data=comparison_markdown(c),

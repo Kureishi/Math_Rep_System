@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 from modules.report_content import REPORT_TITLE, Section, generated_stamp
 
 _CSS = """
-:root{--bg:#fff;--fg:#1d2230;--muted:#667;--card:#f6f8fb;--line:#d9dfe8;--ok:#1a7f45;--bad:#c0392b;--accent:#2b5fd9}
+:root{--bg:#fff;--fg:#1d2230;--muted:#667;--card:#f6f8fb;--line:#d9dfe8;--ok:#1a7f45;--bad:#D55E00;--accent:#2b5fd9}
 @media (prefers-color-scheme:dark){:root{--bg:#14171f;--fg:#e6e9f0;--muted:#9aa3b5;--card:#1d222e;--line:#313a4d;--ok:#4cc17e;--bad:#ff7a6b;--accent:#7aa2ff}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 header,main,footer{max-width:60rem;margin:0 auto;padding:0 1.2rem}header{padding-top:2rem}h1{margin:.2rem 0}

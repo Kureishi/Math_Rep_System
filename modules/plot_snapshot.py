@@ -74,7 +74,7 @@ def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, floa
         if solved_expr is not None:
             f = sp.lambdify(x, solved_expr, "numpy")
             ys = np.real(np.array(f(xs), dtype=complex))
-            ax.plot(xs, ys, color="#2a9d8f", linewidth=2)
+            ax.plot(xs, ys, color="#4A9BC8", linewidth=2)
             ax.set_xlabel(x_symbol)
             ax.set_ylabel(y_target)
             ax.grid(alpha=0.3)
@@ -83,7 +83,7 @@ def snapshot_line_plot(eq: Equation, x_symbol: str, param_values: dict[str, floa
     residual = residual_expression(eq, param_values, {x_symbol})
     f = sp.lambdify(x, residual, "numpy")
     ys = np.real(np.array(f(xs), dtype=complex))
-    ax.plot(xs, ys, color="#2a9d8f", linewidth=2)
+    ax.plot(xs, ys, color="#4A9BC8", linewidth=2)
     ax.axhline(0, color="gray", linestyle="--", linewidth=1)
     ax.set_xlabel(x_symbol)
     ax.set_ylabel(f"{eq.name} residual (0 = satisfied)")
@@ -386,7 +386,7 @@ def snapshot_histogram_plot(samples: list[float], target_symbol: str,
     """Static counterpart to plotter.build_histogram_plot() -- the
     exportable version of a Monte Carlo uncertainty-propagation result."""
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.hist(samples, bins=min(60, max(10, len(samples) // 20)), color="#2a9d8f", alpha=0.85)
+    ax.hist(samples, bins=min(60, max(10, len(samples) // 20)), color="#4A9BC8", alpha=0.85)
     if mean is not None:
         ax.axvline(mean, color="black", linewidth=2, label="mean")
     if p5 is not None:
@@ -589,14 +589,14 @@ def snapshot_motion_diagram_gif(t_values, x_values, v_values, x_label: str = "po
         for j in strobes:
             if j <= i:
                 xj = float(x_values[j])
-                ax1.plot(xj, 0, "o", color="#2E5EAA", alpha=0.3, markersize=12, zorder=2)
-                arrow(ax1, xj, float(v_values[j]), v_scale, offset, "#C0392B", 1.4)
+                ax1.plot(xj, 0, "o", color="#0072B2", alpha=0.3, markersize=12, zorder=2)
+                arrow(ax1, xj, float(v_values[j]), v_scale, offset, "#D55E00", 1.4)
                 if a_arr is not None:
-                    arrow(ax1, xj, float(a_arr[j]), a_scale, -offset, "#1E7E34", 1.4)
-        ax1.plot(xi, 0, "o", color="#2E5EAA", markersize=16, zorder=3)
-        arrow(ax1, xi, vi, v_scale, 0, "#C0392B")
+                    arrow(ax1, xj, float(a_arr[j]), a_scale, -offset, "#009E73", 1.4)
+        ax1.plot(xi, 0, "o", color="#0072B2", markersize=16, zorder=3)
+        arrow(ax1, xi, vi, v_scale, 0, "#D55E00")
         if a_arr is not None:
-            arrow(ax1, xi, float(a_arr[i]), a_scale, -offset, "#1E7E34", 2.4)
+            arrow(ax1, xi, float(a_arr[i]), a_scale, -offset, "#009E73", 2.4)
         ax1.set_xlim(x_min - pad, x_max + pad)
         ax1.set_ylim(-1, 1)
         ax1.set_yticks([])
@@ -605,8 +605,8 @@ def snapshot_motion_diagram_gif(t_values, x_values, v_values, x_label: str = "po
             ax1.set_title("red: velocity" + (", green: acceleration" if show_a else "")
                            + "  (each scaled separately)", fontsize=8)
 
-        ax2.plot(t_values[: i + 1], x_values[: i + 1], color="#2E5EAA", linewidth=2)
-        ax2.plot(t_values[i], x_values[i], "o", color="#C0392B", markersize=9, zorder=3)
+        ax2.plot(t_values[: i + 1], x_values[: i + 1], color="#0072B2", linewidth=2)
+        ax2.plot(t_values[i], x_values[i], "o", color="#D55E00", markersize=9, zorder=3)
         ax2.set_xlim(float(t_values[0]), float(t_values[-1]))
         ax2.set_ylim(x_min - pad, x_max + pad)
         ax2.set_xlabel(f"time{t_unit_sfx}")
@@ -636,9 +636,9 @@ def snapshot_cobweb_gif(g, x0: float, x_range: tuple[float, float], n_steps: int
 
     def update(k):
         ax.clear()
-        ax.plot(curve_xs, curve_ys, color="#2E5EAA", linewidth=2, label="y = g(x)")
+        ax.plot(curve_xs, curve_ys, color="#0072B2", linewidth=2, label="y = g(x)")
         ax.plot(curve_xs, curve_xs, color="gray", linestyle="--", linewidth=1.3, label="y = x")
-        ax.plot(path_x[: 2 * k + 1], path_y[: 2 * k + 1], color="#C0392B", linewidth=1.6)
+        ax.plot(path_x[: 2 * k + 1], path_y[: 2 * k + 1], color="#D55E00", linewidth=1.6)
         ax.set_xlim(x_range)
         ax.set_ylim(x_range)
         ax.set_xlabel(x_label)
@@ -656,7 +656,7 @@ def snapshot_cobweb_gif(g, x0: float, x_range: tuple[float, float], n_steps: int
 # build_partial_sum_animation -- PNG for the error plot, GIF for the three
 # animations, same no-extra-binaries approach as the GIFs above).
 # ---------------------------------------------------------------------------
-_TIME_PALETTE = ["#2E5EAA", "#C0392B", "#1E7E34", "#8E44AD", "#D68910", "#117A8B"]
+_TIME_PALETTE = ["#0072B2", "#D55E00", "#009E73", "#8E44AD", "#D68910", "#117A8B"]
 
 
 def _frame_picks(n: int, n_frames: int) -> list[int]:
@@ -696,8 +696,8 @@ def snapshot_ode_error_plot(comparison, fmt: str = "png") -> bytes:
                   markerfacecolor="none", markeredgecolor=colour, markeredgewidth=1.6,
                   label=f"{name} (numerical)")
         ax2.semilogy(t, np.maximum(comparison.rel_error[i], 1e-16), color=colour, linewidth=1.8)
-    ax2.axhline(comparison.tolerance, color="#C0392B", linestyle="--", linewidth=1.3)
-    ax2.text(t[0], comparison.tolerance / 1.6, f"tolerance {comparison.tolerance:g}", color="#C0392B",
+    ax2.axhline(comparison.tolerance, color="#D55E00", linestyle="--", linewidth=1.3)
+    ax2.text(t[0], comparison.tolerance / 1.6, f"tolerance {comparison.tolerance:g}", color="#D55E00",
               fontsize=8, va="top")
     ax1.set_ylabel("value")
     ax1.legend(fontsize=8, loc="best")
@@ -810,7 +810,7 @@ def snapshot_partial_sum_gif(partial_sums, title: str = "", fps: int = 2) -> byt
         ax.plot(ps.xs, ps.target, color="#222222", linewidth=2.6, label="function")
         if ps.center is not None:
             ax.axvline(ps.center, color="gray", linestyle=":", linewidth=1.2)
-        ax.plot(ps.xs, ps.sums[k], color="#C0392B", linewidth=2.2, label="partial sum")
+        ax.plot(ps.xs, ps.sums[k], color="#D55E00", linewidth=2.2, label="partial sum")
         ax.set_xlim(float(ps.xs[0]), float(ps.xs[-1]))
         ax.set_ylim(ps.y_range)
         ax.set_xlabel("x")
@@ -874,7 +874,7 @@ def snapshot_parameter_morph_gif(morph, n_frames: int = 40, fps: int = 8) -> byt
             ax.plot(morph.t, morph.nominal_curve, color="#222222", linestyle="--", linewidth=1.6,
                      label=f"current setting ({morph.param_name} = {morph.nominal_value:g})")
             ax.legend(fontsize=8, loc="upper right")
-        ax.plot(morph.t, morph.curves[i], color="#C0392B", linewidth=3)
+        ax.plot(morph.t, morph.curves[i], color="#D55E00", linewidth=3)
         ax.set_ylim(morph.y_range)
         ax.set_xlabel("t")
         ax.set_ylabel(morph.function)
@@ -895,13 +895,13 @@ def snapshot_bifurcation_plot(result, marker: float | None = None, fmt: str = "p
     ys = result.values.ravel()
     keep = np.isfinite(ys)
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(xs[keep], ys[keep], s=0.4, color="#2E5EAA", alpha=0.45, linewidths=0, rasterized=True)
+    ax.scatter(xs[keep], ys[keep], s=0.4, color="#0072B2", alpha=0.45, linewidths=0, rasterized=True)
     for p, period in result.transitions:
         if period in (2, 4, 8, 16):
-            ax.axvline(p, color="#C0392B", linestyle=":", linewidth=0.9, alpha=0.7)
-            ax.text(p, ax.get_ylim()[1], f"{period}", color="#C0392B", fontsize=7, ha="center", va="bottom")
+            ax.axvline(p, color="#D55E00", linestyle=":", linewidth=0.9, alpha=0.7)
+            ax.text(p, ax.get_ylim()[1], f"{period}", color="#D55E00", fontsize=7, ha="center", va="bottom")
     if marker is not None and result.params[0] <= marker <= result.params[-1]:
-        ax.axvline(marker, color="#1E7E34", linestyle="--", linewidth=1.8, label="current")
+        ax.axvline(marker, color="#009E73", linestyle="--", linewidth=1.8, label="current")
         ax.legend(fontsize=8, loc="upper left")
     ax.set_xlim(float(result.params[0]), float(result.params[-1]))
     ax.set_xlabel(result.param_name)
@@ -934,7 +934,7 @@ def snapshot_space_time_gif(field, y_label: str = "u", n_frames: int = 40, fps: 
     def update(k):
         i = picks[k]
         ax_p.clear()
-        ax_p.plot(field.xs, field.u[i], color="#C0392B", linewidth=2.6)
+        ax_p.plot(field.xs, field.u[i], color="#D55E00", linewidth=2.6)
         ax_p.set_ylim(field.u_min - pad, field.u_max + pad)
         ax_p.set_ylabel(y_label)
         ax_p.grid(alpha=0.3)
@@ -949,7 +949,7 @@ def snapshot_space_time_gif(field, y_label: str = "u", n_frames: int = 40, fps: 
 # Solve-order replay and chain value flow (matplotlib GIFs)
 # ---------------------------------------------------------------------------
 _CURRENT_RING = "#F39C12"      # the stage being shown (matches plotter._CURRENT_RING)
-_BLOCKED_RING = "#C0392B"
+_BLOCKED_RING = "#D55E00"
 
 
 def snapshot_solve_order_gif(nodes, edges, frames, fps: int = 1) -> bytes:
@@ -958,7 +958,7 @@ def snapshot_solve_order_gif(nodes, edges, frames, fps: int = 1) -> bytes:
     from matplotlib.colors import to_rgba
     if not frames:
         raise ValueError("Nothing to replay.")
-    base = {"known": "#1E7E34", "unknown": "#C0392B", "equation": "#2E5EAA"}
+    base = {"known": "#009E73", "unknown": "#D55E00", "equation": "#0072B2"}
     alpha = {"known": 1.0, "done": 1.0, "current": 1.0, "pending": 0.16, "blocked": 0.45}
     by_id = {n.id: n for n in nodes}
     fig, ax = plt.subplots(figsize=(7, max(3.4, 0.9 * max((n.y for n in nodes), default=0) + 2.2)))
@@ -995,7 +995,7 @@ def snapshot_chain_flow_gif(flow, fps: int = 1) -> bytes:
         raise ValueError("This chain has no steps.")
     pos = {s.position: s for s in flow.steps}
     order = sorted(pos)
-    colour = {"ok": "#2E5EAA", "error": "#C0392B", "stale": "#8A8F98"}
+    colour = {"ok": "#0072B2", "error": "#D55E00", "stale": "#8A8F98"}
     xs = [s.x for s in flow.steps]
     ys = [s.y for s in flow.steps] + [lit.y for lit in flow.literals]
     fig, ax = plt.subplots(figsize=(max(6.0, 1.9 * len(order)), 4.4))
@@ -1008,7 +1008,7 @@ def snapshot_chain_flow_gif(flow, fps: int = 1) -> bytes:
                 continue
             a, b = pos[e.source], pos[e.target]
             ax.annotate("", xy=(b.x, b.y), xytext=(a.x, a.y), zorder=1,
-                         arrowprops=dict(arrowstyle="-|>", color="#C0392B" if e.broken else "#2E5EAA",
+                         arrowprops=dict(arrowstyle="-|>", color="#D55E00" if e.broken else "#0072B2",
                                          linewidth=2.6, linestyle="--" if e.broken else "-", shrinkA=26, shrinkB=26))
             ax.text((a.x + b.x) / 2, (a.y + b.y) / 2 + 0.22,
                     f"{e.symbol}: {e.reason}" if e.broken else f"{e.symbol} = {e.carried:.4g}",
