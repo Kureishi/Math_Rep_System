@@ -60,7 +60,7 @@ def test_the_symbolic_engine_check_passes():
 
 def test_an_unwritable_data_folder_is_a_failure_with_a_fix(tmp_path):
     blocker = tmp_path / "file"
-    blocker.write_text("x")                                           # a file where the folder should be
+    blocker.write_text("x", encoding="utf-8")                                           # a file where the folder should be
     c = health.check_data_folder(blocker / "data")
     assert c.status == "fail" and "not writable" in c.detail and c.fix
 
@@ -88,20 +88,20 @@ def test_old_python_is_a_warning(monkeypatch):
 
 def test_requirements_are_parsed_with_their_operators(tmp_path):
     f = tmp_path / "req.txt"
-    f.write_text("sympy==1.14.0  # pinned\n# a comment\nnumpy>=1.0\n-r other.txt\nstreamlit\n")
+    f.write_text("sympy==1.14.0  # pinned\n# a comment\nnumpy>=1.0\n-r other.txt\nstreamlit\n", encoding="utf-8")
     assert health.parse_requirements(f) == [("sympy", "==", "1.14.0"), ("numpy", ">=", "1.0")]
 
 
 def test_a_missing_package_fails_with_the_install_command(tmp_path):
     f = tmp_path / "req.txt"
-    f.write_text("definitely-not-a-real-package==1.0\n")
+    f.write_text("definitely-not-a-real-package==1.0\n", encoding="utf-8")
     c = health.check_packages(f)
     assert c.status == "fail" and "definitely-not-a-real-package" in c.detail and "pip install" in c.fix
 
 
 def test_a_different_pinned_or_too_old_package_is_only_a_warning(tmp_path):
     f = tmp_path / "req.txt"
-    f.write_text("sympy==0.0.1\nnumpy>=999.0\n")
+    f.write_text("sympy==0.0.1\nnumpy>=999.0\n", encoding="utf-8")
     c = health.check_packages(f)
     assert c.status == "warn" and "sympy" in c.detail and "numpy" in c.detail
 

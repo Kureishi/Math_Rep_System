@@ -31,7 +31,7 @@ def test_the_repository_itself_has_no_conflict_markers():
 
 def test_a_conflicted_file_is_found_with_every_marker_line(tmp_path):
     f = tmp_path / "a.py"
-    f.write_text(_conflicted())
+    f.write_text(_conflicted(), encoding="utf-8")
     assert cm.conflict_lines(f) == [2, 4, 6]
 
 
@@ -50,7 +50,7 @@ def test_crlf_files_are_found_too(tmp_path):
 ])
 def test_things_that_merely_look_like_markers_are_left_alone(tmp_path, text):
     f = tmp_path / "doc.md"
-    f.write_text(text)
+    f.write_text(text, encoding="utf-8")
     assert cm.conflict_lines(f) == []
 
 
@@ -62,21 +62,64 @@ def test_binary_and_missing_files_are_ignored(tmp_path):
 
 def test_main_reports_the_file_and_exits_nonzero(tmp_path, capsys):
     bad, good = tmp_path / "bad.py", tmp_path / "good.py"
-    bad.write_text(_conflicted())
-    good.write_text("x = 1\n")
+    bad.write_text(_conflicted(), encoding="utf-8")
+    good.write_text("x = 1\n", encoding="utf-8")
     assert cm.main([str(good)]) == 0
     assert cm.main([str(good), str(bad)]) == 1
     assert "bad.py" in capsys.readouterr().err
 
 
 def test_line_endings_are_pinned_for_everyone():
-    attrs = (ROOT / ".gitattributes").read_text()
+    attrs = (ROOT / ".gitattributes").read_text(encoding="utf-8")
     assert "* text=auto eol=lf" in attrs and "*.png  binary" in attrs
 
 
 def test_ci_and_precommit_run_the_check():
-    assert "check_conflict_markers.py" in (ROOT / ".github" / "workflows" / "tests.yml").read_text()
-    assert "check_conflict_markers.py" in (ROOT / ".pre-commit-config.yaml").read_text()
+    assert "check_conflict_markers.py" in (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    assert "check_conflict_markers.py" in (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------------------------------ text encodings
+
+def _text_io_without_encoding() -> list[str]:
+    """Every call that reads or writes TEXT without naming an encoding, found by parsing the code (not by searching it, so a string
+    containing 'write_text(' cannot fool it). On Windows the default encoding is cp1252, not UTF-8: a file with a degree sign, an emoji
+    or an arrow is then written or read wrongly, or fails outright. This is what broke the plugin tests on Windows CI."""
+    import ast
+    skip_modules = {"Image", "zipfile", "webbrowser", "ZipFile", "tarfile", "io", "os", "subprocess", "urllib", "gzip"}
+    found = []
+    folders = [ROOT / d for d in ("modules", "ui", "tests", "scripts", "plugins")] + [ROOT / "cli.py", ROOT / "app.py", ROOT / "api_server.py", ROOT / "config.py"]
+    files = [f for d in folders for f in ([d] if d.is_file() else d.rglob("*.py")) if "__pycache__" not in f.parts]
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or any(k.arg == "encoding" for k in node.keywords):
+                continue
+            f = node.func
+            if isinstance(f, ast.Attribute) and f.attr in ("write_text", "read_text"):
+                found.append(f"{path.relative_to(ROOT)}:{node.lineno} .{f.attr}()")
+            elif (isinstance(f, ast.Name) and f.id == "open") or (isinstance(f, ast.Attribute) and f.attr == "open"
+                                                                    and not (isinstance(f.value, ast.Name) and f.value.id in skip_modules)):
+                mode = next((a.value for a in node.args[1:2] if isinstance(a, ast.Constant) and isinstance(a.value, str)), None) \
+                    or next((k.value.value for k in node.keywords if k.arg == "mode" and isinstance(k.value, ast.Constant)), "r")
+                if "b" not in str(mode):
+                    found.append(f"{path.relative_to(ROOT)}:{node.lineno} open()")
+    return found
+
+
+def test_no_code_or_test_reads_or_writes_text_without_naming_the_encoding():
+    assert _text_io_without_encoding() == []
+
+
+def test_the_encoding_guard_really_does_catch_a_missing_encoding(tmp_path, monkeypatch):
+    """The guard is only worth having if it can fail: point it at a file that breaks the rule."""
+    bad = tmp_path / "modules"
+    bad.mkdir()
+    (bad / "oops.py").write_text("from pathlib import Path\nPath('x').write_text('hi')\nopen('y')\nopen('z', 'wb')\nPath('x').read_text(encoding='utf-8')\n",
+                                 encoding="utf-8")
+    monkeypatch.setitem(globals(), "ROOT", tmp_path)
+    found = _text_io_without_encoding()
+    assert [f.split(" ", 1)[1] for f in found] == [".write_text()", "open()"]                   # not the binary open, not the one with encoding
 
 
 # ------------------------------------------------------------------------------------------ applying a delivery
@@ -90,7 +133,7 @@ def _write(base: Path, files: dict[str, str]) -> None:
     for rel, text in files.items():
         p = base / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text, newline="\n")
+        p.write_text(text, newline="\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -133,18 +176,18 @@ def test_dry_run_changes_nothing_and_lists_the_plan(repo, tmp_path, capsys):
     assert ad.run(_delivery(tmp_path, NEW), repo, apply=False) == 0
     out = capsys.readouterr().out
     assert "lib/new.py" in out and "app.py" in out and "old_test.py" in out and "Dry run" in out
-    assert (repo / "app.py").read_text() == "print('v1')\n" and not (repo / "lib" / "new.py").exists()
+    assert (repo / "app.py").read_text(encoding="utf-8") == "print('v1')\n" and not (repo / "lib" / "new.py").exists()
 
 
 @needs_git
 def test_apply_adds_changes_and_removes_deleted_files_but_never_touches_git_or_data(repo, tmp_path):
     (repo / "data").mkdir()
-    (repo / "data" / "mine.db").write_text("my history")
+    (repo / "data" / "mine.db").write_text("my history", encoding="utf-8")
     head = _git(repo, "rev-parse", "HEAD")
     assert ad.run(_delivery(tmp_path, NEW), repo, apply=True) == 0
-    assert (repo / "app.py").read_text() == "print('v2')\n" and (repo / "lib" / "new.py").read_text() == "B = 2\n"
+    assert (repo / "app.py").read_text(encoding="utf-8") == "print('v2')\n" and (repo / "lib" / "new.py").read_text(encoding="utf-8") == "B = 2\n"
     assert not (repo / "old_test.py").exists()                         # the delivery dropped it, so it is gone, not left behind
-    assert (repo / "data" / "mine.db").read_text() == "my history"     # ignored data is never overwritten or removed
+    assert (repo / "data" / "mine.db").read_text(encoding="utf-8") == "my history"     # ignored data is never overwritten or removed
     assert _git(repo, "rev-parse", "HEAD") == head and not _git(repo, "diff", "--cached")   # nothing committed or staged
     status = _git(repo, "status", "--porcelain")
     assert "M app.py" in status and "?? lib/new.py" in status and "D old_test.py" in status
@@ -179,10 +222,10 @@ def test_line_ending_differences_alone_are_not_changes(repo, tmp_path, capsys):
 
 @needs_git
 def test_uncommitted_work_stops_it(repo, tmp_path):
-    (repo / "app.py").write_text("print('my edit')\n")
+    (repo / "app.py").write_text("print('my edit')\n", encoding="utf-8")
     with pytest.raises(ad.DeliveryError, match="uncommitted"):
         ad.run(_delivery(tmp_path, NEW), repo, apply=True)
-    assert (repo / "app.py").read_text() == "print('my edit')\n"
+    assert (repo / "app.py").read_text(encoding="utf-8") == "print('my edit')\n"
 
 
 @needs_git
@@ -195,7 +238,7 @@ def test_being_behind_origin_stops_it_which_is_what_prevents_forked_history(repo
     _git(other, "push")
     with pytest.raises(ad.DeliveryError, match=r"pull --rebase"):
         ad.run(_delivery(tmp_path, NEW), repo, apply=True)
-    assert (repo / "app.py").read_text() == "print('v1')\n"
+    assert (repo / "app.py").read_text(encoding="utf-8") == "print('v1')\n"
 
 
 @needs_git

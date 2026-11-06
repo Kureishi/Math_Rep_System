@@ -12,7 +12,7 @@ from tests.conftest import FakeClient, KINEMATICS_JSON
 
 def test_load_problems_from_plain_string_list(tmp_path):
     p = tmp_path / "problems.json"
-    p.write_text(json.dumps(["problem one", "problem two"]))
+    p.write_text(json.dumps(["problem one", "problem two"]), encoding="utf-8")
     problems = cli._load_problems(str(p), None)
     assert problems == [{"text": "problem one", "known_context": None},
                           {"text": "problem two", "known_context": None}]
@@ -20,7 +20,7 @@ def test_load_problems_from_plain_string_list(tmp_path):
 
 def test_load_problems_from_object_list_with_known_context(tmp_path):
     p = tmp_path / "problems.json"
-    p.write_text(json.dumps([{"text": "problem one", "known_context": "d = 5"}]))
+    p.write_text(json.dumps([{"text": "problem one", "known_context": "d = 5"}]), encoding="utf-8")
     problems = cli._load_problems(str(p), None)
     assert problems == [{"text": "problem one", "known_context": "d = 5"}]
 
@@ -37,14 +37,14 @@ def test_load_problems_raises_on_missing_input():
 
 def test_load_problems_raises_on_non_array_json(tmp_path):
     p = tmp_path / "bad.json"
-    p.write_text(json.dumps({"not": "an array"}))
+    p.write_text(json.dumps({"not": "an array"}), encoding="utf-8")
     with pytest.raises(ValueError):
         cli._load_problems(str(p), None)
 
 
 def test_load_problems_raises_on_unrecognized_entry(tmp_path):
     p = tmp_path / "bad.json"
-    p.write_text(json.dumps([42]))
+    p.write_text(json.dumps([42]), encoding="utf-8")
     with pytest.raises(ValueError):
         cli._load_problems(str(p), None)
 
@@ -66,7 +66,7 @@ def test_output_format_falls_back_to_explicit_when_no_recognizable_extension():
 def test_write_output_csv_to_file(tmp_path):
     out = tmp_path / "results.csv"
     cli._write_output([{"a": 1, "b": "x"}, {"a": 2, "b": "y"}], str(out), "csv")
-    with open(out) as f:
+    with open(out, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert rows == [{"a": "1", "b": "x"}, {"a": "2", "b": "y"}]
 
@@ -74,7 +74,7 @@ def test_write_output_csv_to_file(tmp_path):
 def test_write_output_json_to_file(tmp_path):
     out = tmp_path / "results.json"
     cli._write_output([{"a": 1}], str(out), "json")
-    assert json.loads(out.read_text()) == [{"a": 1}]
+    assert json.loads(out.read_text(encoding="utf-8")) == [{"a": 1}]
 
 
 def test_write_output_csv_to_stdout(capsys):
@@ -105,7 +105,7 @@ def test_cmd_solve_end_to_end(monkeypatch, tmp_path):
     args = _args(text="A car accelerates from 8 m/s to 20 m/s in 6 seconds.", output=str(out))
     rc = cli.cmd_solve(args)
     assert rc == 0
-    with open(out) as f:
+    with open(out, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 1
     assert rows[0]["domain"] == "kinematics"
@@ -135,7 +135,7 @@ def test_cmd_solve_captures_per_problem_errors_without_aborting_the_batch(monkey
     args = _args(text="a problem", output=str(out))
     rc = cli.cmd_solve(args)
     assert rc == 0  # a per-problem error shouldn't fail the whole batch
-    rows = json.loads(out.read_text())
+    rows = json.loads(out.read_text(encoding="utf-8"))
     assert "extraction blew up" in rows[0]["error"]
 
 
@@ -143,12 +143,12 @@ def test_cmd_solve_multiple_problems_from_file(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "LMStudioClient",
                           lambda: FakeClient(payload_json=KINEMATICS_JSON, final_answers={"a": 2.0}))
     problems_file = tmp_path / "problems.json"
-    problems_file.write_text(json.dumps(["problem A", "problem B", "problem C"]))
+    problems_file.write_text(json.dumps(["problem A", "problem B", "problem C"]), encoding="utf-8")
     out = tmp_path / "results.csv"
     args = _args(problems=str(problems_file), output=str(out))
     rc = cli.cmd_solve(args)
     assert rc == 0
-    with open(out) as f:
+    with open(out, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 3
 
@@ -169,7 +169,7 @@ def test_cmd_montecarlo_end_to_end(monkeypatch, tmp_path):
     args = _mc_args(text="A car accelerates from 8 m/s to 20 m/s in 6 seconds.", output=str(out))
     rc = cli.cmd_montecarlo(args)
     assert rc == 0
-    with open(out) as f:
+    with open(out, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert len(rows) > 0
     # (v - u)/t with v=20±1, u=8, t=6 -- mean should land near 2.0
@@ -202,7 +202,7 @@ def test_cmd_montecarlo_seed_is_reproducible(monkeypatch, tmp_path):
     out2 = tmp_path / "run2.csv"
     cli.cmd_montecarlo(_mc_args(text="a problem", output=str(out1), seed=123))
     cli.cmd_montecarlo(_mc_args(text="a problem", output=str(out2), seed=123))
-    assert out1.read_text() == out2.read_text()
+    assert out1.read_text(encoding="utf-8") == out2.read_text(encoding="utf-8")
 
 
 def test_cmd_montecarlo_connection_failure(monkeypatch):
@@ -222,19 +222,19 @@ def test_resolve_montecarlo_problem_text_prefers_text_arg():
 
 def test_resolve_montecarlo_problem_text_reads_plain_text_file(tmp_path):
     p = tmp_path / "problem.txt"
-    p.write_text("a plain text problem")
+    p.write_text("a plain text problem", encoding="utf-8")
     assert cli._resolve_montecarlo_problem_text(str(p), None) == "a plain text problem"
 
 
 def test_resolve_montecarlo_problem_text_reads_json_array_first_entry(tmp_path):
     p = tmp_path / "problems.json"
-    p.write_text(json.dumps(["first problem", "second problem"]))
+    p.write_text(json.dumps(["first problem", "second problem"]), encoding="utf-8")
     assert cli._resolve_montecarlo_problem_text(str(p), None) == "first problem"
 
 
 def test_resolve_montecarlo_problem_text_reads_json_object_array(tmp_path):
     p = tmp_path / "problems.json"
-    p.write_text(json.dumps([{"text": "first problem"}]))
+    p.write_text(json.dumps([{"text": "first problem"}]), encoding="utf-8")
     assert cli._resolve_montecarlo_problem_text(str(p), None) == "first problem"
 
 

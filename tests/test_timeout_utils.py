@@ -22,13 +22,15 @@ def test_slow_function_raises_computation_timeout_error():
 
 def test_timeout_returns_control_promptly_not_after_full_duration():
     def slow():
-        time.sleep(0.6)
+        time.sleep(2)
 
     t0 = time.time()
     with pytest.raises(ComputationTimeoutError):
         run_with_timeout(slow, timeout=0.2)
     elapsed = time.time() - t0
-    assert elapsed < 0.5  # should return around 0.2s, not wait for the full 0.6s sleep
+    # Returns around 0.2s, not after the full 2s sleep. The bound is deliberately generous (1.0s): a busy CI runner (Windows, several
+    # workers, coverage on) can delay starting the thread by hundreds of milliseconds, and this must not fail for that.
+    assert elapsed < 1.0
 
 
 def test_non_timeout_exception_propagates_unchanged():
@@ -159,11 +161,26 @@ def test_uncertainty_solve_symbolic_never_raises_on_timeout(monkeypatch):
     solve_symbolic_for_target(model, "a")
 
 
-def test_equivalence_check_degrades_to_undetermined_on_timeout(monkeypatch):
+@pytest.fixture
+def hung_simplify(monkeypatch):
+    """Make SymPy's simplify block until the test ends, with a short timeout, so "the check timed out" is a certainty.
+
+    These tests used to set the timeout to 0.0 and hope a trivial simplification had not finished by the time the wait began. That is
+    a race: on Linux the worker thread usually loses it, but on Windows (and with SymPy's caches warm from earlier tests in the same
+    process) it often wins, the check completes, and the test fails for a reason that has nothing to do with the code under test.
+    """
+    import sympy as sp
     from config import settings
+    release = threading.Event()
+    monkeypatch.setattr(sp, "simplify", lambda *args, **kwargs: release.wait(30))
+    monkeypatch.setattr(settings, "computation_timeout_seconds", 0.2)
+    yield
+    release.set()                                         # let the abandoned worker threads end
+
+
+def test_equivalence_check_degrades_to_undetermined_on_timeout(hung_simplify):
     from modules.equivalence import check_equivalence
 
-    monkeypatch.setattr(settings, "computation_timeout_seconds", 0.0)
     result = check_equivalence("sin(x)**2 + cos(x)**2", "1")
     assert result.equivalent is None
     assert result.method == "undetermined"
@@ -171,13 +188,12 @@ def test_equivalence_check_degrades_to_undetermined_on_timeout(monkeypatch):
     assert result.error is None  # this is a timeout, not a parse error
 
 
-def test_proof_build_returns_none_when_equivalence_check_timed_out(monkeypatch):
-    from config import settings
+def test_proof_build_returns_none_when_equivalence_check_timed_out(hung_simplify):
     from modules.equivalence import check_equivalence
     from modules.proof import build_proof
 
-    monkeypatch.setattr(settings, "computation_timeout_seconds", 0.0)
     result = check_equivalence("sin(x)**2 + cos(x)**2", "1")
+    assert result.method == "undetermined"                # the premise: it really did time out, on every platform
     assert build_proof(result) is None
 
 

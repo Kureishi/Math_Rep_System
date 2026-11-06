@@ -43,7 +43,7 @@ def _load_problems(problems_path: str | None, text: str | None) -> list[dict]:
         return [{"text": text, "known_context": None}]
     if not problems_path:
         raise ValueError("Give either a problems file or --text.")
-    raw = json.loads(Path(problems_path).read_text())
+    raw = json.loads(Path(problems_path).read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         raise ValueError(f"{problems_path} must contain a JSON array.")
     problems = []
@@ -75,7 +75,7 @@ def _write_output(rows: list[dict], output_path: str | None, fmt: str):
     if resolved_format == "json":
         text = json.dumps(rows, indent=2, default=str)
         if output_path:
-            Path(output_path).write_text(text)
+            Path(output_path).write_text(text, encoding="utf-8")
         else:
             print(text)
         return
@@ -84,7 +84,7 @@ def _write_output(rows: list[dict], output_path: str | None, fmt: str):
         return
     fieldnames = list(rows[0].keys())
     if output_path:
-        with open(output_path, "w", newline="") as f:
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -137,7 +137,7 @@ def cmd_solve(args) -> int:
 def _resolve_montecarlo_problem_text(problem_arg: str, text_arg: str | None) -> str:
     if text_arg:
         return text_arg
-    raw = Path(problem_arg).read_text()
+    raw = Path(problem_arg).read_text(encoding="utf-8")
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:

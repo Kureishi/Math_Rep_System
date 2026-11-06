@@ -160,9 +160,9 @@ def test_cli_replay_exits_zero_for_an_honest_bundle_and_one_for_a_forged_one(goo
     import cli
     model, report = good
     ok, bad = tmp_path / "ok.json", tmp_path / "bad.json"
-    ok.write_text(_bundle(_record(report, model.raw_json)))
+    ok.write_text(_bundle(_record(report, model.raw_json)), encoding="utf-8")
     forged = VerificationReport(checks=list(report.checks), sympy_numeric_answers={"a": 99.0, "d": 1.0})
-    bad.write_text(_bundle(_record(forged, model.raw_json)))
+    bad.write_text(_bundle(_record(forged, model.raw_json)), encoding="utf-8")
     assert cli.main(["replay", str(ok)]) == 0
     assert "1 reproduced" in capsys.readouterr().out
     assert cli.main(["replay", str(bad)]) == 1

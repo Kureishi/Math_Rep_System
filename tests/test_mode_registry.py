@@ -18,7 +18,7 @@ def pkg(tmp_path, monkeypatch):
     name = f"scratchmodes_{abs(hash(str(tmp_path))) % 10 ** 8}"
     folder = tmp_path / name
     folder.mkdir()
-    (folder / "__init__.py").write_text("")
+    (folder / "__init__.py").write_text("", encoding="utf-8")
     monkeypatch.syspath_prepend(str(tmp_path))
     yield name, folder
     for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
@@ -29,7 +29,7 @@ def spec_file(folder: Path, filename: str, label: str, order: int = 100, keyword
     (folder / filename).write_text(textwrap.dedent(f'''
         from modules.mode_spec import ModeSpec
         MODE = ModeSpec(label={label!r}, keywords={keywords}, module="ui.discover", function="render_discover_tab", order={order}){extra}
-    '''))
+    '''), encoding="utf-8")
 
 
 # ------------------------------------------------------------------------------------------ the real modes
@@ -97,7 +97,7 @@ def test_one_file_can_declare_several_modes(pkg):
         from modules.mode_spec import ModeSpec
         MODES = [ModeSpec(label="One", module="ui.discover", function="render_discover_tab", order=1),
                  ModeSpec(label="Two", module="ui.discover", function="render_discover_tab", order=2)]
-    '''))
+    '''), encoding="utf-8")
     assert mr.discover(name, None).labels == ["One", "Two"]
 
 
@@ -112,7 +112,7 @@ def test_files_starting_with_an_underscore_are_ignored(pkg):
 
 def test_a_file_that_cannot_be_imported_is_skipped_with_a_reason_and_the_rest_load(pkg):
     name, folder = pkg
-    (folder / "broken.py").write_text("def oops(:\n")
+    (folder / "broken.py").write_text("def oops(:\n", encoding="utf-8")
     spec_file(folder, "fine.py", "Fine")
     reg = mr.discover(name, None)
     assert reg.labels == ["Fine"] and any("broken" in e and "cannot be imported" in e and "SyntaxError" in e for e in reg.errors)
@@ -120,14 +120,14 @@ def test_a_file_that_cannot_be_imported_is_skipped_with_a_reason_and_the_rest_lo
 
 def test_a_file_that_raises_on_import_is_skipped(pkg):
     name, folder = pkg
-    (folder / "boom.py").write_text("raise RuntimeError('boom')\n")
+    (folder / "boom.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
     reg = mr.discover(name, None)
     assert reg.labels == [] and any("boom" in e and "RuntimeError" in e for e in reg.errors)
 
 
 def test_a_file_that_declares_no_mode_is_reported(pkg):
     name, folder = pkg
-    (folder / "empty.py").write_text("X = 1\n")
+    (folder / "empty.py").write_text("X = 1\n", encoding="utf-8")
     assert any("declares no mode" in e for e in mr.discover(name, None).errors)
 
 
@@ -142,7 +142,7 @@ def test_a_file_that_declares_no_mode_is_reported(pkg):
 ])
 def test_an_invalid_declaration_is_rejected_with_the_reason(pkg, snippet, message):
     name, folder = pkg
-    (folder / "bad.py").write_text(f"from modules.mode_spec import ModeSpec\nMODE = {snippet}\n")
+    (folder / "bad.py").write_text(f"from modules.mode_spec import ModeSpec\nMODE = {snippet}\n", encoding="utf-8")
     reg = mr.discover(name, None)
     assert reg.labels == [] and any(message in e for e in reg.errors)
 
@@ -178,7 +178,7 @@ def write_plugin(folder: Path, stem: str, label: str, function="page", defines=T
         MODE = ModeSpec(label={label!r}, keywords=("plug",), module="plugins.{stem}", function={function!r}, order={order})
         {"def page(): return 'ok'" if defines else ""}
     '''
-    (folder / f"{stem}.py").write_text(textwrap.dedent(body))
+    (folder / f"{stem}.py").write_text(textwrap.dedent(body), encoding="utf-8")
 
 
 def test_a_plugin_with_its_own_page_function_is_discovered_and_importable_by_name(plugin_dir):
@@ -204,7 +204,7 @@ def test_a_plugin_naming_a_function_it_does_not_define_is_rejected(plugin_dir):
 
 
 def test_a_broken_plugin_never_stops_the_app_or_the_other_plugins(plugin_dir):
-    (plugin_dir / "plug_bad.py").write_text("import not_a_real_module_xyz\n")
+    (plugin_dir / "plug_bad.py").write_text("import not_a_real_module_xyz\n", encoding="utf-8")
     write_plugin(plugin_dir, "plug_good", "🔌 Good")
     reg = mr.discover("modules.modes", plugin_dir)
     assert "🔌 Good" in reg.labels and any("plug_bad.py" in e and "ModuleNotFoundError" in e for e in reg.errors)
@@ -219,8 +219,8 @@ def test_underscore_plugins_and_a_missing_plugin_folder_are_fine(plugin_dir, tmp
 
 def test_the_shipped_example_plugin_works_once_copied(plugin_dir):
     import importlib
-    text = (ROOT / "plugins" / "_example_mode.py").read_text()
-    (plugin_dir / "plug_example.py").write_text(text.replace("plugins.my_mode", "plugins.plug_example"))
+    text = (ROOT / "plugins" / "_example_mode.py").read_text(encoding="utf-8")
+    (plugin_dir / "plug_example.py").write_text(text.replace("plugins.my_mode", "plugins.plug_example"), encoding="utf-8")
     reg = mr.discover("modules.modes", plugin_dir)
     assert reg.errors == [] and "👋 Hello plugin" in reg.labels
     assert callable(importlib.import_module("plugins.plug_example").render_hello_tab)

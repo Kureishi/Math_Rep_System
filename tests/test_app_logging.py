@@ -18,7 +18,7 @@ def _fresh_logger(tmp_path):
 def test_logger_writes_warning_to_file(tmp_path):
     logger = _fresh_logger(tmp_path)
     logger.warning("a test warning")
-    content = app_logging.LOG_PATH.read_text()
+    content = app_logging.LOG_PATH.read_text(encoding="utf-8")
     assert "a test warning" in content
     assert "WARNING" in content
 
@@ -26,7 +26,7 @@ def test_logger_writes_warning_to_file(tmp_path):
 def test_logger_writes_error_to_file(tmp_path):
     logger = _fresh_logger(tmp_path)
     logger.error("a test error")
-    content = app_logging.LOG_PATH.read_text()
+    content = app_logging.LOG_PATH.read_text(encoding="utf-8")
     assert "a test error" in content
     assert "ERROR" in content
 
@@ -39,7 +39,7 @@ def test_info_level_not_written_by_default(tmp_path):
     logger.info("should not appear")
     logger.debug("should not appear either")
     logger.warning("should appear")
-    content = app_logging.LOG_PATH.read_text()
+    content = app_logging.LOG_PATH.read_text(encoding="utf-8")
     assert "should not appear" not in content
     assert "should appear" in content
 
@@ -81,7 +81,7 @@ def test_extract_json_logs_on_failure(tmp_path):
         extract_json("not valid json at all")
     except LLMOutputError:
         pass
-    content = app_logging.LOG_PATH.read_text()
+    content = app_logging.LOG_PATH.read_text(encoding="utf-8")
     assert "extract_json" in content
 
 
@@ -96,6 +96,6 @@ def test_run_with_timeout_logs_on_timeout(tmp_path):
         run_with_timeout(lambda: time.sleep(2), timeout=0.2, label="test computation")
     except ComputationTimeoutError:
         pass
-    content = app_logging.LOG_PATH.read_text()
+    content = app_logging.LOG_PATH.read_text(encoding="utf-8")
     assert "timed out" in content.lower()
     assert "test computation" in content
