@@ -5,11 +5,13 @@ import copy
 import plotly.graph_objects as go
 import streamlit as st
 from ui.a11y import show_figure
+from ui.next_steps import render_next_steps
 
 from modules import history
 from modules import problem_sets as ps
 from modules.equation_engine import build_model
-from modules.problem_library import LIBRARY
+from modules import next_steps
+from modules.problem_library import LIBRARY, LIBRARY_CONCEPTS
 
 _SET = "_problem_set"
 _REPORT = "_problem_set_grades"
@@ -81,6 +83,7 @@ def _create_tab() -> None:
                + (f" ({pset.discarded} candidate(s) were discarded along the way)." if pset.discarded else "."))
     for w in pset.warnings:
         st.warning(w)
+    render_next_steps(next_steps.for_problem(text, raw, default_title, LIBRARY_CONCEPTS.get(default_title) or [model.problem_domain]), "pset")
     show = st.toggle("Show the answer key", False, key="pset_show_key")
     for i in pset.instances:
         with st.expander(f"Problem {i.index}", expanded=i.index <= 2):

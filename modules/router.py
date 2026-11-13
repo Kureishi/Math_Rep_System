@@ -34,6 +34,7 @@ STATMECH = "🔥 Statistical mechanics"
 QUANTUM = "⚛️ Quantum mechanics"
 DIMENSIONAL = "📐 Dimensional analysis"
 RECALL = "🔎 Have I solved this?"
+CHEMISTRY = "🧪 Chemistry"
 
 # Words naming a mode outright (heavier than an incidental keyword).
 _MODE_WORDS: dict[str, list[str]] = {
@@ -107,6 +108,42 @@ def split_equivalence(text: str) -> tuple[str, str] | None:
     return (a, b) if a and b and len(a) < 200 and len(b) < 200 else None
 
 
+_ARROW = re.compile(r"->|→|=>|<->|⇌|<=>")
+_SPECIES = re.compile(r"^\d*[A-Z(\[][A-Za-z0-9()\[\]^+.\-{}]*(?:\((?:s|l|g|aq)\))?$|^e-$")
+
+
+def extract_reaction(text: str) -> str | None:
+    """The chemical reaction inside a sentence ('balance the equation C3H8 + O2 -> CO2 + H2O' gives 'C3H8 + O2 -> CO2 + H2O'), or None. The
+    candidate is checked with the real parser, and stray leading words that look like formulas ("Balance") are dropped until it parses."""
+    from modules.chemistry import ChemistryError, parse_reaction
+    m = _ARROW.search(text)
+    if not m:
+        return None
+    left = text[:m.start()].split()
+    right = text[m.end():].split()
+    picked_left: list[str] = []
+    for tok in reversed(left):
+        if tok == "+" or _SPECIES.match(tok):
+            picked_left.insert(0, tok)
+        else:
+            break
+    picked_right: list[str] = []
+    for tok in right:
+        if tok == "+" or _SPECIES.match(tok):
+            picked_right.append(tok)
+        else:
+            break
+    for drop_right in range(min(3, len(picked_right)) + 1):
+        for drop_left in range(min(3, len(picked_left)) + 1):
+            candidate = " ".join(picked_left[drop_left:]) + " " + m.group() + " " + " ".join(picked_right[:len(picked_right) - drop_right])
+            try:
+                parse_reaction(candidate)
+                return candidate.strip()
+            except ChemistryError:
+                continue
+    return None
+
+
 def triangle_sides(text: str) -> tuple[str, str, str] | None:
     if "triangle" not in text.lower():
         return None
@@ -178,6 +215,12 @@ def route(query: str) -> Route:
                  r"seen this (?:problem|before)|(?:similar|duplicate|old) (?:problems?|questions?) (?:to|in|from) (?:this|my)", text):
         add(RECALL, 3.0, "asks whether you have solved something like this before")
         prefill[RECALL] = {"recall_query": raw}
+
+    if re.search(r"(?:->|→|=>|<->|⇌|<=>)", raw) and re.search(r"[A-Z][a-z]?\d*[A-Za-z0-9()\[\]^+-]*\s+\+\s+[A-Z(]", raw) and len(raw) <= 160:
+        add(CHEMISTRY, 3.5, "a chemical equation")
+        reaction = extract_reaction(raw)
+        if reaction:
+            prefill[CHEMISTRY] = {"chem_reaction": reaction}
 
     if re.search(r"\bconvert\b|\bunits?\b|dimensionless|dimension of", text):
         add(DIMENSIONAL, 0.8, "about units")

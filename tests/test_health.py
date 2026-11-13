@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from modules import health, history, templates
+from modules import health, history, practice, templates
 from modules.llm_client import pick_embedding_model
 
 
@@ -35,6 +35,7 @@ def isolated_databases(tmp_path, monkeypatch):
     """The health check opens the real history/templates databases; keep that in a temporary folder."""
     monkeypatch.setattr(history, "DB_PATH", tmp_path / "history.db")
     monkeypatch.setattr(templates, "DB_PATH", tmp_path / "templates.db")
+    monkeypatch.setattr(practice, "DB_PATH", tmp_path / "practice.db")
 
 
 def run(**kw):

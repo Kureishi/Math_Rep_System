@@ -157,3 +157,31 @@ def test_the_newer_modes_are_reachable_by_asking(query, mode):
 def test_a_quiz_request_at_least_offers_problem_sets_among_its_choices():
     r = rt.route("generate a quiz on kinematics")
     assert "🧑‍🏫 Problem sets" in [r.mode] + [m for m, _ in r.alternatives]
+
+
+@pytest.mark.parametrize("query, reaction", [
+    ("balance the equation C3H8 + O2 -> CO2 + H2O please", "C3H8 + O2 -> CO2 + H2O"),
+    ("Balance C3H8 + O2 -> CO2 + H2O", "C3H8 + O2 -> CO2 + H2O"),
+    ("Fe + O2 → Fe2O3", "Fe + O2 → Fe2O3"),
+    ("MnO4^- + Fe^2+ + H^+ -> Mn^2+ + Fe^3+ + H2O (acidic)", "MnO4^- + Fe^2+ + H^+ -> Mn^2+ + Fe^3+ + H2O"),
+])
+def test_a_chemical_equation_goes_to_chemistry_with_just_the_reaction_filled_in(query, reaction):
+    r = rt.route(query)
+    assert r.mode == rt.CHEMISTRY and r.sure and r.prefill == {"chem_reaction": reaction}
+    assert rt.extract_reaction(query) == reaction
+
+
+@pytest.mark.parametrize("query", ["hello -> world", "a -> b", "the cat -> sat"])
+def test_arrows_in_ordinary_text_are_not_chemistry(query):
+    assert rt.extract_reaction(query) is None and rt.route(query).mode != rt.CHEMISTRY
+
+
+@pytest.mark.parametrize("query, mode", [
+    ("titration curve of acetic acid with sodium hydroxide", "🧪 Chemistry"),
+    ("what is the reaction order from my concentration data", "🧪 Chemistry"),
+    ("pH of 0.01 M HCl", "🧪 Chemistry"),
+    ("spaced repetition review queue", "🧠 Practice & mastery"),
+    ("my daily practice streak and mastery", "🧠 Practice & mastery"),
+])
+def test_chemistry_and_practice_are_reachable_by_asking(query, mode):
+    assert mode in MODE_LABELS and rt.route(query).mode == mode

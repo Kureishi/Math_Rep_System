@@ -59,4 +59,39 @@ LIBRARY: dict[str, tuple[str, dict]] = {
                        _v("n", "compounding periods per year", 12, None), _v("t", "years", 10, "years"), _v("A", "final amount", None, "dollars")],
          "equations": [_eq("compound interest", "Eq(A, P*(1 + r/n)**(n*t))")],
          "solve_for": ["A"], "assumptions": ["no deposits or withdrawals"]}),
+    "Dilution": (
+        "How many mL of a 12.0 M stock solution are needed to make 250 mL of a 0.50 M solution?",
+        {"problem_domain": "chemistry", "problem_type": "algebraic",
+         "variables": [_v("M1", "stock concentration", 12.0, "M"), _v("M2", "final concentration", 0.50, "M"), _v("V2", "final volume", 250, "mL"),
+                       _v("V1", "volume of stock needed", None, "mL")],
+         "equations": [_eq("dilution equation", "Eq(M1*V1, M2*V2)")],
+         "solve_for": ["V1"], "assumptions": ["volumes are additive"]}),
+    "pH of a strong acid": (
+        "What is the pH of a 0.0025 M solution of hydrochloric acid?",
+        {"problem_domain": "chemistry", "problem_type": "algebraic",
+         "variables": [_v("C", "hydrogen-ion concentration", 0.0025, "M"), _v("pH", "pH", None, None)],
+         "equations": [_eq("definition of pH", "Eq(pH, -log(C)/log(10))")],
+         "solve_for": ["pH"], "assumptions": ["the acid is fully dissociated", "25 C", "water's own ions are negligible"]}),
+    "Molarity from a mass": (
+        "What is the molarity of a solution made by dissolving 5.85 g of sodium chloride (molar mass 58.44 g/mol) in enough water to make 500 mL of solution?",
+        {"problem_domain": "chemistry", "problem_type": "algebraic",
+         "variables": [_v("m", "mass of solute", 5.85, "g"), _v("MM", "molar mass of the solute (a constant)", 58.44, "g/mol"),
+                       _v("V", "volume of solution", 500, "mL"), _v("M", "molarity", None, "mol/L")],
+         "equations": [_eq("molarity", "Eq(M, (m/MM)/(V/1000))")],
+         "solve_for": ["M"], "assumptions": []}),
+}
+
+
+# Concept tags for each starter problem: the unit of the mastery heatmap (modules/practice.py). A tag is a skill, not a chapter title.
+LIBRARY_CONCEPTS: dict[str, list[str]] = {
+    "Constant acceleration (kinematics)": ["kinematics", "uniform acceleration"],
+    "Projectile range": ["kinematics", "projectile motion"],
+    "Series circuit": ["circuits", "Ohm's law"],
+    "Pendulum period": ["oscillations", "periodic motion"],
+    "Kinetic energy and momentum": ["mechanics", "energy and momentum"],
+    "Ideal gas": ["thermodynamics", "gas laws"],
+    "Compound interest": ["finance", "exponential growth"],
+    "Dilution": ["chemistry", "solutions"],
+    "pH of a strong acid": ["chemistry", "acids and bases"],
+    "Molarity from a mass": ["chemistry", "solutions"],
 }

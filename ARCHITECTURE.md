@@ -421,6 +421,10 @@ math-rep-system/
     ├── discover_plots.py              # Plotly figures for it
     ├── showcase.py                    # Schwarzschild ray tracer (GPU-capable), orbits, Flamm surface, Ising critical movie
     ├── showcase_plots.py              # Plotly figures for it
+    ├── chemistry.py                   # formulas, balancing (null space + recount), stoichiometry, exact pH / titration, kinetics, Arrhenius
+    ├── chemistry_plots.py             # titration / distribution / kinetics / Arrhenius / stoichiometry figures
+    ├── practice.py                    # spaced-repetition practice on fresh verified variants; mastery per concept; data/practice.db
+    ├── next_steps.py                  # "What next?": suggestions from a result's state, destinations from the mode registry
     ├── problem_sets.py                # verified problem-set generator + answer parsing + grading with mistake diagnosis
     ├── problem_library.py             # starter solved problems so the generator needs no history or model
     ├── mcmc.py                        # affine-invariant ensemble sampler, convergence + model-adequacy diagnostics

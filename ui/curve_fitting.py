@@ -2,6 +2,7 @@
 Curve/data fitting mode (CSV or pasted (x, y) -> fitted symbolic model + fit-quality + statistical inference).
 """
 import streamlit as st
+from ui.next_steps import render_fit_handoff
 from ui.a11y import show_figure
 import sympy as sp
 import numpy as np
@@ -257,6 +258,7 @@ def render_curve_fitting_tab():
     m1, m2 = st.columns(2)
     m1.metric("R²", f"{result.r_squared:.5f}")
     m2.metric("RMSE", f"{result.rmse:.5g}")
+    render_fit_handoff(xs, ys, stat_family, stat_degree, stat_expr_str, stat_param_names, result.param_values)
 
     log_cols = st.columns(2)
     with log_cols[0]:

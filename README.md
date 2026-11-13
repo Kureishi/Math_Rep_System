@@ -369,6 +369,24 @@ Markdown, PDF, Python, or a Jupyter notebook.
   ✓ / ! / ✕ as well as a colour.
 - **Where it ran:** results that can use the GPU show a small chip, ⚡ GPU or 🖥️ CPU, recording what actually produced them (a GPU job that
   fell back to the CPU says CPU).
+- **What next?** (`next_steps.py`). Under a solved problem, a curve fit, or a kinetics run, a short row of buttons proposes the sensible next moves,
+  chosen from what the result actually is: make a practice set from this problem, add it to your daily practice, check whether you have solved it
+  before, sample the posterior of a fit (with the data, the model and the fit's own values already filled in), or open the chemistry lab for a
+  chemistry problem. A problem that failed verification is not offered as practice material, and one whose answer is not a number (a differential
+  equation) is not offered a practice set it cannot have.
+- **Practice & mastery** (`🧠` mode; `practice.py`; no LLM involved). A few minutes a day on problems you have solved or that ship with the app. Each
+  review is a **fresh variant** of the problem (new numbers, an answer key that passed the app's own verification), so you practise the method, not an
+  answer you remember; the variant is the same if you reload the page and different tomorrow. When a problem comes back is decided by **SM-2**
+  spaced repetition: a success pushes it out (1 day, 6 days, then by a growing ease), a failure brings it back tomorrow. **Mastery** is shown per
+  concept as a recency-weighted accuracy (half-life three weeks) with a weekly heatmap, a review forecast and a streak; a concept needs several
+  attempts before it can be called mastered. Everything is local (`data/practice.db`); it is not part of project bundles. Not to be confused with the
+  results page's *Practice* tab, which asks the language model to write a worksheet.
+- **Chemistry** (`🧪` mode; `chemistry.py`; no LLM involved). **Balancing** (the exact null space of the element-and-charge matrix, then an independent
+  recount of every atom and the charge; underdetermined and impossible reactions are reported, not forced), **stoichiometry** (limiting reagent,
+  yields, ending with a mass-conservation check), **acids and titration** (pH and full titration curves from the *exact* charge balance, including
+  polyprotic acids, with the equivalence points, a half-equivalence-against-pKa table that shows where the textbook shortcut fails, and a species
+  distribution diagram) and **kinetics** (zero, first and second order fitted and compared by BIC, saying so when the data cannot tell two orders
+  apart; Arrhenius activation energy; a handoff to the posterior sampler). Species are written `Fe^3+`, `SO4^2-`, `CuSO4.5H2O`; 25 C throughout.
 - **Copy buttons:** each answer, and each Monte Carlo summary, has a 📋 popover to copy
   it as plain text, with units, as LaTeX, or as Python (a value, or the function).
 - **Follow-up questions and tutor-mode guesses are saved with the problem**, so they

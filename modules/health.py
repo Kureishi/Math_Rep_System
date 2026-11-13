@@ -186,14 +186,14 @@ def check_data_folder(data_dir: Path | None = None) -> Check:
 
 
 def check_databases() -> Check:
-    from modules import history, templates
+    from modules import history, practice, templates
     try:
-        for mod in (history, templates):
+        for mod in (history, templates, practice):
             mod._connect().close()
     except Exception as exc:  # noqa: BLE001
         return Check("databases", "Databases", "fail", f"could not open {type(exc).__name__}: {exc}",
                      "Close other copies of the app; if the file is damaged, move data/*.db aside to start fresh.")
-    return Check("databases", "Databases", "ok", "history and templates open and are up to date")
+    return Check("databases", "Databases", "ok", "history, templates and practice open and are up to date")
 
 
 def check_lm_studio(client: Any) -> list[Check]:
