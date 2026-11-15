@@ -456,6 +456,10 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
             if replay_file is not None and st.button("Replay checks", key="bundle_replay_button"):
                 from ui.results.proof_card import render_replay
                 render_replay(replay_file.getvalue().decode("utf-8"))
+            report_file = st.file_uploader("Report to re-verify (its appendix holds a replay manifest)", type=["md", "html", "tex", "txt", "pdf", "docx", "zip"], key="report_replay_upload")
+            if report_file is not None and st.button("Re-verify this report", key="report_replay_button"):
+                from ui.results.proof_card import render_manifest_replay
+                render_manifest_replay(report_file.name, report_file.getvalue())
 
         st.divider()
         st.header("History")

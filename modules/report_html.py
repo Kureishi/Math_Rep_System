@@ -147,6 +147,8 @@ def render_html(sections: list[Section], title: str = REPORT_TITLE) -> str:
                 body.append(f'<ul class="st">{items}</ul>')
             elif b.kind == "kv":
                 body.append("<dl>" + "".join(f"<dt>{_esc(k)}</dt><dd>{_esc(v)}</dd>" for k, v in b.rows) + "</dl>")
+            elif b.kind == "code":
+                body.append(f'<pre class="code" style="font-size:11px;overflow-x:auto;padding:10px;border:1px solid #8A8F98;border-radius:6px" id="replay-manifest">{_esc(b.text)}</pre>')
             elif b.kind in ("image", "figure"):
                 caption = f"<figcaption><b>{_esc(b.label_text)}</b>" + (f" -- {_esc(b.text)}" if b.text else "") + "</figcaption>"
                 if b.figure_json:

@@ -54,3 +54,24 @@ def render_replay(bundle_text: str) -> None:
         with st.expander(f"{icon} {item.title}"):
             for line in item.details:
                 st.caption(line)
+
+
+def render_manifest_replay(name: str, data: bytes) -> None:
+    """Find the replay manifest in an uploaded report, check it is intact, replay its computed checks and say whether they came out the same."""
+    try:
+        manifest = pc.extract_manifest(pc.text_of_report_file(name, data))
+    except Exception as exc:  # noqa: BLE001 -- an unreadable file is reported, never a traceback
+        st.error(f"Could not read that file: {type(exc).__name__}: {exc}")
+        return
+    if manifest is None:
+        st.warning("No replay manifest was found in that file. Export the report with the appendix ticked (the lab-report and homework themes include it).")
+        return
+    result = pc.verify_manifest(manifest)
+    (st.success if result.ok else st.error)(f"{'✅' if result.ok else '⚠️'} {result.headline}")
+    st.caption(result.integrity_detail)
+    if result.replay is not None:
+        for line in result.replay.details:
+            st.caption(line)
+    if result.trust_level:
+        st.caption(f"Trust level of the replayed checks: {result.trust_level}. (The independent re-solve asks the language model and is not replayed.)")
+    st.caption("Problem: " + str(manifest["content"]["problem_text"])[:200])

@@ -64,6 +64,7 @@ class Block:
         figure     figure_json, text (caption), label_text (title) -- a live plot with no static image
                    at all, so every format except HTML leaves it out
         subheading text
+        code       text (monospace lines; the replay manifest); every format except PowerPoint carries it
     """
     kind: str
     text: str = ""
@@ -111,6 +112,8 @@ class ReportExtras:
     now: dict[str, Any] | None = None     # override "the current settings" (tests)
     live_figures: bool = False            # also build live Plotly figures (tornado charts, the dependency
                                           # graph, Monte Carlo histograms) -- only the HTML report can show them
+    auto_captions: bool = False           # number the plots ("Figure 1.") and describe each chart in words under it
+    appendix_manifest: bool = True        # the appendix carries the full replay manifest (False: just the proof reference line)
 
 
 def mc_run_dict(result: Any, unit: str | None = None) -> dict[str, Any]:
@@ -141,6 +144,7 @@ SECTIONS: list[tuple[str, str, str]] = [
     ("followups", "Follow-up questions", "The follow-up Q&A from this session"),
     ("tutor", "Tutor-mode practice", "Your guesses in tutor mode and how they were marked"),
     ("provenance", "Reproducibility", "Model, settings, versions and seeds this was produced with"),
+    ("appendix", "Appendix: proof card and replay manifest", "What backs the answer and what does not, plus a manifest that lets anyone re-verify the report"),
 ]
 SECTION_IDS = [s[0] for s in SECTIONS]
 SECTION_TITLES = {s[0]: s[1] for s in SECTIONS}
@@ -152,6 +156,9 @@ PRESETS: dict[str, list[str]] = {
     "Peer review": ["problem", "results", "equations", "variables", "confidence", "domain", "verification",
                     "sensitivity", "provenance"],
     "Quick summary": ["problem", "results", "confidence", "provenance"],
+    "Lab report": ["problem", "equations", "variables", "steps", "results", "units", "plots", "sensitivity", "confidence", "verification", "provenance", "appendix"],
+    "Homework solution": ["problem", "variables", "equations", "steps", "results", "units", "confidence", "appendix"],
+    "One-page summary": ["problem", "results", "equations", "confidence", "appendix"],
 }
 DEFAULT_PRESET = "Full audit"
 
@@ -332,12 +339,38 @@ def _sensitivity(model, report, extras: ReportExtras, pct_range: float = 0.2) ->
     return Section("sensitivity", SECTION_TITLES["sensitivity"], blocks) if blocks else None
 
 
-def _plots(snapshots) -> Section | None:
+def chart_description(figure_json: str) -> str:
+    """The chart described in words (series, axes, ranges), from its live Plotly figure; empty when it cannot be built."""
+    if not figure_json:
+        return ""
+    try:
+        import plotly.io as pio
+        from modules.palette import describe_figure
+        text = describe_figure(pio.from_json(figure_json))
+    except Exception:  # noqa: BLE001 -- a caption is an extra and must never sink the export
+        return ""
+    return text[len("Chart: "):] if text.startswith("Chart: ") else text
+
+
+def figure_caption(number: int, title: str, caption: str, figure_json: str = "") -> str:
+    """"Figure 3. <what was chosen to show>. <the chart described in words>" -- the numbering and description are automatic, the caption is the person's."""
+    parts = [f"Figure {number}."]
+    if caption.strip():
+        parts.append(caption.strip().rstrip(".") + ".")
+    desc = chart_description(figure_json)
+    if desc:
+        parts.append(desc if desc.endswith(".") else desc + ".")
+    return " ".join(parts)
+
+
+def _plots(snapshots, auto_captions: bool = False) -> Section | None:
     if not snapshots:
         return None
-    return Section("plots", SECTION_TITLES["plots"],
-                   [Block("image", text=s.caption, png=s.png_bytes, label_text=s.title,
-                                                            figure_json=s.figure_json) for s in snapshots])
+    blocks = []
+    for n, s in enumerate(snapshots, 1):
+        caption = figure_caption(n, s.title, s.caption, s.figure_json) if auto_captions else s.caption
+        blocks.append(Block("image", text=caption, png=s.png_bytes, label_text=s.title, figure_json=s.figure_json))
+    return Section("plots", SECTION_TITLES["plots"], blocks)
 
 
 def _scenarios(scenarios) -> Section | None:
@@ -376,6 +409,37 @@ def _provenance(extras: ReportExtras) -> Section | None:
     return Section("provenance", SECTION_TITLES["provenance"], [Block("kv", rows=[[k, v] for k, v in rows])])
 
 
+def _appendix(problem_text: str, model: ProblemModel, report: VerificationReport, extras: ReportExtras) -> Section | None:
+    """The proof card (what backs the answer and what does not) and the replay manifest (everything needed to re-verify this report)."""
+    from modules import proof_card as pc
+    try:
+        summary = pc.trust_summary(model, report)
+        manifest = pc.build_manifest(problem_text, model, report, extras.provenance)
+    except Exception:  # noqa: BLE001 -- an appendix is an extra: never let it sink the export
+        return None
+    blocks: list[Block] = [Block("label", "Proof card"), Block("text", summary.headline, style="bold"), Block("text", f"Verdict level: {summary.level}.")]
+    if summary.reasons:
+        blocks += [Block("label", "What backs the answer"), Block("bullets", items=list(summary.reasons))]
+    if summary.audits:
+        blocks += [Block("label", "Each equation with the answer substituted back in"),
+                   Block("table", headers=["Equation", "Result", "Detail"], rows=[[a.name, a.status, a.detail] for a in summary.audits])]
+    if summary.limits:
+        blocks += [Block("label", "What it does not establish" if summary.level != "failed" else "What to fix"), Block("bullets", items=list(summary.limits))]
+    short = manifest["content_sha256"][:16]
+    if not extras.appendix_manifest:
+        blocks += [Block("label", "Proof reference"), Block("kv", rows=[["Proof id", short], ["Full manifest", "in the lab-report and homework formats, and in the Markdown, HTML, LaTeX, Word and PDF exports of the full report"]])]
+        return Section("appendix", SECTION_TITLES["appendix"], blocks)
+    v = manifest["content"]["verification"]
+    blocks += [Block("label", "Replay manifest"),
+               Block("text", "To re-verify this report, paste or upload this file into the app (sidebar: Project, Replay, then Report to re-verify). The equations are rebuilt from the manifest and every "
+                               "check that is computed rather than asked of a language model is run again; the result must match what is recorded here. Editing the block breaks its hash."),
+               Block("kv", rows=[["Proof id", manifest["content_sha256"]], ["Checks recorded", f"{len(v['checks'])} ({sum(1 for c in v['checks'] if c['passed'])} passed)"],
+                                   ["Answers recorded", ", ".join(f"{k} = {x:.6g}" for k, x in v["sympy_numeric_answers"].items()) or "none"],
+                                   ["Environment", f"app {manifest['environment'].get('app_version', '?')}, Python {manifest['environment'].get('python', '?')}"]]),
+               Block("code", text=pc.encode_manifest(manifest))]
+    return Section("appendix", SECTION_TITLES["appendix"], blocks)
+
+
 def build_sections(problem_text: str, model: ProblemModel, report: VerificationReport,
                    steps_by_target: dict[str, list[SolutionStep]], scenarios: list[dict] | None = None,
                    plot_snapshots: list[PlotSnapshot] | None = None, extras: ReportExtras | None = None,
@@ -404,11 +468,12 @@ def build_sections(problem_text: str, model: ProblemModel, report: VerificationR
         "verification": lambda: _verification(report),
         "steps": lambda: _steps(steps_by_target),
         "sensitivity": lambda: _sensitivity(model, report, ex),
-        "plots": lambda: _plots(plot_snapshots),
+        "plots": lambda: _plots(plot_snapshots, ex.auto_captions),
         "scenarios": lambda: _scenarios(scenarios),
         "followups": lambda: _followups(ex),
         "tutor": lambda: _tutor(ex),
         "provenance": lambda: _provenance(ex),
+        "appendix": lambda: _appendix(problem_text, model, report, ex),
     }
     out = []
     for sid in SECTION_IDS:

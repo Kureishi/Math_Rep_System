@@ -15,8 +15,9 @@ from dataclasses import dataclass, field, replace
 
 from modules import exporter, report_office, report_tex
 from modules.equation_engine import ProblemModel
-from modules.report_content import PlotSnapshot, ReportExtras, build_sections
+from modules.report_content import REPORT_TITLE, PlotSnapshot, ReportExtras, build_sections
 from modules.report_html import render_html
+from modules.report_theme import THEMES, apply_theme
 from modules.solver import SolutionStep
 from modules.verifier import VerificationReport
 
@@ -55,6 +56,8 @@ class ExportContext:
     scenarios: list[dict] = field(default_factory=list)
     snapshots: list[PlotSnapshot] = field(default_factory=list)
     extras: ReportExtras = field(default_factory=ReportExtras)
+    theme: str | None = None                  # a key of modules/report_theme.THEMES: the title, section order and headings, captions, compactness
+    auto_captions: bool | None = None         # number the figures and describe each chart; None follows the theme (off without one)
 
 
 @dataclass
@@ -64,27 +67,39 @@ class ExportedFile:
     mime: str
 
 
+def _themed(ctx: ExportContext, fmt: str):
+    theme = THEMES.get(ctx.theme) if ctx.theme else None
+    captions = ctx.auto_captions if ctx.auto_captions is not None else bool(theme and theme.auto_captions)
+    extras = replace(ctx.extras, live_figures=(fmt == "html"), auto_captions=captions, appendix_manifest=not (theme and theme.compact))
+    return theme, extras
+
+
 def render_export(fmt: str, ctx: ExportContext, include: list[str] | set[str] | None = None,
                   stem: str = "solved_problem") -> ExportedFile:
-    """Build `fmt` ("pdf", "html", "docx", "pptx", "tex" or "md") for the chosen sections. ValueError for an
-    unknown format or section id."""
+    """Build `fmt` ("pdf", "html", "docx", "pptx", "tex" or "md") for the chosen sections, in the context's theme if it has one. ValueError for an
+    unknown format, section id or theme."""
     if fmt not in FORMAT_KEYS:
         raise ValueError(f"Unknown export format {fmt!r}; expected one of {', '.join(FORMAT_KEYS)}.")
+    if ctx.theme is not None and ctx.theme not in THEMES:
+        raise ValueError(f"Unknown report theme {ctx.theme!r}; expected one of {', '.join(THEMES)}.")
     spec = next(f for f in FORMATS if f.key == fmt)
-    extras = replace(ctx.extras, live_figures=(fmt == "html"))
+    theme, extras = _themed(ctx, fmt)
     sections = build_sections(ctx.problem_text, ctx.model, ctx.report, ctx.steps_by_target, ctx.scenarios,
                               ctx.snapshots, extras, include)
+    title = REPORT_TITLE
+    if theme is not None:
+        sections, title = apply_theme(sections, theme), theme.title
     if fmt == "pdf":
-        return ExportedFile(stem + spec.ext, exporter.render_pdf(sections), spec.mime)
+        return ExportedFile(stem + spec.ext, exporter.render_pdf(sections, title), spec.mime)
     if fmt == "md":
-        return ExportedFile(stem + spec.ext, exporter.render_markdown(sections).encode("utf-8"), spec.mime)
+        return ExportedFile(stem + spec.ext, exporter.render_markdown(sections, title).encode("utf-8"), spec.mime)
     if fmt == "html":
-        return ExportedFile(stem + spec.ext, render_html(sections).encode("utf-8"), spec.mime)
+        return ExportedFile(stem + spec.ext, render_html(sections, title).encode("utf-8"), spec.mime)
     if fmt == "docx":
-        return ExportedFile(stem + spec.ext, report_office.render_docx(sections), spec.mime)
+        return ExportedFile(stem + spec.ext, report_office.render_docx(sections, title), spec.mime)
     if fmt == "pptx":
-        return ExportedFile(stem + spec.ext, report_office.render_pptx(sections), spec.mime)
-    name, data, mime = report_tex.package_tex(sections)
+        return ExportedFile(stem + spec.ext, report_office.render_pptx(sections, title), spec.mime)
+    name, data, mime = report_tex.package_tex(sections, title)
     return ExportedFile(stem + (".tex" if name.endswith(".tex") else "_tex.zip"), data, mime)
 
 
@@ -92,7 +107,7 @@ def available_sections(ctx: ExportContext) -> list[str]:
     """The section ids that would have content for this problem (the rest would be left out anyway), so a
     chooser offers only what exists. Built the cheap way: sections are built with live figures off."""
     return [s.id for s in build_sections(ctx.problem_text, ctx.model, ctx.report, ctx.steps_by_target,
-                                          ctx.scenarios, ctx.snapshots, replace(ctx.extras, live_figures=False))]
+                                          ctx.scenarios, ctx.snapshots, replace(ctx.extras, live_figures=False, auto_captions=False))]
 
 
 def expected_file(fmt: str, ctx: ExportContext, include: list[str] | set[str] | None = None,

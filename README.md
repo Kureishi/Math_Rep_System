@@ -387,6 +387,39 @@ Markdown, PDF, Python, or a Jupyter notebook.
   polyprotic acids, with the equivalence points, a half-equivalence-against-pKa table that shows where the textbook shortcut fails, and a species
   distribution diagram) and **kinetics** (zero, first and second order fitted and compared by BIC, saying so when the data cannot tell two orders
   apart; Arrhenius activation energy; a handoff to the posterior sampler). Species are written `Fe^3+`, `SO4^2-`, `CuSO4.5H2O`; 25 C throughout.
+- **Waves & optics lab** (`🌊` mode; `waves.py`; no LLM involved). **Slits and diffraction by FFT**: a single slit, a double slit or an N-slit grating is
+  sampled with sub-sample accuracy and transformed; the result is compared with the closed form (fringe spacing λL/d from the dark fringes, which the
+  envelope cannot bias; the sinc² envelope, whose slit width is *recovered* from the measured fringe heights; the first zero λL/a; Parseval), in the
+  paraxial approximation, which the page states. **2-D apertures**: circular (the Airy zero 1.2197 λL/D and the 83.8 % encircled energy), rectangular and double
+  slit, by a 2-D FFT (GPU-capable). **Ripple tank**: a leapfrog finite-difference wave equation with absorbing edges; one source must decay as 1/√r with the
+  wavelength the *scheme* propagates (its own dispersion relation, reported), two sources must put their maxima where r₂ − r₁ is a whole number of wavelengths
+  plus the phase offset, in phase or in antiphase. **Doppler**: every wavefront's arrival time is solved exactly, and the frequency heard is compared with
+  f₀(c + vₒ)/(c − vₛ), with the passing-siren curve and, supersonically, the Mach-cone angle measured from where successive wavefronts intersect.
+- **Dynamics & chaos lab** (`🌀` mode; `dynamics.py`; no LLM involved). **N-body** with leapfrog, Yoshida 4th order, RK4 and (as the cautionary tale) explicit Euler:
+  the figure-eight orbit must return after each period, the Lagrange triangle must stay equilateral, a Kepler orbit must keep its Laplace–Runge–Lenz vector and obey
+  the third law, and energy drift is classified as bounded or secular (symplectic methods promise the former); a chaotic preset (3-4-5) fails the energy check
+  *visibly* rather than being dressed up. An **order study** measures each integrator's convergence slope against an 8th-order reference. The **double
+  pendulum**'s equations are derived from its Lagrangian by SymPy and the fast vectorised version is verified against that derivation; the **chaos map** colours
+  every starting angle by the time to the first flip. **Lyapunov exponents** are estimated over an *ensemble* of nearby trajectories by the Benettin/QR method on
+  batched tangent frames, with a standard error and two exact identities as checks (Lorenz exponents sum to −(σ + 1 + β) and the largest matches the published 0.9056;
+  Hamiltonian exponents sum to zero and pair as ±), plus a second route from the divergence of nearby pairs. Ensembles are one batched RK4 and use the GPU when large.
+  A simulated trajectory can be sent straight to **Discover**.
+- **Circuits & control lab** (`🔌` mode; `circuits.py`; no LLM involved). **RLC transients** (series, voltage step; parallel, current step) are integrated from the circuit
+  equations and checked against the closed form, scipy's step response and what is *measured from the ringing*: ζ from the logarithmic decrement, the ringing frequency
+  from the peak spacing, overshoot, peak time, the settling-time bound, the slow-pole decay when overdamped, and an energy balance (source work = stored + dissipated)
+  integrated alongside the circuit. **Bode plots** come from the transfer function SymPy derives from the impedances, compared with scipy's, with the resonance peak,
+  its gain and the −3 dB bandwidth against ω₀, ζ, Q. **Control**: a plant (first/second order, first order with dead time via Padé, integrator with lag, the RLC, or any
+  transfer function) under a PID with a filtered derivative; the loop is cross-checked three ways (Routh–Hurwitz against the pole locations, an explicit feedback
+  simulation against the closed-loop algebra, the final value theorem), the margins are verified at their crossovers, and tuning (Ziegler–Nichols from the ultimate gain,
+  found twice, or the reaction curve; SIMC; a numerical ITAE optimiser) fills the gains in. Linear theory only: no saturation, noise or sampling.
+- **Report themes, a proof appendix and the answer card.** The Share dialog's presets now include **Lab report**, **Homework solution** and **One-page summary**
+  (`report_theme.py`): each reorders and renames the sections (Objective, Theory, Method and analysis, Results…; Given, Solution, Answer, Check…), and the one-page summary
+  trims to the problem, the answer, three equations and the verdict (it renders on one page). Figures can be **numbered and described automatically** ("Figure 1. …
+  1 series: y, x axis…") from the same chart descriptions used for screen readers. An **appendix** carries the proof card and a **replay manifest**: the problem, the
+  extracted equations and what every check said, with a SHA-256 of that content, as a base64 block between marker lines that survives Markdown, HTML, LaTeX, Word and PDF.
+  *Sidebar → Project → Replay → Report to re-verify* extracts it from the file, detects any edit, rebuilds the model and re-runs every computed check. The **answer card**
+  (Share → 🖼️ Answer card, and a panel under every lab result) is a 1200 × 630 PNG: the problem, the answer with units and the verdict *in words and symbol, not only colour*;
+  a failing result says "Not verified". It carries the short proof id and a footer that says where a language model was involved.
 - **Copy buttons:** each answer, and each Monte Carlo summary, has a 📋 popover to copy
   it as plain text, with units, as LaTeX, or as Python (a value, or the function).
 - **Follow-up questions and tutor-mode guesses are saved with the problem**, so they
@@ -460,8 +493,9 @@ With an NVIDIA GPU and [CuPy](https://cupy.dev), the data-parallel kernels run o
 changes and everything runs on the CPU. Install the wheel matching your CUDA version (see `requirements-gpu.txt`),
 then check with `python -c "from modules import gpu; print(gpu.describe())"`.
 
-- **What uses it:** Langevin ensembles (overdamped and underdamped), Ising/Potts/XY lattice sweeps, and the
-  eigenvalue solves for random-matrix spectra. Not the symbolic work (SymPy), the adaptive ODE/geodesic
+- **What uses it:** Langevin ensembles (overdamped and underdamped), Ising/Potts/XY lattice sweeps, the
+  eigenvalue solves for random-matrix spectra, ensembles of chaotic trajectories (Lyapunov spectra, the double-pendulum chaos map; at least
+  20,000 members), direct-summation N-body runs (at least 1,500 bodies), the 2-D diffraction FFT (at least 2048 × 2048) and the ripple-tank grid (at least 512 × 512). Not the symbolic work (SymPy), the adaptive ODE/geodesic
   integrators or the small 1-D quantum/PDE grids: those are sequential or too small for a GPU to help. LM Studio
   uses the GPU for the language model on its own (its GPU-offload setting).
 - **When:** *auto* (default) uses the GPU only for jobs big enough to benefit (at least 100,000 Langevin paths, a

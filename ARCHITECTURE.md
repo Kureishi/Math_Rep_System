@@ -416,13 +416,21 @@ math-rep-system/
     ├── gr_plots.py                    # the Plotly figures for all of the above
     ├── gpu.py                         # optional CuPy backend: detection, auto/on/off, size thresholds, CPU fallback
     ├── router.py                      # "Ask anything": weighted signals -> (mode, confidence, reason, prefill); optional LLM tie-break
-    ├── proof_card.py                  # trust verdict, equation audit, step badges, bundle replay (cli.py replay)
+    ├── proof_card.py                  # trust verdict, equation audit, step badges, bundle replay (cli.py replay), report replay manifest (hash, encode, extract, verify)
     ├── discover.py                    # equation discovery: derivatives, library, STLSQ, BIC threshold, bootstrap, simulation check
     ├── discover_plots.py              # Plotly figures for it
     ├── showcase.py                    # Schwarzschild ray tracer (GPU-capable), orbits, Flamm surface, Ising critical movie
     ├── showcase_plots.py              # Plotly figures for it
     ├── chemistry.py                   # formulas, balancing (null space + recount), stoichiometry, exact pH / titration, kinetics, Arrhenius
     ├── chemistry_plots.py             # titration / distribution / kinetics / Arrhenius / stoichiometry figures
+    ├── waves.py                       # Fraunhofer diffraction by FFT (1-D, 2-D), leapfrog ripple tank, exact-retarded-time Doppler; each checked against a closed form
+    ├── waves_plots.py                 # diffraction / aperture / ripple / Doppler figures
+    ├── dynamics.py                    # N-body (leapfrog, Yoshida, RK4, Euler), order study, double pendulum (SymPy-derived), Lorenz, batched Lyapunov ensembles, flip map
+    ├── dynamics_plots.py              # orbits, conservation, order, pendulum, Lorenz, Lyapunov, divergence, flip-map figures
+    ├── circuits.py                    # RLC transients + Bode (symbolic transfer functions), plants, PID, Routh, margins, tuning rules, root locus
+    ├── circuits_plots.py              # transient / Bode / step / loop-Bode / root-locus / pole-zero figures
+    ├── report_theme.py                # lab report / homework / one-page themes: order, headings, compaction
+    ├── answer_card.py                 # the shareable 1200 x 630 answer card (problem, answer, verdict, proof id)
     ├── practice.py                    # spaced-repetition practice on fresh verified variants; mastery per concept; data/practice.db
     ├── next_steps.py                  # "What next?": suggestions from a result's state, destinations from the mode registry
     ├── problem_sets.py                # verified problem-set generator + answer parsing + grading with mistake diagnosis
@@ -620,6 +628,19 @@ Decisions and operational details that don't belong in the README.
   which also stops the full Markdown report being rebuilt on every rerun.
   `AppTest` closes a dialog on any interaction, so the dialog's tab bodies are tested
   directly and only the opening of the dialog goes through the app.
+- **Themes, the appendix and the answer card** (`report_theme.py`, `answer_card.py`, `proof_card.py`). A preset says which sections go in; a *theme* says how
+  the report reads (title, order, headings, captions, compaction) and only reorders, renames or trims what already exists, so it can never add a claim. The
+  appendix's replay manifest is `{content, sha256(content), environment}` where the content is the problem, the model's raw JSON and what each check said; it is
+  base64 between marker lines (not JSON in a code fence) because it has to survive a PDF's text layer and Word's paragraphs, and extraction ignores everything outside
+  the base64 alphabet. Replay recomputes the hash first (an edit is reported as tampering, not as a failed check), then runs `replay_record`. The independent
+  re-solve asks the language model, so it is recorded but not replayed, and the replay says so. The answer card's verdict comes from the same `trust_summary` the
+  app shows, or from the lab's own `CheckList`, and is carried by a symbol and words as well as a colour.
+- **The simulation labs share one honesty rule: a result is only shown with the checks that were run on it, and each check compares the method with something
+  it did not use.** FFT diffraction against the closed form *and* against quantities measured from the FFT alone; the ripple tank against the scheme's own
+  dispersion relation (so grid dispersion is not mistaken for physics); Doppler arrival times from the exact retarded-time quadratic; integrators against an
+  8th-order reference and conservation laws; Lyapunov exponents against exact identities; RLC against the circuit's own energy ledger; loops against Routh,
+  an explicit feedback simulation and the final value theorem. A check that cannot be evaluated is a *note*, not a failure; a chaotic problem that a fixed
+  step cannot follow is allowed to fail. Ensembles are one batched RK4 over an (M, n) array so the same code runs on NumPy or CuPy (`gpu.py` thresholds).
 - **One content model, many formats** (`modules/report_content.py`). Markdown and PDF
   each used to walk the model by hand, so every new section (or fix) had to be made
   twice, and a third and fourth format would have made it four times. A solved problem

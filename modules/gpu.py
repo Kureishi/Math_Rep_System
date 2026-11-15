@@ -13,6 +13,11 @@ WHAT RUNS ON THE GPU (and why only these)
     are still drawn on the CPU from the same seeded generators, so these results do not depend on the backend.
   * Black-hole images (showcase.trace_rays): every pixel's light ray is integrated at once; deterministic, so the image
     does not depend on the backend.
+  * The waves lab (waves.diffraction_2d, waves.ripple_tank): the 2-D FFT of a large aperture and the finite-difference
+    ripple tank are pure array arithmetic; the 1-D diffraction FFT is cheap on any machine and stays where it is.
+  * The dynamics lab (dynamics.py): N-body accelerations (an N x N pairwise array), and ENSEMBLES of nearby chaotic
+    trajectories (Lyapunov spectra, divergence curves, the double-pendulum flip-time map), which are one batched
+    Runge-Kutta step over every member. The fixed-step symplectic integrators on a handful of bodies stay on the CPU.
   Everything else stays on the CPU on purpose: SymPy (symbolic, single-threaded Python), adaptive ODE/geodesic
   integration (sequential), and the 1-D quantum / PDE grids (a few thousand points: the GPU would be slower than
   the launch overhead alone). LM Studio uses the GPU for the language model by itself (its own GPU-offload setting).
@@ -53,6 +58,10 @@ THRESHOLDS: dict[str, int] = {
     "lattice_sites": 128 * 128,       # sites on the lattice
     "matrix_dim": 128,                # side of a random matrix
     "raytrace_pixels": 250 * 250,     # rays in a black-hole image
+    "fft_pixels": 2048 * 2048,        # pixels of a 2-D diffraction aperture
+    "wave_cells": 512 * 512,          # cells of the ripple-tank grid
+    "ensemble_trajectories": 20_000,  # members of a chaotic ensemble integrated at once
+    "nbody_particles": 1500,          # bodies in a direct-summation N-body run
 }
 
 
@@ -142,7 +151,9 @@ def describe() -> str:
     if _mode == "on":
         return f"{backend.name}: used for every supported computation."
     return (f"{backend.name}: used for large ensembles (≥ {THRESHOLDS['langevin_paths']:,} paths), "
-            f"lattices (L ≥ {int(THRESHOLDS['lattice_sites'] ** 0.5)}) and matrices (N ≥ {THRESHOLDS['matrix_dim']}).")
+            f"lattices (L ≥ {int(THRESHOLDS['lattice_sites'] ** 0.5)}), matrices (N ≥ {THRESHOLDS['matrix_dim']}), "
+            f"chaotic ensembles (≥ {THRESHOLDS['ensemble_trajectories']:,} trajectories), N-body runs (≥ {THRESHOLDS['nbody_particles']:,} bodies) "
+            f"and wave grids (≥ {int(THRESHOLDS['wave_cells'] ** 0.5)} cells a side).")
 
 
 def to_host(a: Any) -> np.ndarray:

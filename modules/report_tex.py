@@ -24,7 +24,7 @@ from modules.share_text import tex_escape
 _UNICODE = {"→": r"$\to$", "←": r"$\leftarrow$", "±": r"$\pm$", "×": r"$\times$", "≈": r"$\approx$", "≤": r"$\leq$",
             "≥": r"$\geq$", "≠": r"$\neq$", "—": "---", "–": "--", "…": r"\ldots{}", "°": r"$^\circ$",
             "µ": r"$\mu$", "Ω": r"$\Omega$", "’": "'", "‘": "`", "“": "``", "”": "''", "·": r"$\cdot$",
-            "✅": "[PASS]", "❌": "[FAIL]", "⚠️": "[!]", "✔": "[PASS]", "✖": "[FAIL]", "📸": ""}
+            "✅": "[PASS]", "❌": "[FAIL]", "🟡": "[CAUTION]", "⚪": "[UNCHECKED]", "🔴": "[FAIL]", "🟢": "[PASS]", "⚠️": "[!]", "✔": "[PASS]", "✖": "[FAIL]", "📸": ""}
 
 PREAMBLE = r"""\documentclass[11pt]{article}
 \usepackage[utf8]{inputenc}
@@ -92,6 +92,8 @@ def render_tex(sections: list[Section], title: str = REPORT_TITLE) -> tuple[str,
                     for ok, label, detail in b.rows] + [r"\end{itemize}", ""]
             elif b.kind == "kv":
                 L += [r"\begin{description}"] + [rf"\item[{tex_text(k)}] {tex_text(v)}" for k, v in b.rows] + [r"\end{description}", ""]
+            elif b.kind == "code":
+                L += [r"{\footnotesize", r"\begin{verbatim}", b.text, r"\end{verbatim}", "}", ""]
             elif b.kind == "image" and b.png:
                 name = f"figures/plot-{len(files) + 1}.png"
                 files[name] = b.png

@@ -61,6 +61,8 @@ def render_markdown(sections: list[Section], title: str = REPORT_TITLE) -> str:
                 L += [f"- {'✅' if ok else '❌'} **{label}:** {detail}" for ok, label, detail in b.rows] + [""]
             elif b.kind == "kv":
                 L += [f"**{k}:** {v}  " for k, v in b.rows] + [""]
+            elif b.kind == "code":
+                L += ["```text", b.text, "```", ""]
             elif b.kind == "image":
                 b64 = base64.b64encode(b.png).decode("ascii")
                 L += [f"**{b.label_text}**", "", f"![{b.label_text}](data:image/png;base64,{b64})", "", f"_{b.text}_", ""]
@@ -138,12 +140,12 @@ def _pdf_line(pdf: FPDF, text: str, font: str = "Helvetica", style: str = "", si
     pdf.multi_cell(0, h, _safe(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-def render_pdf(sections: list[Section]) -> bytes:
+def render_pdf(sections: list[Section], title: str = "Math Representation System") -> bytes:
     """PDF for already-built sections. Equations are typeset to images by matplotlib's mathtext."""
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    _pdf_line(pdf, "Math Representation System", style="B", size=18, h=10)
+    _pdf_line(pdf, title, style="B", size=18, h=10)
     pdf.set_text_color(120, 120, 120)
     _pdf_line(pdf, generated_stamp(), size=9)
     pdf.set_text_color(0, 0, 0)
@@ -180,6 +182,10 @@ def render_pdf(sections: list[Section]) -> bytes:
             elif b.kind == "kv":
                 for k, v in b.rows:
                     _pdf_line(pdf, f"{k}: {v}")
+            elif b.kind == "code":
+                for line in b.text.splitlines():
+                    _pdf_line(pdf, line, font="Courier", size=6, h=2.6)
+                pdf.ln(1)
             elif b.kind == "image":
                 _pdf_line(pdf, b.label_text, style="B", size=11, h=6)
                 try:

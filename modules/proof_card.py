@@ -278,3 +278,122 @@ def replay_bundle(bundle_json: str) -> ReplayReport:
     if not report.items:
         report.errors.append("The bundle contains no solved problems to replay.")
     return report
+
+
+# ------------------------------------------------------------------------------------------ the replay manifest (re-verifying a REPORT)
+
+MANIFEST_FORMAT = "mrs-replay-manifest"
+MANIFEST_VERSION = 1
+MANIFEST_BEGIN = "-----BEGIN MRS REPLAY MANIFEST-----"
+MANIFEST_END = "-----END MRS REPLAY MANIFEST-----"
+_LINE = 76
+
+
+def _canonical(obj: Any) -> str:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def content_hash(content: dict[str, Any]) -> str:
+    """SHA-256 of the manifest's content (the problem, its equations and what the checks said): the proof's identity."""
+    import hashlib
+    return hashlib.sha256(_canonical(content).encode("ascii")).hexdigest()
+
+
+def build_manifest(problem_text: str, model: ProblemModel, report: VerificationReport, environment: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Everything needed to re-verify a report: the problem, the equations the model extracted, and what every check and answer was, plus a hash
+    of that content (so an edited manifest is detected) and the environment it was produced in (which a replay may legitimately differ from)."""
+    from dataclasses import asdict
+    from modules import provenance
+    content = {
+        "problem_text": problem_text,
+        "raw_json": model.raw_json,
+        "verification": {
+            "passed": bool(report.passed),
+            "checks": [{"label": c.label, "passed": bool(c.passed), "detail": c.detail} if not hasattr(c, "__dataclass_fields__") else asdict(c) for c in report.checks],
+            "sympy_numeric_answers": {k: float(v) for k, v in report.sympy_numeric_answers.items()},
+            "llm_independent_answers": {k: float(v) for k, v in (report.llm_independent_answers or {}).items()},
+        },
+    }
+    return {"format": MANIFEST_FORMAT, "version": MANIFEST_VERSION, "content": content, "content_sha256": content_hash(content),
+            "environment": environment if environment is not None else provenance.capture()}
+
+
+def encode_manifest(manifest: dict[str, Any]) -> str:
+    """The manifest as a block of base64 lines between marker lines: it survives being pasted into Markdown, HTML, LaTeX, Word or a PDF."""
+    import base64
+    import zlib
+    raw = base64.b64encode(zlib.compress(_canonical(manifest).encode("ascii"), 9)).decode("ascii")
+    lines = [raw[i:i + _LINE] for i in range(0, len(raw), _LINE)]
+    return "\n".join([MANIFEST_BEGIN, *lines, MANIFEST_END])
+
+
+def extract_manifest(text: str) -> dict[str, Any] | None:
+    """Find and decode a manifest block in any text (a report's Markdown, HTML, LaTeX or text extracted from a PDF or Word file); None if there is none."""
+    import base64
+    import re
+    import zlib
+    m = re.search(re.escape(MANIFEST_BEGIN) + r"(.*?)" + re.escape(MANIFEST_END), text, flags=re.S)
+    if not m:
+        return None
+    payload = re.sub(r"[^A-Za-z0-9+/=]", "", m.group(1))
+    try:
+        data = json.loads(zlib.decompress(base64.b64decode(payload)).decode("ascii"))
+    except Exception:  # noqa: BLE001 -- a damaged block is simply not a manifest
+        return None
+    return data if isinstance(data, dict) and data.get("format") == MANIFEST_FORMAT else None
+
+
+def text_of_report_file(name: str, data: bytes) -> str:
+    """The text of an uploaded report (Markdown, HTML, LaTeX, plain text, a PDF or a Word file), for finding a manifest in it."""
+    lower = name.lower()
+    if lower.endswith(".pdf"):
+        import io
+        from pypdf import PdfReader
+        return "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(data)).pages)
+    if lower.endswith(".docx"):
+        import io
+        from docx import Document
+        return "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
+    if lower.endswith((".zip",)):
+        import io
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            return "\n".join(z.read(n).decode("utf-8", "replace") for n in z.namelist() if n.endswith(".tex"))
+    return data.decode("utf-8", "replace")
+
+
+@dataclass
+class ManifestVerification:
+    integrity_ok: bool
+    integrity_detail: str
+    replay: ReplayItem | None
+    trust_level: str | None
+    headline: str
+
+    @property
+    def ok(self) -> bool:
+        return self.integrity_ok and self.replay is not None and self.replay.status == "reproduced"
+
+
+def verify_manifest(manifest: dict[str, Any]) -> ManifestVerification:
+    """Is the manifest intact (its hash matches its content), and do the computed checks still come out the same when replayed?"""
+    content = manifest.get("content")
+    if not isinstance(content, dict):
+        return ManifestVerification(False, "The manifest has no content.", None, None, "Not a valid manifest")
+    expected = manifest.get("content_sha256")
+    actual = content_hash(content)
+    if expected != actual:
+        return ManifestVerification(False, f"The content hash does not match (recorded {str(expected)[:12]}, computed {actual[:12]}): the manifest was edited after it was made.",
+                                    None, None, "Tampered or damaged manifest")
+    item = replay_record(content)
+    level = None
+    if item.status != "not replayable":
+        try:
+            model = build_model(content["raw_json"])
+            fresh = deterministic_report(model)
+            level = trust_summary(model, fresh).level
+        except Exception:  # noqa: BLE001
+            level = None
+    headline = {"reproduced": "Re-verified: every computed check and answer came out the same", "differs": "Replayed, but something differs",
+                "not replayable": "Could not be replayed"}[item.status]
+    return ManifestVerification(True, f"The content hash matches ({actual[:12]}…): the manifest is as it was made.", item, level, headline)

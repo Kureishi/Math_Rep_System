@@ -105,6 +105,12 @@ def render_docx(sections: list[Section], title: str = REPORT_TITLE) -> bytes:
                     p = doc.add_paragraph()
                     p.add_run(f"{k}: ").bold = True
                     p.add_run(str(v))
+            elif b.kind == "code":
+                for line in b.text.splitlines():
+                    para = doc.add_paragraph()
+                    para.paragraph_format.space_after = Pt(0)
+                    run = para.add_run(line)
+                    run.font.name, run.font.size = "Courier New", Pt(6.5)
             elif b.kind == "image" and b.png:
                 doc.add_paragraph().add_run(b.label_text).bold = True
                 doc.add_picture(io.BytesIO(b.png), width=Inches(6))

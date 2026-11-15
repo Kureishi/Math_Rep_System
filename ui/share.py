@@ -16,16 +16,21 @@ session, and picking a preset replaces it; editing a tick afterwards switches th
 
 A dialog is its own fragment: interacting with it reruns the dialog and leaves the page alone.
 """
+import dataclasses
+
 import streamlit as st
 
+from modules import answer_card as card_module
 from modules import chains
 from modules.equation_engine import ProblemModel, target_kind
 from modules.report_content import (
     DEFAULT_PRESET, PRESETS, SECTION_DESCRIPTIONS, SECTION_IDS, SECTION_TITLES,
 )
 from modules.report_export import FORMATS, ExportContext, available_sections
+from modules.report_theme import THEMES
 from modules.share_text import build_latex, build_plain_text
 from modules.verifier import VerificationReport
+from ui.answer_card import render_card
 from ui.cache import cached
 from ui.exports import collect_context, download_button
 
@@ -43,9 +48,11 @@ def render_share_button(model: ProblemModel, report: VerificationReport, steps_b
 @st.dialog("Share this solution", width="large")
 def share_dialog(model: ProblemModel, report: VerificationReport, steps_by_target) -> None:
     ctx = collect_context()
-    tab_export, tab_copy, tab_chain = st.tabs(["⬇️ Export", "📋 Copy", "🔗 Send to a chain"])
+    tab_export, tab_card, tab_copy, tab_chain = st.tabs(["⬇️ Export", "🖼️ Answer card", "📋 Copy", "🔗 Send to a chain"])
     with tab_export:
         _export_tab(ctx)
+    with tab_card:
+        _card_tab(model, report, ctx.problem_text)
     with tab_copy:
         _copy_tab(model, report, steps_by_target, ctx.problem_text)
     with tab_chain:
@@ -75,6 +82,12 @@ def _export_tab(ctx: ExportContext) -> None:
 
     st.selectbox("What to include", list(PRESETS) + [_CUSTOM], key="share_preset", on_change=_apply_preset,
                  help="A preset ticks a set of sections; change any tick and it becomes Custom.")
+    theme = THEMES.get(st.session_state.get("share_preset", ""))
+    if theme is not None:
+        st.caption(f"🎨 **{theme.name}** theme: {theme.note}")
+    captions = st.checkbox("Number the figures and add an automatic description under each", value=bool(theme and theme.auto_captions), key=f"share_captions_{theme.name if theme else 'none'}",
+                           help="“Figure 1. …” followed by the chart described in words: its series, axes and ranges.")
+    ctx = dataclasses.replace(ctx, theme=theme.name if theme else None, auto_captions=captions)
     cols = st.columns(3)
     for i, sid in enumerate(s for s in SECTION_IDS if s in available):
         key = f"share_sec_{sid}"
@@ -103,6 +116,16 @@ def _export_tab(ctx: ExportContext) -> None:
         with grid[i % 3]:
             download_button(spec.key, f"{spec.icon} {spec.label}", ctx, chosen, key=f"share_dl_{spec.key}")
             st.caption(spec.note)
+
+
+def _card_tab(model, report, problem_text) -> None:
+    st.caption("One image with the problem, the answer and the verdict, for a chat or a class forum. The verdict is the same one the app shows, in words as well as colour.")
+    try:
+        card = card_module.from_solution(problem_text, model, report)
+    except Exception:  # noqa: BLE001
+        st.info("This problem has nothing to put on a card yet.")
+        return
+    render_card(card, "share_card")
 
 
 def _copy_tab(model, report, steps_by_target, problem_text) -> None:

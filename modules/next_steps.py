@@ -29,6 +29,7 @@ PAGE_POSTERIOR = "ui.posterior"
 PAGE_PRACTICE = "ui.practice"
 PAGE_CHEMISTRY = "ui.chemistry"
 PAGE_COMPARE = "ui.compare"
+PAGE_DISCOVER = "ui.discover"
 
 ADD_TO_PRACTICE = "add_practice"
 
@@ -123,4 +124,18 @@ def for_fit(xs: Any, ys: Any, expr: str, names: list[str], p0: list[float], labe
     step = _step("posterior", label, "least squares gives one best curve and a symmetric ±; sampling shows every parameter combination the data allow",
                  PAGE_POSTERIOR, {"post_source": "Paste or upload data", "post_paste": csv_for(xs, ys), "post_expr": expr,
                                   "post_names": ", ".join(names), "post_guess": ", ".join(f"{v:.6g}" for v in p0)})
+    return [step] if step else []
+
+
+def for_trajectory(t: Any, X: Any, names: list[str], label: str = "🧭 Discover the equations behind this trajectory", max_rows: int = 400) -> list[NextStep]:
+    """Hand a simulated trajectory (time and a few state variables) to the equation-discovery mode: can the dynamics be recovered from the data alone?"""
+    tt, XX = np.asarray(t, dtype=float), np.asarray(X, dtype=float)
+    if XX.ndim != 2 or XX.shape[1] != len(names) or len(tt) != len(XX):
+        return []
+    if len(tt) > max_rows:
+        keep = np.linspace(0, len(tt) - 1, max_rows).round().astype(int)
+        tt, XX = tt[keep], XX[keep]
+    text = "t," + ",".join(names) + "\n" + "\n".join(",".join(f"{v:.8g}" for v in [a, *row]) for a, row in zip(tt, XX))
+    step = _step("discover", label, "SINDy fits sparse equations to the data: with clean simulated data it should rediscover the equations that produced it",
+                 PAGE_DISCOVER, {"discover_source": "Paste or upload data", "discover_paste": text})
     return [step] if step else []
