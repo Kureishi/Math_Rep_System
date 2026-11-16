@@ -36,7 +36,6 @@ def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, r
     st.session_state["_graph_focus"] = []     # set again by the Explore tab if a graph node is selected
     run_panel("Confidence summary", render_confidence_banner, report)
     run_panel("Proof card", render_proof_card, model, report)
-    run_panel("Suggested next steps", render_solution_next_steps, model, report, problem_text)
     run_panel("Geometry schematic", render_geometry_schematic, model)
     run_panel("Motion diagram", render_motion_diagram, model, report)
     run_panel("Share / export", _share, model, report)
@@ -64,6 +63,8 @@ def render_results(client: LMStudioClient, ws: Workspace, model: ProblemModel, r
     elif st.session_state.get("model") is not None:
         st.info("No step-by-step solution is available for this problem (it was not computed, or could not be). The derived equations and their verification are above.")
 
+    # "What next?" comes after the worked solution (that is when someone is ready to choose a next step) and before the follow-up box
+    run_panel("Suggested next steps", render_solution_next_steps, model, report, problem_text)
     run_panel("Follow-up questions", render_followup, client, model, report)
     run_panel("Alternative scenarios", render_scenarios)
     run_panel("Practice tab", render_practice_tab, client, model, report, tab_practice)

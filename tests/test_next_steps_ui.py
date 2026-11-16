@@ -151,3 +151,27 @@ def test_an_exponential_fit_offers_to_sample_its_posterior_with_the_model_and_da
 def test_a_polynomial_fit_hands_over_its_coefficients_as_the_model():
     at = fitted_app("polynomial")
     assert any(b.key == "ns_fit_posterior" for b in at.button)
+
+
+def test_what_next_sits_between_the_step_by_step_solution_and_the_follow_up_box():
+    """Layout: the worked solution first, then "What next?", then "Ask a follow-up question"."""
+    from tests.report_helpers import kinematics_ctx
+    ctx = kinematics_ctx()
+    at = AppTest.from_file(str(Path(__file__).parent.parent / "app.py"), default_timeout=200)
+    at.run()
+    at.session_state["model"], at.session_state["report"] = ctx.model, ctx.report
+    at.session_state["steps"], at.session_state["problem_text"] = ctx.steps_by_target, ctx.problem_text
+    at.run()
+    assert not at.exception
+
+    def walk(node):
+        """Every text-bearing element in the order it appears on the page."""
+        for child in getattr(node, "children", {}).values():
+            if getattr(child, "type", "") in ("markdown", "subheader", "header", "caption"):
+                yield child.value
+            yield from walk(child)
+    text = list(walk(at.main))
+    where = lambda needle: next(i for i, t in enumerate(text) if needle in t)          # noqa: E731
+    assert where("Step-by-step") < where("What next?") < where("follow-up")
+    # and it is no longer up near the top, between the confidence banner and the tabs
+    assert where("What next?") > where("Domain:")

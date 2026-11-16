@@ -291,6 +291,18 @@ def dark_mode_css() -> str:
             color: #E8E8E8 !important;
             border-color: rgba(232, 232, 232, 0.25) !important;
         }
+        /* A popover's trigger button ("Explain step 3", "Copy a...") has its own test-id (stPopoverButton), so the rule above never reaches it: it keeps the
+           light theme's near-white fill, while the broader label rule at the top of this block recolours its text light grey -- pale text on a pale button.
+           Give its text (and the chevron) a dark shade so it reads against that fill. Hover is excluded on purpose: the hover look was already right. */
+        [data-testid="stPopoverButton"]:not(:hover),
+        [data-testid="stPopoverButton"]:not(:hover) p,
+        [data-testid="stPopoverButton"]:not(:hover) span {
+            color: #2B3040 !important;
+        }
+        [data-testid="stPopoverButton"]:not(:hover) svg {
+            fill: #2B3040 !important;
+            color: #2B3040 !important;
+        }
         /* A button's hover-help tooltip (st.button(..., help="...")) also
            renders in a portal with its own light-theme background and a
            low-opacity gray hint text -- both unreadable against a dark

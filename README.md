@@ -395,7 +395,7 @@ Markdown, PDF, Python, or a Jupyter notebook.
   ✓ / ! / ✕ as well as a colour.
 - **Where it ran:** results that can use the GPU show a small chip, ⚡ GPU or 🖥️ CPU, recording what actually produced them (a GPU job that
   fell back to the CPU says CPU).
-- **What next?** (`next_steps.py`). Under a solved problem, a curve fit, or a kinetics run, a short row of buttons proposes the sensible next moves,
+- **What next?** (`next_steps.py`). Under a solved problem (after its step-by-step solution, above the follow-up box), a curve fit, or a kinetics run, a short row of buttons proposes the sensible next moves,
   chosen from what the result actually is: make a practice set from this problem, add it to your daily practice, check whether you have solved it
   before, sample the posterior of a fit (with the data, the model and the fit's own values already filled in), or open the chemistry lab for a
   chemistry problem. A problem that failed verification is not offered as practice material, and one whose answer is not a number (a differential
