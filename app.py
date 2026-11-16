@@ -40,6 +40,7 @@ from modules.llm_client import LMStudioClient  # noqa: E402  (deliberately after
 from modules.workspace import Workspace  # noqa: E402
 from ui import PAGES  # noqa: E402
 from ui.actions import apply_pending_updates  # noqa: E402
+from ui.safe import guarded  # noqa: E402
 from ui.sidebar import render_sidebar  # noqa: E402
 from ui.word_problem import render_word_problem_page  # noqa: E402
 
@@ -80,15 +81,26 @@ sidebar = render_sidebar(client, ws)
 
 if _boot_notice is not None:
     _boot_notice.empty()
+# Packages that only one feature needs (Word / PowerPoint / PDF export, OCR...) are optional at start-up: say once per session what is missing and how to fix it,
+# rather than letting the first click on that feature be the first the person hears of it.
+if not st.session_state.get("_booted"):
+    from modules import optional_deps  # noqa: E402
+    _gone = optional_deps.missing()
+    if _gone:
+        st.toast("Some optional features are unavailable. " + optional_deps.install_hint(_gone), icon="📦")
 st.session_state["_booted"] = True
 
 # ---------------------------------------------------------------- mode dispatch
 # `sidebar.mode` comes from the sidebar's navigation radio. Every mode except the default word-problem
 # solver is a standalone page in ui.PAGES, gated with an early st.stop() so the word-problem page
 # below never renders underneath it.
+# Both are run under `guarded`: a failure inside a page is shown as a notice with its technical details and the sidebar stays usable, instead of a bare
+# traceback replacing the page (st.stop() below is Streamlit's own control flow and is let through).
 page = PAGES.get(sidebar.mode)
 if page is not None:
-    page(client)
+    with guarded(f"The “{sidebar.mode}” page", "Switch to another mode from the sidebar, or open 🩺 Health check."):
+        page(client)
     st.stop()
 
-render_word_problem_page(client, ws, sidebar.ok)
+with guarded("The word-problem page", "Open 🩺 Health check in the sidebar to see what is missing."):
+    render_word_problem_page(client, ws, sidebar.ok)

@@ -46,7 +46,9 @@ class Settings:
     # Generation behavior
     temperature_extraction: float = 0.1   # low temp: we want faithful, reproducible math
     temperature_narration: float = 0.4    # slightly higher for readable explanations
-    max_tokens: int = 2048
+    # The longest reply the model may write. "Thinking" models spend this on reasoning before they answer, and an empty or cut-off reply is the usual
+    # symptom of it being too small (the failure explanation says so); raise it here, in the sidebar's Advanced settings, or with LM_MAX_TOKENS.
+    max_tokens: int = int(os.getenv("LM_MAX_TOKENS", "2048"))
 
 
 # Bumped by hand when behaviour that affects results or exports changes. It is stamped on every export

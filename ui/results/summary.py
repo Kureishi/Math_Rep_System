@@ -54,6 +54,12 @@ def render_confidence_banner(report: VerificationReport):
                     "trusting the result completely.")
     elif not report.passed:
         st.caption("Review the equations below carefully before trusting the result.")
+        from modules.llm_diagnosis import diagnose_verification
+        from ui.diagnosis import render_diagnosis
+        diagnosis = diagnose_verification(report)
+        if diagnosis is not None:
+            with st.expander("Why didn't this verify, and what can I try?", expanded=True):
+                render_diagnosis(diagnosis, key="unverified")
 
     if cr.critical_failures:
         st.error("**Critical checks that failed:** " +

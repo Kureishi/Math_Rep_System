@@ -89,6 +89,17 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     return "\n".join(pages_text).strip()
 
 
+def _explained(exc: BaseException, prefix: str = "") -> str:
+    """One line for a batch row: the plain error, then what the diagnosis says to try (a batch row has no room for the full explanation)."""
+    try:
+        from modules.llm_diagnosis import diagnose_exception
+        d = diagnose_exception(exc)
+        fix = f" Try: {d.top_fix}" if d.top_fix else ""
+        return f"{d.title}: {d.summary}{fix}" if d.kind != "unexpected" else f"{prefix}{exc}{fix}"
+    except Exception:  # noqa: BLE001 -- explaining a failure must never be a second failure
+        return f"{prefix}{exc}"
+
+
 def solve_one(client: LMStudioClient, index: int, problem_text: str,
               narrate: bool = False) -> BatchItemResult:
     """Runs one problem through modules/pipeline.py's run_pipeline() (the
@@ -99,10 +110,9 @@ def solve_one(client: LMStudioClient, index: int, problem_text: str,
         return BatchItemResult(index=index, problem_text=problem_text, model=result.model,
                                  report=result.report, steps=result.steps, retries=result.retries)
     except LLMOutputError as e:
-        return BatchItemResult(index=index, problem_text=problem_text, error=str(e))
+        return BatchItemResult(index=index, problem_text=problem_text, error=_explained(e))
     except Exception as e:  # noqa: BLE001
-        return BatchItemResult(index=index, problem_text=problem_text,
-                                 error=f"Unexpected error: {e}")
+        return BatchItemResult(index=index, problem_text=problem_text, error=_explained(e, prefix="Unexpected error: "))
 
 
 def solve_batch(client: LMStudioClient, problem_texts: list[str],

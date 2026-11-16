@@ -498,8 +498,13 @@ def extract_model(client: LMStudioClient, problem_text: str, retry_reason: str |
     from config import settings
     raw = client.chat(system=system, user=user,
                        temperature=settings.temperature_extraction, json_mode=True, model=model)
-    payload = extract_json(raw)
-    payload = _validate_llm_payload(payload, raw)
+    meta = getattr(raw, "meta", None) or {}
+    try:
+        payload = extract_json(raw)
+        payload = _validate_llm_payload(payload, raw)
+    except LLMOutputError as exc:
+        exc.diagnostics = {**meta, **exc.diagnostics}       # how the call went (finish reason, token use) next to what was wrong with the reply
+        raise
     return build_model(payload)
 
 
@@ -521,4 +526,5 @@ def _validate_llm_payload(payload: Any, raw: str) -> dict:
         # show directly in the UI's retry/error path
         problems = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
         raise LLMOutputError(f"The model's JSON output doesn't match the expected structure: "
-                               f"{problems}", raw_output=raw) from exc
+                               f"{problems}", raw_output=raw, kind="schema",
+                               diagnostics={"problems": [{"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"]} for e in exc.errors()]}) from exc

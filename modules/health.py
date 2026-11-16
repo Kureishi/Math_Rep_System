@@ -133,7 +133,13 @@ def check_packages(requirements: Path | None = None) -> Check:
         elif op in (">=", "~=") and _version_tuple(have) < _version_tuple(wanted):
             off.append(f"{name} {have} (needs ≥ {wanted})")
     if missing:
-        return Check("packages", "Required packages", "fail", "missing: " + ", ".join(missing), "pip install -r requirements.txt")
+        from modules import optional_deps
+        by_dist = {d.dist.lower(): d for d in optional_deps.DEPS}
+        shown = [f"{m} ({by_dist[m.lower()].feature})" if m.lower() in by_dist else m for m in missing]
+        required = [m for m in missing if m.lower() in by_dist and by_dist[m.lower()].required]
+        # a package only one feature needs is a warning that names the feature; one the app cannot start without is a failure
+        level = "fail" if required or any(m.lower() not in by_dist for m in missing) else "warn"
+        return Check("packages", "Required packages", level, "missing: " + ", ".join(shown), "pip install -r requirements.txt")
     if off:
         return Check("packages", "Required packages", "warn", "different from requirements.txt: " + "; ".join(off),
                      "pip install -r requirements.txt  (the app usually still runs, but it is only tested with the pinned versions)")

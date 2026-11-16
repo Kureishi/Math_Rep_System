@@ -8,20 +8,29 @@
 # To upgrade deliberately: bump one line at a time, run `pytest`, and
 # only commit the change once the full suite (all platforms in CI) is
 # green against the new version.
+# --- the app and the language model
 streamlit==1.62.0
 openai==3.3.1
 httpx==0.28.1
+pydantic==2.13.5
+
+# --- mathematics and data
 sympy==1.14.0
-plotly==6.9.0
+mpmath==1.3.0          # imported directly; also a dependency of sympy (which accepts >=1.1,<1.4)
 numpy==2.4.4
 scipy==1.17.1
 pandas==3.0.2
-openpyxl==3.1.5
+openpyxl==3.1.5        # the batch Excel export (pandas uses it to write .xlsx)
+
+# --- charts and images
+plotly==6.9.0
+matplotlib==3.10.8     # typeset equations in reports, and the shareable answer card
 Pillow==12.1.1
-pytesseract==0.3.13
-matplotlib==3.10.8
-fpdf2==2.8.8
-pypdf==5.9.0
-pydantic==2.13.5
-python-docx==1.2.0
-python-pptx==1.0.2
+pytesseract==0.3.13    # reads a photographed problem when no vision model is loaded (also needs the Tesseract program itself)
+
+# --- report export. Each of these is imported only when its format is built, so a missing one switches off that one format
+# (the Share dialog names the package) instead of breaking the page -- but `pip install -r requirements.txt` is the supported setup.
+fpdf2==2.8.8           # PDF
+python-docx==1.2.0     # Word (.docx)
+python-pptx==1.0.2     # PowerPoint (.pptx)
+pypdf==5.9.0           # reading PDFs: batch PDF import, and re-verifying a PDF report

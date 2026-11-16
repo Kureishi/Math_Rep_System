@@ -28,11 +28,12 @@ equivalent if either ever wants to converge on this module.
 """
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Callable, ContextManager
 
 from config import settings
+from modules.app_logging import logger
 from modules.equation_engine import ProblemModel, extract_model
 from modules.llm_client import LMStudioClient
 from modules.scenarios import generate_alternative_scenarios
@@ -45,6 +46,22 @@ StageFn = Callable[[str], ContextManager[Any]]
 
 def _no_stage(label: str) -> ContextManager[Any]:
     return nullcontext()
+
+
+@contextmanager
+def _tagged(stage: StageFn, label: str):
+    """Run `stage(label)` and, if the work inside raises, record WHICH stage it was on the exception (`exc.pipeline_stage`), so the failure can be explained
+    as "while deriving the equations" rather than just "something failed". The exception itself is re-raised unchanged."""
+    with stage(label):
+        try:
+            yield
+        except Exception as exc:  # noqa: BLE001
+            if not hasattr(exc, "pipeline_stage"):
+                try:
+                    exc.pipeline_stage = label                      # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001 -- an exception type that refuses attributes is still re-raised
+                    pass
+            raise
 
 
 @dataclass
@@ -61,6 +78,8 @@ class PipelineResult:
     steps: dict[str, list[SolutionStep]]
     scenarios: list[dict] = field(default_factory=list)
     retries: int = 0
+    # stages AFTER the derivation that could not be completed (the step trace, narration, scenarios): the derivation and its verification are still good
+    warnings: list[str] = field(default_factory=list)
 
 
 def extract_and_verify(client: LMStudioClient, problem_text: str, *,
@@ -83,15 +102,15 @@ def extract_and_verify(client: LMStudioClient, problem_text: str, *,
     stage = stage or _no_stage
     limit = settings.max_verification_retries if max_retries is None else max_retries
 
-    with stage("Deriving equations from the problem statement..."):
+    with _tagged(stage, "Deriving equations from the problem statement..."):
         model = extract_model(client, problem_text, known_context=known_context)
 
-    with stage("Verifying the derivation..."):
+    with _tagged(stage, "Verifying the derivation..."):
         report = verify(model, client, problem_text)
         retries = 0
         while not report.passed and retries < limit:
             retries += 1
-            with stage(f"Verification failed -- retrying derivation ({retries}/{limit})..."):
+            with _tagged(stage, f"Verification failed -- retrying derivation ({retries}/{limit})..."):
                 model = extract_model(client, problem_text, retry_reason=report.failure_reason,
                                        known_context=known_context)
                 report = verify(model, client, problem_text)
@@ -113,15 +132,28 @@ def run_pipeline(client: LMStudioClient, problem_text: str, *,
                                   max_retries=max_retries, stage=stage)
     model = derived.model
 
-    with stage("Computing step-by-step solution..."):
-        steps = compute_steps(model)
-        if narrate:
-            steps = narrate_steps(client, model, steps)
+    # Everything below needs the derivation, not the other way round: if one of these stages fails, the equations and their verification are still
+    # worth showing, so the failure becomes a warning on the result instead of an exception that throws the derivation away.
+    warnings: list[str] = []
+    steps: dict[str, list[SolutionStep]] = {}
+    try:
+        with _tagged(stage, "Computing step-by-step solution..."):
+            steps = compute_steps(model)
+            if narrate:
+                steps = narrate_steps(client, model, steps)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("run_pipeline(): step trace failed: %s", exc)
+        warnings.append(f"The step-by-step solution could not be computed ({type(exc).__name__}: {str(exc)[:160]}). "
+                        "The derived equations and their verification are shown without it.")
 
     scenarios: list[dict] = []
     if with_scenarios:
-        with stage("Generating alternative scenarios..."):
-            scenarios = generate_alternative_scenarios(client, model)
+        try:
+            with _tagged(stage, "Generating alternative scenarios..."):
+                scenarios = generate_alternative_scenarios(client, model)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("run_pipeline(): scenarios failed: %s", exc)
+            warnings.append(f"Alternative scenarios could not be generated ({type(exc).__name__}: {str(exc)[:160]}).")
 
     return PipelineResult(model=model, report=derived.report, steps=steps,
-                           scenarios=scenarios, retries=derived.retries)
+                           scenarios=scenarios, retries=derived.retries, warnings=warnings)

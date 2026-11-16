@@ -8,6 +8,7 @@ reuse the official `openai` python SDK and just repoint base_url.
 """
 import base64
 import json
+import re
 import os
 import socket
 from urllib.parse import urlparse
@@ -64,6 +65,35 @@ def pick_embedding_model(loaded: list[str], configured: str | None = None) -> st
     if want:
         return want if want in loaded else None
     return next((m for m in loaded if any(h in m.lower() for h in _EMBEDDING_HINTS)), None)
+
+
+class LLMText(str):
+    """The model's reply, as an ordinary string that also carries how the call went (`.meta`: model, finish_reason, token counts, whether the model
+    put text in a separate reasoning field). Everything that treats the reply as a str keeps working; the extraction path reads `.meta` so that a failure
+    can say WHY the reply was unusable (the token budget ran out while the model was still thinking, the server cut it off, ...)."""
+    meta: dict
+
+    def __new__(cls, text: str, meta: dict | None = None):
+        obj = super().__new__(cls, text)
+        obj.meta = dict(meta or {})
+        return obj
+
+
+def _call_meta(resp, requested_model: str, content: str | None) -> dict:
+    """What the server said about a completion, tolerant of servers that omit any of it."""
+    choice = resp.choices[0] if getattr(resp, "choices", None) else None
+    msg = getattr(choice, "message", None)
+    usage = getattr(resp, "usage", None)
+    reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None) or ""
+    return {
+        "model": getattr(resp, "model", None) or requested_model,
+        "finish_reason": getattr(choice, "finish_reason", None),
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "max_tokens": settings.max_tokens,
+        "reasoning_chars": len(reasoning) if isinstance(reasoning, str) else 0,
+        "content_chars": len(content or ""),
+    }
 
 
 class LMStudioClient:
@@ -162,10 +192,12 @@ class LMStudioClient:
                 ],
             )
             content = resp.choices[0].message.content
-            if content is None:
+            meta = _call_meta(resp, model or settings.reasoning_model, content)
+            if content is None or not content.strip():
                 raise LLMOutputError("The model returned an empty response (no text content) -- "
-                                      "try again or check LM Studio's loaded model.")
-            return content
+                                      "try again or check LM Studio's loaded model.", raw_output=content or "",
+                                      kind="empty", diagnostics=meta)
+            return LLMText(content, meta)
         except Exception as e:  # noqa: BLE001
             # Logged HERE, at the one gateway every LLM call in the app
             # goes through, rather than in each of the many try/except
@@ -271,17 +303,32 @@ class LLMOutputError(Exception):
     """Raised when the model's response couldn't be parsed as expected.
     Carries the raw output so the UI can show it for debugging instead of
     just crashing with a bare traceback."""
-    def __init__(self, message: str, raw_output: str = ""):
+    def __init__(self, message: str, raw_output: str = "", *, kind: str = "unknown", diagnostics: dict | None = None):
         super().__init__(message)
         self.raw_output = raw_output
+        # what KIND of failure (empty | no_json | truncated | unclosed_thinking | bad_json | schema | unknown) and the facts around it
+        # (finish_reason, token counts, the fields that failed validation, ...); modules/llm_diagnosis.py turns these into an explanation
+        self.kind = kind
+        self.diagnostics = dict(diagnostics or {})
+
+
+_THINK_BLOCK = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.S | re.I)
+_THINK_OPEN = re.compile(r"<think(?:ing)?>", re.I)
 
 
 def extract_json(raw: str) -> dict | list:
     """Best-effort JSON extraction for models that wrap JSON in prose/fences.
     Handles both object ({...}) and array ([...]) roots, since different
     call sites in this app expect different shapes (extraction wants an
-    object, scenarios/narration want an array)."""
-    text = raw.strip()
+    object, scenarios/narration want an array).
+
+    A reasoning model's <think>...</think> block is removed first: it often contains braces of its own (a sketch of the answer, a formula), which would
+    otherwise be mistaken for the JSON. A <think> that is never closed means the model ran out of room while still thinking: reported as such."""
+    text = _THINK_BLOCK.sub("", raw).strip()
+    if _THINK_OPEN.search(text):
+        logger.warning("extract_json(): the model's reply ends inside an unclosed <think> block (%d chars)", len(raw))
+        raise LLMOutputError("The model was still thinking when its reply ended (a <think> block was never closed), so it never got to the JSON answer.",
+                              raw_output=raw, kind="unclosed_thinking")
     if text.startswith("```"):
         text = text.lstrip("`")
         if text.lower().startswith("json"):
@@ -298,7 +345,7 @@ def extract_json(raw: str) -> dict | list:
             "The model didn't return any JSON -- it may have replied with a "
             "clarifying question or plain prose instead of the structured "
             "format the app requires.",
-            raw_output=raw,
+            raw_output=raw, kind="no_json",
         )
     start = min(candidates)
     closing = "}" if text[start] == "{" else "]"
@@ -306,9 +353,10 @@ def extract_json(raw: str) -> dict | list:
     if end == -1 or end < start:
         logger.warning("extract_json(): model's JSON output looks truncated (%d chars of raw output)", len(raw))
         raise LLMOutputError("The model's JSON output looks truncated (no closing bracket found).",
-                              raw_output=raw)
+                              raw_output=raw, kind="truncated")
     try:
         return json.loads(text[start : end + 1])
     except json.JSONDecodeError as e:
         logger.warning("extract_json(): JSON decode failed: %s", e)
-        raise LLMOutputError(f"The model's JSON didn't parse ({e}).", raw_output=raw) from e
+        raise LLMOutputError(f"The model's JSON didn't parse ({e}).", raw_output=raw, kind="bad_json",
+                              diagnostics={"error": str(e), "line": e.lineno, "column": e.colno}) from e

@@ -104,14 +104,20 @@ def render_batch_solver_tab(client: LMStudioClient):
         st.download_button("⬇️ Download results as CSV", data=results_df.to_csv(index=False),
                              file_name="batch_results.csv", mime="text/csv", key="batch_csv_download")
     with table_cols[1]:
-        xlsx_buf = io.BytesIO()
-        results_df.to_excel(xlsx_buf, index=False, sheet_name="results")
-        st.download_button(
-            "⬇️ Download results as Excel", data=xlsx_buf.getvalue(),
-            file_name="batch_results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="batch_xlsx_download",
-        )
+        from modules import optional_deps
+        gone = optional_deps.missing_for("openpyxl")
+        if gone:                    # Excel needs openpyxl; without it the CSV above still works, and the person is told what to install
+            st.button("⬇️ Download results as Excel", disabled=True, key="batch_xlsx_off")
+            st.caption("Unavailable: " + optional_deps.install_hint(gone))
+        else:
+            xlsx_buf = io.BytesIO()
+            results_df.to_excel(xlsx_buf, index=False, sheet_name="results")
+            st.download_button(
+                "⬇️ Download results as Excel", data=xlsx_buf.getvalue(),
+                file_name="batch_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="batch_xlsx_download",
+            )
     with st.expander("Preview results table"):
         st.dataframe(results_df, width='stretch', hide_index=True)
 

@@ -9,7 +9,8 @@ from contextlib import contextmanager
 import streamlit as st
 
 from modules import history
-from modules.llm_client import LMStudioClient, LLMOutputError
+from modules.app_logging import logger
+from modules.llm_client import LMStudioClient
 from modules.workspace import Workspace
 from modules import provenance
 from ui import view_state
@@ -82,6 +83,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
         st.session_state["problem_text"] = problem_text
         known_context = ws.as_context_string()
 
+        st.session_state["_pipeline_warnings"] = []
         try:
             # One persistent status panel for the whole pipeline, instead of a
             # sequence of st.spinner()s that each vanish once their step ends --
@@ -101,32 +103,44 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                     st.write(f"✅ {label}")
 
                 result = run_pipeline(client, problem_text, known_context=known_context, stage=stage)
-                status.update(label="Solved", state="complete", expanded=False)
+                status.update(label="Solved" if not result.warnings else "Solved (with warnings)", state="complete", expanded=False)
 
             model, report, steps, scenarios = result.model, result.report, result.steps, result.scenarios
 
-            st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios,
-                                     pdf_bytes=None, plot_snapshots={})
-            saved_id = history.save(problem_text, model, report, steps, scenarios)
-            st.session_state["last_saved_history_id"] = saved_id
-            view_state.start_fresh(saved_id, provenance.capture())     # default settings; record how it was solved
-            st.toast("Saved to history", icon="💾")
+            # The derivation is the valuable part: put it on screen FIRST, then do the housekeeping (history, provenance) where a failure can only
+            # cost that housekeeping, never the result.
+            st.session_state.update(model=model, report=report, steps=steps, scenarios=scenarios, pdf_bytes=None, plot_snapshots={},
+                                     _pipeline_warnings=list(result.warnings))
+            try:
+                saved_id = history.save(problem_text, model, report, steps, scenarios)
+                st.session_state["last_saved_history_id"] = saved_id
+                view_state.start_fresh(saved_id, provenance.capture())     # default settings; record how it was solved
+                st.toast("Saved to history", icon="💾")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("could not save the solved problem to history")
+                st.session_state["_pipeline_warnings"].append(
+                    f"The result could not be saved to history ({type(exc).__name__}: {str(exc)[:140]}). It is shown below, but it will not be there after you leave this page.")
 
-        except LLMOutputError as e:
-            status.update(label="Could not extract a valid model", state="error", expanded=False)
-            st.error(f"⚠️ {e}")
-            with st.expander("Raw model response (for debugging)"):
-                st.code(e.raw_output or "(empty response)")
-            st.info(
-                "This usually means the model asked a clarifying question, refused, or got confused "
-                "instead of returning structured JSON -- often because a referenced quantity (like a "
-                "workspace variable) wasn't clearly matched. Try rephrasing, or use a stronger reasoning "
-                "model for extraction."
-            )
+        except Exception as e:  # noqa: BLE001 -- every way the solve can fail is explained, never shown as a raw traceback
+            from modules.llm_diagnosis import diagnose_exception
+            from ui.diagnosis import render_diagnosis
+            logger.exception("solve failed")
+            try:
+                status.update(label="Could not solve the problem", state="error", expanded=False)
+            except Exception:  # noqa: BLE001 -- the status box may not exist if the failure came before it opened
+                pass
+            render_diagnosis(diagnose_exception(e), key="solve_failure")
 
     # ---------------------------------------------------------------- display
     model = st.session_state["model"]
     report = st.session_state["report"]
     if model:
-        from ui.results import render_results
-        render_results(client, ws, model, report, problem_text)
+        for w in st.session_state.get("_pipeline_warnings") or []:
+            st.warning(w, icon="⚠️")
+        try:
+            from ui.results import render_results
+        except ImportError as exc:        # a missing package must be a clear instruction, not a traceback over the whole page
+            from ui.safe import show_failure
+            show_failure("The results view", exc, "The solved equations are kept; install the package and rerun the app.")
+        else:
+            render_results(client, ws, model, report, problem_text)

@@ -26,12 +26,13 @@ from modules.equation_engine import ProblemModel, target_kind
 from modules.report_content import (
     DEFAULT_PRESET, PRESETS, SECTION_DESCRIPTIONS, SECTION_IDS, SECTION_TITLES,
 )
-from modules.report_export import FORMATS, ExportContext, available_sections
+from modules.report_export import FORMATS, ExportContext, available_sections, format_availability
 from modules.report_theme import THEMES
 from modules.share_text import build_latex, build_plain_text
 from modules.verifier import VerificationReport
 from ui.answer_card import render_card
 from ui.cache import cached
+from ui.safe import guarded
 from ui.exports import collect_context, download_button
 
 _SELECTION_KEY = "share_selection"      # the chosen section ids, kept apart from the checkbox widgets
@@ -47,16 +48,20 @@ def render_share_button(model: ProblemModel, report: VerificationReport, steps_b
 
 @st.dialog("Share this solution", width="large")
 def share_dialog(model: ProblemModel, report: VerificationReport, steps_by_target) -> None:
-    ctx = collect_context()
+    # Each tab is its own failure domain: a problem building one (a missing report package, say) must not take the others away.
     tab_export, tab_card, tab_copy, tab_chain = st.tabs(["⬇️ Export", "🖼️ Answer card", "📋 Copy", "🔗 Send to a chain"])
     with tab_export:
-        _export_tab(ctx)
+        with guarded("Export"):
+            _export_tab(collect_context())
     with tab_card:
-        _card_tab(model, report, ctx.problem_text)
+        with guarded("Answer card"):
+            _card_tab(model, report, st.session_state.get("problem_text", ""))
     with tab_copy:
-        _copy_tab(model, report, steps_by_target, ctx.problem_text)
+        with guarded("Copy"):
+            _copy_tab(model, report, steps_by_target, st.session_state.get("problem_text", ""))
     with tab_chain:
-        render_send_to_chain_form(model)
+        with guarded("Send to a chain"):
+            render_send_to_chain_form(model)
 
 
 def _apply_preset() -> None:
@@ -111,11 +116,18 @@ def _export_tab(ctx: ExportContext) -> None:
         st.warning("Tick at least one section to export.")
         return
     st.markdown("**Download** -- built when you click")
+    availability = format_availability()
     grid = st.columns(3)
     for i, spec in enumerate(FORMATS):
         with grid[i % 3]:
-            download_button(spec.key, f"{spec.icon} {spec.label}", ctx, chosen, key=f"share_dl_{spec.key}")
-            st.caption(spec.note)
+            ok, why = availability.get(spec.key, (True, ""))
+            if ok:
+                download_button(spec.key, f"{spec.icon} {spec.label}", ctx, chosen, key=f"share_dl_{spec.key}")
+                st.caption(spec.note)
+            else:
+                # one format missing a package must not hide the others (or crash the dialog): say which package, and the command that fixes it
+                st.button(f"{spec.icon} {spec.label}", key=f"share_dl_{spec.key}_off", disabled=True)
+                st.caption(f"Unavailable: {why}")
 
 
 def _card_tab(model, report, problem_text) -> None:

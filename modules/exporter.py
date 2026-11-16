@@ -13,6 +13,7 @@ system TeX installation, so each equation/step is rendered to a small
 in-memory PNG and embedded in the PDF.
 """
 import base64
+from typing import Any
 import io
 import re
 from datetime import datetime
@@ -20,8 +21,23 @@ from datetime import datetime
 import matplotlib
 matplotlib.use("Agg")  # headless -- no display needed, safe in a server context
 import matplotlib.pyplot as plt
-from fpdf import FPDF
-from fpdf.enums import XPos, YPos
+
+# fpdf2 is imported when a PDF is actually built (_load_fpdf), not when this module is imported: without it only the PDF export is lost.
+FPDF: Any = None
+XPos: Any = None
+YPos: Any = None
+
+
+def _load_fpdf() -> None:
+    global FPDF, XPos, YPos
+    if FPDF is not None:
+        return
+    try:
+        from fpdf import FPDF as _FPDF
+        from fpdf.enums import XPos as _XPos, YPos as _YPos
+    except ImportError as exc:
+        raise ImportError("PDF export needs the fpdf2 package (pip install fpdf2).", name="fpdf") from exc
+    FPDF, XPos, YPos = _FPDF, _XPos, _YPos
 
 from modules.equation_engine import ProblemModel
 from modules.report_content import (
@@ -119,7 +135,7 @@ def _render_latex_image(latex_str: str, fontsize: int = 13) -> io.BytesIO | None
         plt.close(fig)
 
 
-def _add_equation(pdf: FPDF, latex_str: str, fontsize: int = 13, max_h: float = 10):
+def _add_equation(pdf: Any, latex_str: str, fontsize: int = 13, max_h: float = 10):
     img = _render_latex_image(latex_str, fontsize=fontsize)
     if img is not None:
         try:
@@ -135,13 +151,14 @@ def _add_equation(pdf: FPDF, latex_str: str, fontsize: int = 13, max_h: float = 
 _EQ_SIZES = {"plain": (13, 9), "step": (11, 7), "matrix": (12, 16)}      # (font size, max image height)
 
 
-def _pdf_line(pdf: FPDF, text: str, font: str = "Helvetica", style: str = "", size: int = 10, h: float = 5) -> None:
+def _pdf_line(pdf: Any, text: str, font: str = "Helvetica", style: str = "", size: int = 10, h: float = 5) -> None:
     pdf.set_font(font, style, size)
     pdf.multi_cell(0, h, _safe(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
 def render_pdf(sections: list[Section], title: str = "Math Representation System") -> bytes:
     """PDF for already-built sections. Equations are typeset to images by matplotlib's mathtext."""
+    _load_fpdf()
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -269,6 +286,7 @@ def build_batch_pdf_bytes(results: list) -> bytes:
     from modules.batch_solver import batch_summary
 
     summary = batch_summary(results)
+    _load_fpdf()
     cover = FPDF()
     cover.set_auto_page_break(auto=True, margin=15)
     cover.add_page()

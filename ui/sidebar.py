@@ -303,6 +303,11 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                 help="How many times to re-prompt the model with the failure reason if self-verification "
                      "fails, before giving up and showing the result with a warning.",
             )
+            settings.max_tokens = int(st.number_input(
+                "Max response tokens", min_value=256, max_value=32768, value=int(settings.max_tokens), step=256,
+                help="The longest reply the model may write. “Thinking” models spend part of this on reasoning before they answer, and an empty or cut-off "
+                     "reply is the usual sign it is too small: raise it (8192 or more) for those. Also settable with the LM_MAX_TOKENS environment variable.",
+            ))
             settings.numeric_tolerance = st.select_slider(
                 "Numeric balance tolerance",
                 options=[1e-9, 1e-6, 1e-3, 1e-2],
@@ -336,6 +341,7 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                 settings.temperature_extraction = defaults.temperature_extraction
                 settings.temperature_narration = defaults.temperature_narration
                 settings.max_verification_retries = defaults.max_verification_retries
+                settings.max_tokens = defaults.max_tokens
                 settings.numeric_tolerance = defaults.numeric_tolerance
                 settings.cross_check_tolerance = defaults.cross_check_tolerance
                 settings.computation_timeout_seconds = defaults.computation_timeout_seconds

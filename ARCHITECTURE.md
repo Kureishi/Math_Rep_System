@@ -135,6 +135,9 @@ math-rep-system/
 │   │                          #   colours, text description for screen readers)
 │   ├── common.py                # helpers shared by several pages (upload-size guard,
 │   │                          #   snapshot/download buttons, query-param syncing, ...)
+│   ├── safe.py                  # guarded()/run_panel(): one failing panel shows a notice (a missing package gets
+│   │                          #   its pip command) and the rest of the page renders; st.stop()/st.rerun() pass through
+│   ├── diagnosis.py             # render_diagnosis(): what happened, ranked causes with fixes, the facts, the raw reply
 │   ├── cache.py                 # per-session cache keyed by the CONTENT of a result's inputs, so
 │   │                          #   a rerun rebuilds only what its widget changed (figures, ODE solves)
 │   ├── fragments.py             # @isolated: a panel that reruns on its own (st.fragment), plus a
@@ -182,6 +185,9 @@ math-rep-system/
     │                          #   narrate -> scenarios sequence -- ui/word_problem.py
     │                          #   and batch_solver.py both call this; see its own
     │                          #   docstring for what's deliberately NOT routed through it
+    ├── llm_diagnosis.py      # turns any pipeline failure into an explanation: ranked causes, each with its fix,
+    │                         #   from the facts (finish reason, tokens used vs the limit, reasoning text, the reply)
+    ├── optional_deps.py      # which package each feature needs, whether it is installed, the exact pip command
     ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper -- the
     │                         #   connection check (is_available/list_models) does a
     │                         #   fast, hard-timeout TCP probe before ever making an HTTP
@@ -564,6 +570,20 @@ Decisions and operational details that don't belong in the README.
   Inputs are fingerprinted by content (array bytes and shape, expression structure,
   dataclass fields), never identity or `repr`, and anything unhashable recomputes:
   slower, never stale. Cached figures are shared, so they are never modified.
+
+- **Failures are explained, and one never takes the others with it** (`llm_diagnosis.py`, `optional_deps.py`, `ui/safe.py`, `ui/diagnosis.py`).
+  *Explained:* `LMStudioClient.chat()` returns the reply as an `LLMText` (a `str` that also carries `.meta`: model, finish reason, tokens used against the limit, whether
+  the model put text in a separate reasoning field) and raises a classified `LLMOutputError` (`kind` = empty / no_json / truncated / unclosed_thinking / bad_json /
+  schema, plus `diagnostics`). `diagnose_exception()` ranks the causes by rules over those facts (a reply that stopped at the token limit points at *Max response
+  tokens* before anything else; zero tokens generated points at the context window; a refusal, a clarifying question and a prose answer are told apart), says when the
+  facts do not settle it, and also covers a dropped connection, a timeout, a context-length error, a symbolic timeout and an unreadable equation; `diagnose_verification()`
+  explains a derivation that never verified from WHICH checks failed. The pipeline tags each exception with the stage it came from. A reasoning model's `<think>` block is
+  stripped before the JSON is looked for (its braces used to be mistaken for the answer). *Isolated:* the derivation is the valuable part, so stages after it (the step trace,
+  scenarios) become warnings on `PipelineResult` rather than exceptions, the result is put on screen before history is saved, every results panel runs under `run_panel`,
+  and each Share tab is its own failure domain. *Optional packages:* python-docx, python-pptx and fpdf2 are imported inside the functions that build their format (a
+  module-level default such as `color=_INK` would capture the placeholder: resolve at call time), `report_export.format_availability()` says which formats can be built, and
+  the dialog disables one format with the install command instead of failing. `tests/test_requirements_in_sync.py` fails if the code imports a package no requirements
+  file declares, if `requirements.txt` holds a package nothing imports, or if the registry and the requirements disagree.
 
 - **Isolated panels** (`ui/fragments.py`). The heavy analysis panels (the per-target
   Monte Carlo / error / bounds / goal-seek / sensitivity expanders, the N-dimensional

@@ -13,7 +13,7 @@ samples), so `render_export` turns `live_figures` on for it and for nothing else
 """
 from dataclasses import dataclass, field, replace
 
-from modules import exporter, report_office, report_tex
+from modules import exporter, optional_deps, report_office, report_tex
 from modules.equation_engine import ProblemModel
 from modules.report_content import REPORT_TITLE, PlotSnapshot, ReportExtras, build_sections
 from modules.report_html import render_html
@@ -67,6 +67,30 @@ class ExportedFile:
     mime: str
 
 
+# The packages each format needs at build time (modules/optional_deps.py names them). Markdown and LaTeX need nothing beyond the standard library.
+FORMAT_NEEDS: dict[str, tuple[str, ...]] = {
+    "pdf": ("fpdf", "matplotlib"),
+    "md": (),
+    "html": ("matplotlib",),
+    "docx": ("docx", "PIL"),
+    "pptx": ("pptx", "PIL"),
+    "tex": (),
+}
+
+
+class ExportUnavailable(RuntimeError):
+    """A report format cannot be built here because a package it needs is not installed. The message says which, and the command that fixes it."""
+
+
+def format_availability() -> dict[str, tuple[bool, str]]:
+    """{format key: (can it be built right now, why not / how to fix)} -- so the UI can switch off ONE format with a reason instead of failing the dialog."""
+    out: dict[str, tuple[bool, str]] = {}
+    for key in FORMAT_KEYS:
+        gone = optional_deps.missing_for(*FORMAT_NEEDS.get(key, ()))
+        out[key] = (not gone, optional_deps.install_hint(gone))
+    return out
+
+
 def _themed(ctx: ExportContext, fmt: str):
     theme = THEMES.get(ctx.theme) if ctx.theme else None
     captions = ctx.auto_captions if ctx.auto_captions is not None else bool(theme and theme.auto_captions)
@@ -83,6 +107,9 @@ def render_export(fmt: str, ctx: ExportContext, include: list[str] | set[str] | 
     if ctx.theme is not None and ctx.theme not in THEMES:
         raise ValueError(f"Unknown report theme {ctx.theme!r}; expected one of {', '.join(THEMES)}.")
     spec = next(f for f in FORMATS if f.key == fmt)
+    ok, why = format_availability()[fmt]
+    if not ok:
+        raise ExportUnavailable(f"The {spec.label} export is unavailable: a package it needs is not installed. {why}")
     theme, extras = _themed(ctx, fmt)
     sections = build_sections(ctx.problem_text, ctx.model, ctx.report, ctx.steps_by_target, ctx.scenarios,
                               ctx.snapshots, extras, include)

@@ -26,7 +26,8 @@ show_figure(fig, width="stretch", **ALT)
 
 
 def chart_app(alt=None, **state):
-    at = AppTest.from_string(CHART.replace("**ALT", f"**{({'alt': alt} if alt else {})!r}"))
+    # a generous timeout: the first chart render imports plotly, which can pass AppTest's default 3 s on a loaded (or single-core) machine
+    at = AppTest.from_string(CHART.replace("**ALT", f"**{({'alt': alt} if alt else {})!r}"), default_timeout=60)
     for k, v in state.items():
         at.session_state[k] = v
     at.run()

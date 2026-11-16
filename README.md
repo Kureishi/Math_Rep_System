@@ -23,6 +23,12 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+Run `pip install` in the **same activated environment you start `streamlit` from**. `requirements.txt` is everything the app uses, pinned to the versions the test
+suite runs against. Three other files are optional: `requirements-api.txt` (adds FastAPI and uvicorn for the REST API: `uvicorn api_server:app`),
+`requirements-dev.txt` (pytest, mypy and friends, for running the tests), `requirements-gpu.txt` (CuPy for GPU acceleration, see below).
+If a package is missing the app still starts: only the feature that needs it is switched off, with the exact `pip install` command shown (for example, Word export
+without `python-docx`), and the **🩺 Health check** mode lists everything that is missing or at a different version.
+
 If you want image-OCR as a fallback for non-vision models, also install the
 Tesseract binary:
 - macOS: `brew install tesseract`
@@ -37,6 +43,8 @@ Edit `config.py`, or set environment variables before launching:
 export LM_REASONING_MODEL="qwen2.5-14b-instruct"   # must match the model ID shown in LM Studio
 export LM_VISION_MODEL="qwen2-vl-7b-instruct"
 export LM_STUDIO_BASE_URL="http://localhost:1234/v1"   # change if you used a different port
+export LM_MAX_TOKENS=2048                               # longest reply the model may write (raise to 8192+ for "thinking" models)
+export COMPUTATION_TIMEOUT_SECONDS=10                   # how long one symbolic computation may run
 ```
 
 ## 4. Run
@@ -47,6 +55,23 @@ streamlit run app.py
 
 Opens at `http://localhost:8501` in your browser. Everything (LLM inference,
 math, plotting) runs locally -- nothing leaves your machine.
+
+### When something goes wrong
+
+A failure is explained, not just reported, and one failing part never hides the rest.
+
+- **"The model sent back an empty reply" / "answered in words instead of the structured format" / "JSON is malformed".** The page shows what the model said, the likely
+  causes ranked with the specific fix for each, and the facts they rest on (finish reason, tokens generated against the limit, prompt size, model, temperature). The
+  commonest cause with a "thinking" model is a reply that spent its whole budget reasoning: raise **Max response tokens** in the sidebar's Advanced settings (or set
+  `LM_MAX_TOKENS`), or load a non-thinking model. An empty reply after almost no tokens usually means the prompt does not fit the model's context window: reload the model in
+  LM Studio with a context length of at least 4096.
+- **"This derivation did not pass its checks".** The equations were extracted but a check still fails after the retries; the panel says which checks and what that usually means.
+- **"`<something>` could not be shown".** One panel failed and the rest of the page is intact. The notice says why, names the package to install if one is missing, and
+  keeps the traceback in an expander (and in `data/app.log`).
+- **`No module named 'docx'` (or `pptx`, `fpdf`, `pypdf`, `openpyxl`).** Run `pip install -r requirements.txt` in the environment the app runs from, then restart. Until then
+  the solve and every other feature work; only that export format is greyed out.
+- **"Lost contact with LM Studio" / "took too long" / "model not loaded" / "context length".** Each has its own explanation and fix; the first thing to check is that the
+  LM Studio server is started and the model shows as loaded.
 
 ## How it works
 
@@ -179,7 +204,8 @@ Markdown, PDF, Python, or a Jupyter notebook.
   **Project bundle** export/import moves everything between machines.
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**
   (`api_server.py`) covers `/solve`, `/fit`, `/equivalence` and
-  `/dimensional-analysis`. Both talk to LM Studio the same way the app does.
+  `/dimensional-analysis`. Both talk to LM Studio the same way the app does. The REST API needs
+  `pip install -r requirements-api.txt`, then `uvicorn api_server:app`.
 - **Export:** one **Share / export** button opens a dialog. Choose what goes in (a
   preset -- *Full audit*, *Student handout*, *Peer review*, *Quick summary* -- or tick
   sections: problem, results, equations, steps, sensitivity and Monte Carlo, plots,
@@ -483,7 +509,7 @@ Markdown, PDF, Python, or a Jupyter notebook.
 The sidebar's "⚙️ Advanced settings" expander changes these live, without a
 restart, for the *next* problem you solve (they aren't saved to disk, but can be
 saved as a named profile): extraction and narration temperature, maximum
-verification retries, numeric balance tolerance, independent cross-check
+verification retries, maximum response tokens, numeric balance tolerance, independent cross-check
 tolerance, and the computation timeout. "Reset to defaults" restores
 `config.py`'s values.
 
@@ -552,6 +578,9 @@ spread it over every core, and `pytest -m "not slow"` to skip the four engine te
   approach, `signal.alarm`, does nothing there. CI also byte-compiles the project
   and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`. One cell (ubuntu, 3.12,
   seed 0) runs the full suite with coverage; the other seven skip the `slow` tests. All use `-n auto`.
+- **Requirements stay in step with the code** (`tests/test_requirements_in_sync.py`): the suite fails if
+  the code imports a package no requirements file declares, if `requirements.txt` lists one nothing imports (unless it is allow-listed with the reason), or if the
+  optional-package registry (`modules/optional_deps.py`) and `requirements.txt` disagree.
 - **Coverage floor:** `pytest` fails below 90% line coverage of `modules/`
   (measured: mid-90s). It exists to catch new code with no tests at all, not to
   chase 100%. Coverage uses `sys.monitoring` (`core = "sysmon"`), which reports the

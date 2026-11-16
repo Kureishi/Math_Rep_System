@@ -20,13 +20,48 @@ import io
 import math
 from typing import Any
 
-from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt, RGBColor
 from PIL import Image
-from pptx import Presentation
-from pptx.dml.color import RGBColor as PptxRGB
-from pptx.util import Inches as PInches, Pt as PPt
+
+# python-docx and python-pptx are imported when a Word or PowerPoint report is actually built (the loaders below), not when this module is imported:
+# a missing package then costs that one export format, with a message naming the package, instead of failing the import of everything that touches reports.
+Document: Any = None
+WD_ALIGN_PARAGRAPH: Any = None
+Inches: Any = None
+Pt: Any = None
+RGBColor: Any = None
+Presentation: Any = None
+PptxRGB: Any = None
+PInches: Any = None
+PPt: Any = None
+_INK: Any = None
+_MUTED: Any = None
+
+
+def _load_docx() -> None:
+    global Document, WD_ALIGN_PARAGRAPH, Inches, Pt, RGBColor
+    if Document is not None:
+        return
+    try:
+        from docx import Document as _Document
+        from docx.enum.text import WD_ALIGN_PARAGRAPH as _Align
+        from docx.shared import Inches as _Inches, Pt as _Pt, RGBColor as _RGB
+    except ImportError as exc:
+        raise ImportError("Word export needs the python-docx package (pip install python-docx).", name="docx") from exc
+    Document, WD_ALIGN_PARAGRAPH, Inches, Pt, RGBColor = _Document, _Align, _Inches, _Pt, _RGB
+
+
+def _load_pptx() -> None:
+    global Presentation, PptxRGB, PInches, PPt, _INK, _MUTED
+    if Presentation is not None:
+        return
+    try:
+        from pptx import Presentation as _Presentation
+        from pptx.dml.color import RGBColor as _RGB
+        from pptx.util import Inches as _Inches, Pt as _Pt
+    except ImportError as exc:
+        raise ImportError("PowerPoint export needs the python-pptx package (pip install python-pptx).", name="pptx") from exc
+    Presentation, PptxRGB, PInches, PPt = _Presentation, _RGB, _Inches, _Pt
+    _INK, _MUTED = _RGB(0x1D, 0x22, 0x30), _RGB(0x66, 0x6B, 0x7A)
 
 from modules.exporter import _render_latex_image
 from modules.report_content import REPORT_TITLE, Section, generated_stamp
@@ -57,6 +92,7 @@ def _eq_picture(latex: str, style: str) -> tuple[io.BytesIO, float, float] | Non
 # --------------------------------------------------------------------------- Word
 
 def render_docx(sections: list[Section], title: str = REPORT_TITLE) -> bytes:
+    _load_docx()
     doc = Document()
     doc.add_heading(title, 0)
     stamp = doc.add_paragraph()
@@ -126,8 +162,6 @@ def render_docx(sections: list[Section], title: str = REPORT_TITLE) -> bytes:
 
 _SLIDE_W, _SLIDE_H = 13.333, 7.5
 _BODY_TOP, _BODY_BOTTOM, _MARGIN = 1.35, 7.0, 0.6
-_INK = PptxRGB(0x1D, 0x22, 0x30)
-_MUTED = PptxRGB(0x66, 0x6B, 0x7A)
 
 
 def _text_height(text: str, size_pt: float, width_in: float) -> float:
@@ -138,6 +172,7 @@ def _text_height(text: str, size_pt: float, width_in: float) -> float:
 
 class _Deck:
     def __init__(self) -> None:
+        _load_pptx()
         self.prs = Presentation()
         self.prs.slide_width, self.prs.slide_height = PInches(_SLIDE_W), PInches(_SLIDE_H)
         self.slide: Any = None
@@ -152,14 +187,14 @@ class _Deck:
         self.y = _BODY_TOP
         return self.slide
 
-    def _text(self, text, x, y, w, h, size, bold=False, italic=False, color=_INK, font=None):
+    def _text(self, text, x, y, w, h, size, bold=False, italic=False, color=None, font=None):
         box = self.slide.shapes.add_textbox(PInches(x), PInches(y), PInches(w), PInches(h))
         tf = box.text_frame
         tf.word_wrap = True
         run = tf.paragraphs[0].add_run()
         run.text = str(text)
         run.font.size, run.font.bold, run.font.italic = PPt(size), bold, italic
-        run.font.color.rgb = color
+        run.font.color.rgb = _INK if color is None else color      # resolved at call time: _INK only exists once python-pptx has been loaded
         if font:
             run.font.name = font
         return box
@@ -171,7 +206,7 @@ class _Deck:
         if not self.room_for(h) and self.y > _BODY_TOP:
             self.new_slide(self.title, cont=True)
 
-    def text(self, text, size=16, bold=False, italic=False, color=_INK, font=None) -> None:
+    def text(self, text, size=16, bold=False, italic=False, color=None, font=None) -> None:
         width = _SLIDE_W - 2 * _MARGIN
         h = _text_height(text, size, width)
         self.ensure(h)
@@ -269,6 +304,7 @@ def _steps_to_slides(deck: _Deck, sec: Section) -> None:
 
 
 def render_pptx(sections: list[Section], title: str = REPORT_TITLE) -> bytes:
+    _load_pptx()
     deck = _Deck()
     deck.new_slide(title)
     deck.y = 3.0
