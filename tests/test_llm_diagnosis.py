@@ -135,11 +135,27 @@ def test_a_truncated_reply_blames_the_limit_when_the_numbers_say_so():
 
 
 def test_malformed_json_names_the_offending_line():
+    """Python 3.12 reports the trailing comma at the closing brace's line, 3.13+ at the comma's own line; either is the right line to show."""
     raw = '{\n  "a": 1,\n  "b": 2,\n}'
     with pytest.raises(LLMOutputError) as info:
         extract_json(raw)
     d = ld.diagnose_llm_output(info.value)
-    assert any(k == "Offending line" and "}" in v for k, v in d.details) and "trailing commas" in texts(d) and "Extraction temperature" in texts(d)
+    shown = [v for k, v in d.details if k == "Offending line"]
+    assert shown and ('"b": 2,' in shown[0] or "}" in shown[0])
+    assert "trailing commas" in texts(d) and "Extraction temperature" in texts(d)
+
+
+@pytest.mark.parametrize("line, expected", [(3, '"b": 2,'), (4, "}")])
+def test_the_offending_line_is_whichever_line_the_parser_reports(line, expected):
+    """Both interpreter behaviours, tested directly rather than depending on the Python version running the suite."""
+    raw = '{\n  "a": 1,\n  "b": 2,\n}'
+    d = ld.diagnose_llm_output(err("bad_json", raw, error="Illegal trailing comma", line=line, column=9))
+    assert ("Offending line", f"line {line}: {expected}") in d.details
+
+
+def test_an_offending_line_beyond_the_reply_is_ignored_rather_than_crashing():
+    d = ld.diagnose_llm_output(err("bad_json", "{", error="x", line=40, column=1))
+    assert not [k for k, _ in d.details if k == "Offending line"]
 
 
 def test_schema_problems_are_listed():
