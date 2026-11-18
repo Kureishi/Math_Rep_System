@@ -291,18 +291,71 @@ def dark_mode_css() -> str:
             color: #E8E8E8 !important;
             border-color: rgba(232, 232, 232, 0.25) !important;
         }
-        /* A popover's trigger button ("Explain step 3", "Copy a...") has its own test-id (stPopoverButton), so the rule above never reaches it: it keeps the
-           light theme's near-white fill, while the broader label rule at the top of this block recolours its text light grey -- pale text on a pale button.
-           Give its text (and the chevron) a dark shade so it reads against that fill. Hover is excluded on purpose: the hover look was already right. */
-        [data-testid="stPopoverButton"]:not(:hover),
-        [data-testid="stPopoverButton"]:not(:hover) p,
-        [data-testid="stPopoverButton"]:not(:hover) span {
+        /* SURFACES THAT STAY LIGHT IN DARK MODE. Streamlit paints a few things from the light theme it started with (the page background and most text are
+           re-coloured above, these are not), and the broad "text is light grey" rule above then lands on them: pale text on a pale surface (measured
+           contrast 1.1-1.2 : 1, i.e. unreadable). Each is given a dark text colour instead of being repainted, so they keep their look. Every rule here is
+           limited to the state in which the surface really is light: a popover's trigger turns dark-tinted on hover, focus and while open, and dark text on
+           that would be the same mistake the other way round. */
+
+        /* a popover's trigger ("Explain step 3", "Copy a..."): near-white at rest, dark-tinted when hovered, focused (it keeps focus after its popover closes)
+           or open -- there the light text above is correct and is left alone */
+        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]),
+        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]) p,
+        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]) span {
             color: #2B3040 !important;
         }
-        [data-testid="stPopoverButton"]:not(:hover) svg {
+        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]) svg {
             fill: #2B3040 !important;
             color: #2B3040 !important;
         }
+        /* the header of an OPEN expander (and of st.status, which is one): light fill when open and at rest, dark-tinted on hover and keyboard focus (there the
+           light text above is right) */
+        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible),
+        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible) p,
+        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible) span,
+        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible) svg {
+            color: #2B3040 !important;
+            fill: #2B3040 !important;
+        }
+        /* toasts */
+        [data-testid="stToast"], [data-testid="stToast"] p, [data-testid="stToast"] span, [data-testid="stToast"] div,
+        [data-testid="stToast"] [data-testid="stMarkdownContainer"] p, [data-testid="stToast"] button svg {
+            color: #2B3040 !important;
+            fill: #2B3040 !important;
+        }
+        /* the panel a popover opens: text, captions, labels and headings in it */
+        [data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"],
+        [data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"] p,
+        [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"],
+        [data-testid="stPopoverBody"] label, [data-testid="stPopoverBody"] p,
+        [data-testid="stPopoverBody"] h1, [data-testid="stPopoverBody"] h2, [data-testid="stPopoverBody"] h3, [data-testid="stPopoverBody"] h4 {
+            color: #2B3040 !important;
+        }
+        [data-testid="stPopoverBody"] a { color: #0B57D0 !important; }
+        /* the open list of a selectbox / multiselect (they render in a portal, outside the containers styled above) */
+        [data-testid$="Dropdown"], [data-testid$="Dropdown"] [role="option"], [data-testid$="Dropdown"] p, [data-testid$="Dropdown"] span {
+            color: #2B3040 !important;
+        }
+        /* code blocks: the syntax colours are tuned for a white page and several (greens, oranges, light blues) fall to 2.6-3.7 : 1 on it; darken each token
+           by the same factor so the colours keep their meaning and clear 4.5 : 1 */
+        [data-testid="stCode"] pre code span, [data-testid="stCode"] code span { filter: brightness(0.62); }
+        /* segmented controls / button groups: an unselected option is a white pill (selected and hovered ones are tinted, where the light text is right) */
+        [data-testid="stButtonGroup"] button[aria-checked="false"]:not(:hover):not(:focus-visible) p,
+        [data-testid="stButtonGroup"] button[aria-checked="false"]:not(:hover):not(:focus-visible) span {
+            color: #2B3040 !important;
+        }
+        /* a date field's "/" separators */
+        [data-testid="stDateInputField"] span { color: #4B5160 !important; }
+        /* st.json: its colour scheme is tuned for white too (blue 3.7 : 1, violet 4.4 : 1); darken the text-bearing spans and the leaf elements (a span nested in a span darkens a little more, which only helps) */
+        [data-testid="stJson"] span, [data-testid="stJson"] :not(:has(*)) { filter: brightness(0.72); }
+        /* the file uploader's "limit 200MB per file" hint */
+        [data-testid="stFileUploaderDropzoneInstructions"] span, [data-testid="stFileUploaderDropzoneInstructions"] small { color: #4B5160 !important; }
+        /* an icon in a (dark) button takes the button's light text colour -- the sidebar's collapse arrow was dark grey on dark grey */
+        [data-testid^="stBaseButton-"]:not([data-testid="stBaseButton-primary"]) [data-testid="stIconMaterial"] { color: #E8E8E8 !important; }
+        /* the assistant's avatar icon is white on an orange fill */
+        [data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"] { color: #1D2230 !important; }
+        /* links in text: the light theme's dark blue is 2.5 : 1 on the dark page */
+        [data-testid="stMarkdownContainer"] a, [data-testid="stCaptionContainer"] a { color: #8AB4F8 !important; }
         /* A button's hover-help tooltip (st.button(..., help="...")) also
            renders in a portal with its own light-theme background and a
            low-opacity gray hint text -- both unreadable against a dark

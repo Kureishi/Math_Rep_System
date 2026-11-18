@@ -571,6 +571,13 @@ Decisions and operational details that don't belong in the README.
   dataclass fields), never identity or `repr`, and anything unhashable recomputes:
   slower, never stale. Cached figures are shared, so they are never modified.
 
+- **Dark mode is measured, not eyeballed** (`ui/theme.py:dark_mode_css`, `scripts/dark_mode_gallery.py` + `scripts/dark_mode_contrast_scan.py`). Streamlit bakes its light theme
+  into some components (the page and most text are re-coloured by the override, these are not), so the override's "text is light" rule lands on light surfaces. The fix gives
+  those surfaces dark text instead of repainting them, and every such rule is limited to the state in which the surface is light (rest), because the same element is dark-tinted
+  on hover/focus/open and dark text there is the same bug reversed. The selectors were found by inspecting the live DOM: this Streamlit renders dropdowns with react-aria, so
+  the `[data-baseweb=...]` selectors the file used to carry match nothing. The scan script computes WCAG contrast for every visible text node in each state in headless Chromium
+  (taking `filter: brightness()` into account) and fails below 4.5 : 1; it is a dev tool, so CI checks the stylesheet and the colour arithmetic instead.
+
 - **Failures are explained, and one never takes the others with it** (`llm_diagnosis.py`, `optional_deps.py`, `ui/safe.py`, `ui/diagnosis.py`).
   *Explained:* `LMStudioClient.chat()` returns the reply as an `LLMText` (a `str` that also carries `.meta`: model, finish reason, tokens used against the limit, whether
   the model put text in a separate reasoning field) and raises a classified `LLMOutputError` (`kind` = empty / no_json / truncated / unclosed_thinking / bad_json /

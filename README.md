@@ -578,6 +578,12 @@ spread it over every core, and `pytest -m "not slow"` to skip the four engine te
   approach, `signal.alarm`, does nothing there. CI also byte-compiles the project
   and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`. One cell (ubuntu, 3.12,
   seed 0) runs the full suite with coverage; the other seven skip the `slow` tests. All use `-n auto`.
+- **Dark mode stays readable** (`tests/test_dark_mode_css.py`, `scripts/dark_mode_contrast_scan.py`). The dark theme is a stylesheet laid over Streamlit's light one, so
+  a few surfaces stay light (an open expander's header, toasts, a popover's panel and trigger, dropdown lists, unselected segments) and get dark text instead. Each rule applies only
+  in the state where the surface really is light (a popover's trigger turns dark-tinted on hover, focus and while open). The unit tests check the stylesheet and the colour
+  arithmetic; the real measurement is a browser scan: `streamlit run scripts/dark_mode_gallery.py --server.port 8599`, then `python scripts/dark_mode_contrast_scan.py --port 8599`
+  (needs `pip install playwright && playwright install chromium`, in `requirements-dev.txt`). It computes the contrast of every visible text element in about twenty states
+  (tabs, open dropdowns and popovers, hover, focus) and exits 1 if any is below 4.5 : 1. Run it after touching `ui/theme.py`; add new component types to the gallery page.
 - **Requirements stay in step with the code** (`tests/test_requirements_in_sync.py`): the suite fails if
   the code imports a package no requirements file declares, if `requirements.txt` lists one nothing imports (unless it is allow-listed with the reason), or if the
   optional-package registry (`modules/optional_deps.py`) and `requirements.txt` disagree.
