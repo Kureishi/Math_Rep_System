@@ -9,7 +9,7 @@ text colour, as the browser paints it.
     streamlit run scripts/dark_mode_gallery.py --server.port 8599 &
     python scripts/dark_mode_contrast_scan.py --port 8599            # dark mode (default); --light for light mode
 
-Exits 1 if anything is below 4.5 : 1. Needs `pip install playwright` and `playwright install chromium` (a dev tool: not needed to run the app).
+Exits 1 if anything is below 4.5 : 1. Inactive (disabled) controls are exempt, as WCAG allows, and a slider's value label is skipped (see the comment in the script). Needs `pip install playwright` and `playwright install chromium` (a dev tool: not needed to run the app).
 """
 import argparse
 import json
@@ -30,6 +30,8 @@ JS = r"""
     const st=getComputedStyle(el); const r=el.getBoundingClientRect();
     if(st.visibility==='hidden'||st.display==='none'||r.width<2||r.height<2||parseFloat(st.opacity)===0) continue;
     if(['SCRIPT','STYLE','NOSCRIPT'].includes(el.tagName)) continue;
+    // WCAG exempts inactive controls; and a slider's value label sits INSIDE the thumb in the DOM but is drawn above it, so the background walk would wrongly use the thumb's fill
+    if(el.closest('[disabled],[aria-disabled="true"],:disabled,[data-testid="stSliderThumbValue"]')) continue;
     const fg=parse(st.color); if(!fg) continue; const bg=bgOf(el);
     let k=1; for(let n=el;n;n=n.parentElement){ const f=getComputedStyle(n).filter; const m=f&&f.match(/brightness\(([\d.]+)\)/); if(m) k*=parseFloat(m[1]); }
     fg.r*=k; fg.g*=k; fg.b*=k; const fgc=over(fg,bg);

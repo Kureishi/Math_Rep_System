@@ -172,6 +172,30 @@ def inject_base_styles() -> None:
         [data-testid="stStatusWidget"] {
             border-radius: 10px;
         }
+        /* ---- readable text on the light surfaces (both modes). Measured in a browser with scripts/dark_mode_contrast_scan.py: these fell below WCAG AA's
+           4.5 : 1, in light mode as well as dark. They carry no !important on purpose: the dark-mode block below uses it, so where dark mode needs a different
+           colour for the same element it always wins. ---- */
+        /* code blocks: Streamlit's syntax colours (greens, oranges, light blues, grey punctuation) are 2.6-3.7 : 1 on the near-white code background; darken each
+           token by the same factor so the colours keep their meaning */
+        [data-testid="stCode"] pre code span, [data-testid="stCode"] code span { filter: brightness(0.62); }
+        /* st.json: the solarized scheme is blue 3.7 : 1 and violet 4.4 : 1 on white (the span rule catches a span with a child; the leaf rule catches the rest) */
+        [data-testid="stJson"] span, [data-testid="stJson"] :not(:has(*)) { filter: brightness(0.72); }
+        /* secondary text Streamlit draws at 60 % of its ink colour (4.4 : 1 on its light-grey surfaces): the uploader's size hint, a date field's separators, a
+           slider's end labels, the sidebar's collapse arrow */
+        [data-testid="stFileUploaderDropzoneInstructions"] span, [data-testid="stFileUploaderDropzoneInstructions"] small,
+        [data-testid="stSliderTickBar"] p,
+        [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"] { color: #4B5160; }
+        /* (the date field's colour is set with a more specific selector than a plain attribute rule beats; it is the same colour dark mode uses, so no conflict) */
+        [data-testid="stDateInputField"] span { color: #4B5160 !important; }
+        /* the assistant's chat avatar: a white icon on an orange fill is 2 : 1 */
+        [data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"] { color: #1D2230; }
+        /* Streamlit's success green is 4.1-4.5 : 1 on its tinted fills; the delta under a metric is green when it rises and red (3.9 : 1) when it falls */
+        [data-testid="stAlertContentSuccess"] p,
+        [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]), [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]) p { color: #0B5D27; }
+        [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]), [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]) p { color: #A61B1B; }
+        [data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) [data-testid="stAlertDynamicIcon"] { color: #0B5D27; }
+        /* an error alert's red text is 4.2 : 1 on its pink fill (it is the message shown whenever LM Studio is not running) */
+        [data-testid="stAlertContentError"], [data-testid="stAlertContentError"] p { color: #8B1A1A; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -336,9 +360,6 @@ def dark_mode_css() -> str:
         [data-testid$="Dropdown"], [data-testid$="Dropdown"] [role="option"], [data-testid$="Dropdown"] p, [data-testid$="Dropdown"] span {
             color: #2B3040 !important;
         }
-        /* code blocks: the syntax colours are tuned for a white page and several (greens, oranges, light blues) fall to 2.6-3.7 : 1 on it; darken each token
-           by the same factor so the colours keep their meaning and clear 4.5 : 1 */
-        [data-testid="stCode"] pre code span, [data-testid="stCode"] code span { filter: brightness(0.62); }
         /* segmented controls / button groups: an unselected option is a white pill (selected and hovered ones are tinted, where the light text is right) */
         [data-testid="stButtonGroup"] button[aria-checked="false"]:not(:hover):not(:focus-visible) p,
         [data-testid="stButtonGroup"] button[aria-checked="false"]:not(:hover):not(:focus-visible) span {
@@ -346,14 +367,14 @@ def dark_mode_css() -> str:
         }
         /* a date field's "/" separators */
         [data-testid="stDateInputField"] span { color: #4B5160 !important; }
-        /* st.json: its colour scheme is tuned for white too (blue 3.7 : 1, violet 4.4 : 1); darken the text-bearing spans and the leaf elements (a span nested in a span darkens a little more, which only helps) */
-        [data-testid="stJson"] span, [data-testid="stJson"] :not(:has(*)) { filter: brightness(0.72); }
         /* the file uploader's "limit 200MB per file" hint */
         [data-testid="stFileUploaderDropzoneInstructions"] span, [data-testid="stFileUploaderDropzoneInstructions"] small { color: #4B5160 !important; }
         /* an icon in a (dark) button takes the button's light text colour -- the sidebar's collapse arrow was dark grey on dark grey */
         [data-testid^="stBaseButton-"]:not([data-testid="stBaseButton-primary"]) [data-testid="stIconMaterial"] { color: #E8E8E8 !important; }
         /* the assistant's avatar icon is white on an orange fill */
         [data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"] { color: #1D2230 !important; }
+        /* the success alert's check icon: green on dark green is 3.4 : 1 */
+        [data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) [data-testid="stAlertDynamicIcon"] { color: #6FD39A !important; }
         /* links in text: the light theme's dark blue is 2.5 : 1 on the dark page */
         [data-testid="stMarkdownContainer"] a, [data-testid="stCaptionContainer"] a { color: #8AB4F8 !important; }
         /* A button's hover-help tooltip (st.button(..., help="...")) also

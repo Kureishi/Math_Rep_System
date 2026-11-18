@@ -8,10 +8,26 @@ from pathlib import Path
 
 import pytest
 
-from ui.theme import dark_mode_css
+from ui.theme import dark_mode_css, inject_base_styles
 
 CSS = dark_mode_css()
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _base_css() -> str:
+    """The always-on stylesheet (what inject_base_styles hands to st.markdown), captured."""
+    import streamlit as st
+    seen: list[str] = []
+    real = st.markdown
+    st.markdown = lambda body, *a, **k: seen.append(body)                 # type: ignore[assignment]
+    try:
+        inject_base_styles()
+    finally:
+        st.markdown = real                                                  # type: ignore[assignment]
+    return seen[0]
+
+
+BASE = _base_css()
 
 
 def rule_for(selector_fragment: str) -> str:
@@ -78,9 +94,26 @@ def test_links_in_captions_get_the_light_link_colour_too():
 
 
 def test_code_blocks_and_json_are_darkened_leaf_by_leaf_not_wholesale():
-    assert re.search(r'\[data-testid="stCode"\] pre code span[^{]*\{\s*filter: brightness\(0\.\d+\)', CSS)
-    assert re.search(r'\[data-testid="stJson"\] span[^{]*\{\s*filter: brightness\(0\.\d+\)', CSS)
-    assert "filter" not in rule_for('[data-testid="stCode"] pre code span').replace("filter: brightness", "")        # only brightness, nothing that would also darken the background
+    """In the always-on stylesheet, so light mode gets it too (the same colours are 2.6-3.7 : 1 on white in either mode)."""
+    assert re.search(r'\[data-testid="stCode"\] pre code span[^{]*\{\s*filter: brightness\(0\.\d+\)', BASE)
+    assert re.search(r'\[data-testid="stJson"\] span[^{]*\{\s*filter: brightness\(0\.\d+\)', BASE)
+    assert "filter: brightness" not in CSS                      # not duplicated in the dark block
+
+
+@pytest.mark.parametrize("fragment", [
+    '[data-testid="stAlertContentSuccess"] p', '[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) [data-testid="stAlertDynamicIcon"]', '[data-testid="stAlertContentError"]', '[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"])',
+    '[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"])', '[data-testid="stSliderTickBar"] p', '[data-testid="stFileUploaderDropzoneInstructions"] span',
+    '[data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"]', '[data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"]',
+])
+def test_light_mode_has_a_rule_for_each_surface_the_scan_found(fragment):
+    assert fragment in BASE
+
+
+def test_the_always_on_rules_never_use_important_so_dark_mode_can_always_override_them():
+    start = BASE.index("*/", BASE.index("readable text on the light surfaces")) + 2          # after the comment that introduces the block
+    block = re.sub(r"/\*.*?\*/", "", BASE[start:BASE.index("</style>")], flags=re.S)        # declarations only, not the comments
+    offenders = [line.strip() for line in block.splitlines() if "!important" in line and "stDateInputField" not in line]
+    assert not offenders, offenders                           # the one exception, the date field, is the colour dark mode uses too
 
 
 # ------------------------------------------------------------------------------------------ arithmetic: the colours chosen clear WCAG AA (4.5 : 1)
@@ -90,14 +123,22 @@ def test_code_blocks_and_json_are_darkened_leaf_by_leaf_not_wholesale():
     ("#E8E8E8", (38, 43, 54), 7),                                                 # the same text where the surface goes dark-tinted
     ("#8AB4F8", (14, 17, 23), 7), ("#0B57D0", (255, 255, 255), 4.5),                # links: on the dark page, and inside a light popover
     ("#4B5160", (240, 244, 249), 4.5), ("#1D2230", (255, 164, 33), 7),              # uploader hint, avatar icon
+    ("#0B5D27", (219, 239, 233), 6.5), ("#0B5D27", (233, 249, 238), 7), ("#0B5D27", (255, 255, 255), 7),        # light mode: success text and a rising metric delta
+    ("#6FD39A", (16, 35, 29), 7),                                                                                # dark mode: the success alert's icon
+    ("#A61B1B", (255, 255, 255), 7), ("#8B1A1A", (242, 224, 228), 7),                                         # a falling delta, error text on its pink fill
 ])
 def test_the_chosen_colours_clear_wcag_aa(fg, bg, minimum):
     assert contrast(fg, bg) >= minimum
 
 
+def test_light_mode_text_colours_are_the_ones_the_stylesheet_declares():
+    for hexcolour in ("#0B5D27", "#A61B1B", "#8B1A1A", "#4B5160", "#1D2230"):
+        assert hexcolour in BASE
+
+
 def test_a_code_token_colour_darkened_by_the_filter_clears_aa():
     """Streamlit's lightest-contrast tokens on its near-white code background (rgb 9,171,59 green; 237,111,19 orange; 128,132,149 grey) after brightness(0.62)."""
-    k = float(re.search(r'stCode"\] pre code span[^{]*\{\s*filter: brightness\(([\d.]+)\)', CSS).group(1))
+    k = float(re.search(r'stCode"\] pre code span[^{]*\{\s*filter: brightness\(([\d.]+)\)', BASE).group(1))
     for rgb in ((9, 171, 59), (237, 111, 19), (128, 132, 149), (28, 131, 225), (41, 176, 157)):
         assert contrast(tuple(c * k for c in rgb), (248, 250, 252)) >= 4.5, rgb
 

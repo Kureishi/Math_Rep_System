@@ -21,6 +21,7 @@ if dark:
 with st.sidebar:
     with st.expander("LM Studio", expanded=True):
         st.success("Connected to LM Studio.")
+        st.error("Could not reach LM Studio at http://localhost:1234/v1. Open LM Studio, load a model, and click Start Server.")
         st.button("Re-check connection")
         st.selectbox("Reasoning model", ["qwen3", "other"])
     with st.expander("Advanced settings"):
@@ -51,6 +52,7 @@ with t1:
     st.caption("A caption")
 with t2:
     st.metric("Metric", "42", "+3")
+    st.metric("Falling metric", "7", "-2")
     st.dataframe(pd.DataFrame({"a": [1, 2], "b": ["x", "y"]}))
     st.table(pd.DataFrame({"a": [1, 2]}))
     st.code("print('code block')")
