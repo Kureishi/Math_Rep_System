@@ -356,6 +356,25 @@ def dark_mode_css() -> str:
             color: #2B3040 !important;
         }
         [data-testid="stPopoverBody"] a { color: #0B57D0 !important; }
+        /* a dialog (st.dialog: the Share dialog) is its own white surface; the page-wide "text is light grey" rule above lands on every label, tab, caption and
+           paragraph in it (1.2 : 1). Dark text for the text (the selected tab keeps its underline and is set bolder), and a dark link colour. */
+        [data-testid="stDialog"] [data-testid="stMarkdownContainer"],
+        [data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
+        [data-testid="stDialog"] [data-testid="stMarkdownContainer"] li,
+        [data-testid="stDialog"] [data-testid="stMarkdownContainer"] strong,
+        [data-testid="stDialog"] [data-testid="stCaptionContainer"],
+        [data-testid="stDialog"] [data-testid="stCaptionContainer"] p,
+        [data-testid="stDialog"] [data-testid="stWidgetLabel"] p,
+        [data-testid="stDialog"] label, [data-testid="stDialog"] h1, [data-testid="stDialog"] h2, [data-testid="stDialog"] h3, [data-testid="stDialog"] h4 {
+            color: #2B3040 !important;
+        }
+        [data-testid="stDialog"] [data-testid="stTab"][aria-selected="true"] [data-testid="stMarkdownContainer"] p { font-weight: 600; }
+        [data-testid="stDialog"] a { color: #0B57D0 !important; }
+        /* ...but not the labels of buttons: they have a dark fill, so their light text is right. (A popover trigger and an expander header are NOT exceptions in here:
+           their hover/focus tint is translucent over the white dialog, so they stay light in every state and dark text is right in every state.) */
+        [data-testid="stDialog"] [data-testid^="stBaseButton-"] [data-testid="stMarkdownContainer"] p {
+            color: #E8E8E8 !important;
+        }
         /* the open list of a selectbox / multiselect (they render in a portal, outside the containers styled above) */
         [data-testid$="Dropdown"], [data-testid$="Dropdown"] [role="option"], [data-testid$="Dropdown"] p, [data-testid$="Dropdown"] span {
             color: #2B3040 !important;

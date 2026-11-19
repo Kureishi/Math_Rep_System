@@ -580,11 +580,11 @@ spread it over every core, and `pytest -m "not slow"` to skip the four engine te
   seed 0) runs the full suite with coverage; the other seven skip the `slow` tests. All use `-n auto`.
 - **Both colour themes stay readable** (`tests/test_dark_mode_css.py`, `scripts/dark_mode_contrast_scan.py`). Streamlit bakes its light theme into some components, so a
   few surfaces stay light in dark mode (an open expander's header, toasts, a popover's panel and trigger, dropdown lists, unselected segments) and get dark text instead; and in
-  both modes a handful of Streamlit's own colours are under WCAG AA's 4.5 : 1 (code and JSON syntax colours, green success text and metric deltas, red error text, 60 %-opacity hint
+  both modes a handful of Streamlit's own colours are under WCAG AA's 4.5 : 1 (chart text in dark mode: Streamlit colours it with the light theme's ink, so the chart theme now sets the font colour explicitly; code and JSON syntax colours, green success text and metric deltas, red error text, 60 %-opacity hint
   text, the chat avatar icon), so they are darkened in the always-on stylesheet. Each dark-mode rule applies only in the state where the surface really is light (a popover's trigger
   turns dark-tinted on hover, focus and while open). The unit tests check the stylesheets and the colour arithmetic; the real measurement is a browser scan:
-  `streamlit run scripts/dark_mode_gallery.py --server.port 8599`, then `python scripts/dark_mode_contrast_scan.py --port 8599` (add `--light` for light mode; needs
-  `pip install playwright && playwright install chromium`, in `requirements-dev.txt`). It computes the contrast of every visible text element in about twenty states (tabs, open
+  `streamlit run scripts/dark_mode_gallery.py --server.port 8599`, then `python scripts/dark_mode_contrast_scan.py --port 8599` (add `--light` for light mode, `--dialog` for the Share-style modal, which is its own surface; needs
+  `pip install playwright && playwright install chromium`, in `requirements-dev.txt`). It computes the contrast of every visible text element (chart text, which is SVG, by its `fill`) in about twenty states (tabs, open
   dropdowns and popovers, hover, focus) and exits 1 if any is below 4.5 : 1 (disabled controls are exempt, as WCAG allows). Run it in both modes after touching `ui/theme.py`;
   add new component types to the gallery page. Restart the gallery before scanning: a Streamlit server left running from an earlier edit silently serves the old stylesheet.
 - **Requirements stay in step with the code** (`tests/test_requirements_in_sync.py`): the suite fails if

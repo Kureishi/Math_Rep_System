@@ -14,6 +14,7 @@ import streamlit as st
 from ui.theme import inject_base_styles, dark_mode_css, badge_row
 
 st.set_page_config(layout="wide")
+st.session_state["dark_mode"] = st.query_params.get("dark") == "1"      # what ui.a11y.is_dark() reads, so charts follow the page
 inject_base_styles()
 dark = st.query_params.get("dark") == "1"
 if dark:
@@ -68,5 +69,46 @@ with st.status("A status box", expanded=True):
 st.toast("A toast message", icon="✅")
 badge_row([("badge", "neutral"), ("pass", "pass")])
 st.chat_message("assistant").write("chat bubble")
+# charts are SVG: their text is coloured by `fill`, not CSS `color`, and the app themes them in Python (ui/a11y.show_figure), so they need their own coverage
+import numpy as np
+from modules.plotter import build_motion_diagram
+from ui.a11y import show_figure
+import plotly.graph_objects as go
+t = np.linspace(0, 6, 61)
+show_figure(build_motion_diagram(t, 8 * t + t ** 2, 8 + 2 * t, x_label="position", x_unit="m", t_unit="s", a_values=np.full_like(t, 2.0), n_strobes=6), width="stretch", key="gallery_motion")
+fig = go.Figure(go.Scatter(x=t, y=np.sin(t), name="sin"))
+fig.update_layout(title="A line chart", xaxis_title="time (s)", yaxis_title="value")
+show_figure(fig, width="stretch", key="gallery_line")
+@st.dialog("Share this solution", width="large")
+def share_dialog():
+    """A stand-in for ui/share.py's dialog: a modal is its own surface (white in Streamlit's light theme), with tabs, labels, captions, checkboxes and download buttons."""
+    t1, t2, t3, t4 = st.tabs(["⬇️ Export", "🖼️ Answer card", "📋 Copy", "🔗 Send to a chain"])
+    with t1:
+        st.selectbox("What to include", ["Full audit", "Lab report", "Homework solution"], help="The sections each report contains")
+        st.checkbox("Number the figures and add an automatic description under each", help="Figure 1. …")
+        cols = st.columns(3)
+        for i, name in enumerate(["Problem", "Results", "Derived equations", "Variables", "Verification detail", "Step-by-step solution"]):
+            cols[i % 3].checkbox(name, value=True, key=f"dlg_{i}")
+        st.caption("Nothing to include for: Matrix representation, Vectors, Plots.")
+        st.markdown("Tip: 📷 “Include this plot in the report” under a plot adds it to the Plots section.")
+        with st.expander("Details"):
+            st.write("Expander text inside the dialog")
+        with st.popover("Options"):
+            st.write("Popover text inside the dialog")
+        st.markdown("**Download** -- built when you click")
+        c = st.columns(3)
+        c[0].download_button("PDF", data=b"x", file_name="a.pdf"); c[0].caption("Typeset equations; fixed layout for printing or sending.")
+        c[1].button("Word", disabled=True); c[1].caption("Unavailable: pip install python-docx (python-docx: Word (.docx) export).")
+    with t2:
+        st.caption("One image with the problem, the answer and the verdict.")
+        st.toggle("Dark card"); st.code("a = 2 m/s²", language=None)
+    with t3:
+        st.text_area("Text", "a = 2"); st.radio("Format", ["Plain", "LaTeX"], horizontal=True)
+    with t4:
+        st.text_input("Chain name"); st.button("Send")
+
+
+if st.query_params.get("dialog") == "1":
+    share_dialog()
 st.divider()
 st.markdown("**Bold** markdown, `inline code`, [a link](https://example.com), and a table:\n\n| a | b |\n|---|---|\n| 1 | 2 |")

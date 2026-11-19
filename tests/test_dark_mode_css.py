@@ -151,3 +151,55 @@ def test_the_contrast_tooling_is_in_the_repo_and_documented():
     assert "dark_mode_contrast_scan" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert "dark_mode_contrast_scan" in (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     assert "playwright" in (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------------------------------ the Share dialog (a modal is its own white surface)
+
+def test_a_dialogs_text_is_dark_and_its_selected_tab_is_bolder():
+    sels = selectors_with('[data-testid="stDialog"]')
+    assert any('[data-testid="stMarkdownContainer"] p' in s for s in sels) and any("label" in s for s in sels)
+    assert any("stCaptionContainer" in s for s in sels) and any("stWidgetLabel" in s for s in sels)
+    assert 'stDialog"] [data-testid="stTab"][aria-selected="true"]' in CSS and "font-weight: 600" in rule_for('[aria-selected="true"] [data-testid="stMarkdownContainer"] p')
+    assert 'stDialog"] a' in CSS
+
+
+def test_buttons_in_a_dialog_keep_light_text_but_a_popover_trigger_and_expander_header_do_not_get_an_exception():
+    """A button has a dark fill, so its label stays light. A popover trigger / expander header sits on the white dialog with only a translucent hover tint, so it stays LIGHT in every
+    state and dark text is right in every state (measured: a 'light text on hover' exception put 1.0 : 1 text on 227,235,243)."""
+    assert "color: #E8E8E8 !important" in rule_for('[data-testid="stDialog"] [data-testid^="stBaseButton-"] [data-testid="stMarkdownContainer"] p')
+    assert 'stDialog"] [data-testid="stPopoverButton"]' not in CSS
+    assert 'stDialog"] details' not in CSS
+
+
+@pytest.mark.parametrize("fg, bg, minimum", [("#2B3040", (255, 255, 255), 7), ("#0B57D0", (255, 255, 255), 4.5), ("#E8E8E8", (38, 43, 54), 7)])
+def test_the_dialog_colours_clear_wcag_aa(fg, bg, minimum):
+    assert contrast(fg, bg) >= minimum
+
+
+# ------------------------------------------------------------------------------------------ charts
+
+def test_chart_text_is_set_explicitly_because_streamlit_colours_it_with_the_light_themes_ink():
+    """Measured in a browser: with the app's CSS-only dark mode, every chart's text was rgb(26,26,46) (config.toml's textColor) on the dark page, whatever the template said."""
+    from modules import palette
+    assert palette.plotly_theme(True)["font"]["color"] == palette.CHART_TEXT_DARK_MODE == "#E8E8E8"
+    assert palette.plotly_theme(False)["font"]["color"] == palette.CHART_TEXT_LIGHT_MODE == "#1A1A2E"
+    assert contrast(palette.CHART_TEXT_DARK_MODE, (14, 17, 23)) >= 7 and contrast(palette.CHART_TEXT_LIGHT_MODE, (255, 255, 255)) >= 7
+    toml = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+    assert palette.CHART_TEXT_LIGHT_MODE.lower() in toml.lower()         # the light colour is the theme's own ink, so light mode is unchanged
+
+
+def test_show_figure_gives_light_chart_text_in_dark_mode_and_dark_in_light_mode():
+    from streamlit.testing.v1 import AppTest
+
+    def page():
+        import plotly.graph_objects as go
+        import streamlit as st
+        from ui.a11y import show_figure
+        fig = go.Figure(go.Scatter(x=[0, 1], y=[0, 1]))
+        show_figure(fig, key="chart")
+        st.write(f"font={fig.layout.font.color}")
+    for dark, expected in ((True, "#E8E8E8"), (False, "#1A1A2E")):
+        at = AppTest.from_function(page, default_timeout=60)
+        at.session_state["dark_mode"] = dark
+        at.run()
+        assert not at.exception and any(m.value == f"font={expected}" for m in at.markdown), (dark, [m.value for m in at.markdown])

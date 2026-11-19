@@ -46,6 +46,11 @@ DASHES = ("solid", "dash", "dot", "dashdot", "longdash", "longdashdot")
 
 LIGHT_BACKGROUND = "#FFFFFF"
 DARK_BACKGROUND = "#0E1117"                 # the app's dark mode (ui/theme.py)
+# Chart text. Streamlit's frontend colours a chart's text with the THEME's textColor (config.toml: dark ink) even for st.plotly_chart(theme=None), and the app's dark mode is
+# a CSS layer that never changes that setting, so in dark mode every title, tick label and legend was dark ink on the dark page. Setting the layout font colour explicitly
+# is what wins. On the page colours: 12.9 : 1 on the light page, 14.8 : 1 on the dark one.
+CHART_TEXT_LIGHT_MODE = "#1A1A2E"
+CHART_TEXT_DARK_MODE = "#E8E8E8"
 
 # (background tint, text) per badge kind; the text meets WCAG AA on its tint
 BADGE_COLORS: dict[str, tuple[str, str]] = {
@@ -134,7 +139,8 @@ def plotly_theme(dark: bool) -> dict[str, Any]:
     """Layout settings that make a figure follow the app's light/dark choice and use the colour-blind-safe series colours for
     any trace that does not set its own. Idempotent: applying it twice, or to a cached figure, changes nothing further."""
     return dict(template="plotly_dark" if dark else "plotly_white", colorway=list(CATEGORICAL),
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color=CHART_TEXT_DARK_MODE if dark else CHART_TEXT_LIGHT_MODE))
 
 
 def apply_theme(fig: Any, dark: bool) -> Any:
