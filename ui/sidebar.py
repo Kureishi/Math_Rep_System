@@ -15,6 +15,7 @@ from modules.settings_profiles import save_profile, list_profiles, load_profile,
 from modules import history, chains
 from ui import view_state
 from ui.common import restore_from_query_param, sync_query_param
+from ui.routing import go
 from ui.theme import dark_mode_css
 from modules.command_palette import MODE_LABELS
 from dataclasses import dataclass
@@ -55,14 +56,7 @@ class SidebarState:
     ok: bool
 
 
-def _go(route: "router.Route") -> None:
-    """Navigate to a route's mode and fill in what it prefills. Safe to call from a callback or before the mode radio is built
-    (the sidebar builds the box below ahead of the radio, so app_mode may be set directly)."""
-    st.session_state["app_mode"] = route.mode
-    for key, value in route.prefill.items():
-        st.session_state[key] = value
-    st.session_state["_ask_notice"] = f"→ {route.mode}: {route.reason}"
-    st.session_state.pop("_ask_last", None)
+_go = go      # the jump now lives in ui/routing.py (the word-problem page's banner uses it too)
 
 
 def _ask_submitted() -> None:

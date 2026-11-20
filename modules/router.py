@@ -157,6 +157,24 @@ def _phrase(text: str, phrase: str) -> bool:
     return re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", text) is not None
 
 
+# A SUGGESTION may be bolder than an automatic jump: it costs one glance, and the person decides. Measured on 25 ordinary word problems (kinematics, money, geometry, circuits,
+# chemistry-flavoured arithmetic ...) none reached even 0.5, while the cross-mode requests that should be offered (a reaction to balance, a double slit, an RLC circuit, an orbit,
+# a triangle from three sides, an equivalence question) do. tests/test_mode_suggestion.py holds both lists.
+BANNER_CONFIDENCE = 0.5
+BANNER_MIN_CHARS = 12
+
+
+def suggest_mode(text: str) -> Route | None:
+    """Should the word-problem page offer to switch modes for what was typed into it? The route if so, else None: only when the text clearly belongs to another mode (at least
+    BANNER_CONFIDENCE) and is long enough to judge. The word-problem solver is where the text already is, so it is never 'suggested'."""
+    if len(text.strip()) < BANNER_MIN_CHARS:
+        return None
+    found = route(text)
+    if found.mode == WORD_PROBLEM or found.confidence < BANNER_CONFIDENCE:
+        return None
+    return found
+
+
 def route(query: str) -> Route:
     """Where `query` should go, how sure that is, why, and what to prefill."""
     raw = query.strip()

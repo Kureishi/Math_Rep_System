@@ -15,6 +15,8 @@ from modules.workspace import Workspace
 from modules import provenance
 from ui import view_state
 from ui.common import check_upload_size
+from ui.routing import render_mode_suggestion
+from ui.safe import run_panel
 
 # modules.pipeline (-> solver, verifier, scipy, ...), modules.ocr (-> PIL) and ui.results (-> pandas,
 # plotly, matplotlib, ...) are imported inside the functions that use them rather than here: a fresh
@@ -36,6 +38,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
             placeholder="e.g. A car accelerates uniformly from 8 m/s to 20 m/s over 6 seconds. "
                         "What is its acceleration, and how far does it travel in that time?",
         )
+        run_panel("Mode suggestion", render_mode_suggestion, problem_text)        # a banner only when the text clearly belongs to another mode
 
     with tab_image:
         # ---- camera vs file: a phone user taking a picture of the problem

@@ -135,6 +135,7 @@ math-rep-system/
 │   │                          #   colours, text description for screen readers)
 │   ├── common.py                # helpers shared by several pages (upload-size guard,
 │   │                          #   snapshot/download buttons, query-param syncing, ...)
+│   ├── routing.py               # go(route): the jump shared by the sidebar's Ask box and the word-problem page's mode-suggestion banner
 │   ├── safe.py                  # guarded()/run_panel(): one failing panel shows a notice (a missing package gets
 │   │                          #   its pip command) and the rest of the page renders; st.stop()/st.rerun() pass through
 │   ├── diagnosis.py             # render_diagnosis(): what happened, ranked causes with fixes, the facts, the raw reply
@@ -421,7 +422,8 @@ math-rep-system/
     ├── gr_waves.py                    # linearised gravity, TT plane waves, test masses, quadrupole formula, Peters inspiral
     ├── gr_plots.py                    # the Plotly figures for all of the above
     ├── gpu.py                         # optional CuPy backend: detection, auto/on/off, size thresholds, CPU fallback
-    ├── router.py                      # "Ask anything": weighted signals -> (mode, confidence, reason, prefill); optional LLM tie-break
+    ├── router.py                      # "Ask anything": weighted signals -> (mode, confidence, reason, prefill); optional LLM tie-break;
+    │                                  #   suggest_mode(): the same router, a lower bar (0.5), for the word-problem page's banner
     ├── proof_card.py                  # trust verdict, equation audit, step badges, bundle replay (cli.py replay), report replay manifest (hash, encode, extract, verify)
     ├── discover.py                    # equation discovery: derivatives, library, STLSQ, BIC threshold, bootstrap, simulation check
     ├── discover_plots.py              # Plotly figures for it

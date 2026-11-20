@@ -339,6 +339,10 @@ Markdown, PDF, Python, or a Jupyter notebook.
   or paste a table of numbers and it picks the mode, **says why**, and fills it in: the problem text, both expressions
   to compare, the pasted data, the sides of a triangle. It jumps only when it is sure; otherwise it offers the likely
   modes (and, if LM Studio is up, lets the model choose, accepting only a real mode). Ctrl/Cmd+Enter to submit.
+  **The word-problem box suggests too:** if what you type there clearly belongs to another mode (a reaction to balance, a double slit, an RLC circuit, an orbit, a triangle from
+  three sides, an equivalence question) a banner under the box says which mode, why, and how sure (50 % or more; the automatic jump needs 60 %), with **Switch to ...** (which
+  fills the mode in exactly as the Ask box would) and **Keep it here**. It is only a suggestion: Represent & Solve still works. It never shows for ordinary word problems (none of
+  25 reached the threshold), for text you chose to keep here (remembered regardless of case and spacing), or while a solved problem is on screen.
 - **Proof card and Replay** (`proof_card.py`). Every solved problem opens with a trust verdict (✅ verified, 🟡 passed
   with less behind it, ❌ failed) and a card listing what backs the answer **and what it does not establish**. An
   equation audit substitutes the answer back into every original equation, and the solution steps carry badges where
