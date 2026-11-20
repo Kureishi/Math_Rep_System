@@ -146,7 +146,7 @@ def test_a_code_token_colour_darkened_by_the_filter_clears_aa():
 # ------------------------------------------------------------------------------------------ the tool that measures it
 
 def test_the_contrast_tooling_is_in_the_repo_and_documented():
-    for name in ("dark_mode_gallery.py", "dark_mode_contrast_scan.py"):
+    for name in ("dark_mode_gallery.py", "dark_mode_contrast_scan.py", "chart_text_overlap_scan.py"):
         compile((ROOT / "scripts" / name).read_text(encoding="utf-8"), name, "exec")
     assert "dark_mode_contrast_scan" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert "dark_mode_contrast_scan" in (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")

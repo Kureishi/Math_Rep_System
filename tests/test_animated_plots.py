@@ -136,3 +136,43 @@ def test_motion_diagram_handles_negative_velocity():
     vs = 20 - 5 * ts
     fig = build_motion_diagram(ts, xs, vs)
     assert len(fig.frames) > 1
+
+
+# ------------------------------------------------------------------------------------------ layout: nothing drawn on top of anything else
+
+def _diagram():
+    import numpy as np
+    from modules.plotter import build_motion_diagram
+    t = np.linspace(0, 6, 61)
+    return build_motion_diagram(t, 8 * t + t ** 2, 8 + 2 * t, x_label="position", x_unit="m", t_unit="s", a_values=np.full_like(t, 2.0), n_strobes=6)
+
+
+def test_the_gap_between_the_two_panels_holds_the_upper_axis_title_and_the_lower_panels_title():
+    """Measured in a browser: at 0.16 of a 520 px figure the gap was ~67 px and 'position (m)' was drawn over 'position (m) vs. time (s)' (71 x 12 px of overlap). The upper
+    panel's tick labels + axis title and the lower panel's title need about 100 px."""
+    from modules import plotter
+    fig = _diagram()
+    plot_height = fig.layout.height - fig.layout.margin.t - fig.layout.margin.b
+    gap_px = plotter.MOTION_VERTICAL_SPACING * plot_height
+    assert gap_px >= plotter.MOTION_MIN_PANEL_GAP_PX
+    assert fig.layout.height == plotter.MOTION_HEIGHT and fig.layout.margin.t == plotter.MOTION_MARGIN_TOP
+
+
+def test_play_and_pause_sit_side_by_side_above_the_first_panels_title_not_stacked_over_the_plot():
+    fig = _diagram()
+    menu = fig.layout.updatemenus[0]
+    assert menu.direction == "right" and menu.yanchor == "bottom" and menu.y > 1.0
+    assert [b.label for b in menu.buttons] == ["\u25b6 Play", "\u23f8 Pause"]
+    # the buttons' strip must fit in the top margin: their anchor is above the plot by less than the margin, and the subplot title (about 25 px) sits below it
+    plot_height = fig.layout.height - fig.layout.margin.t - fig.layout.margin.b
+    assert (menu.y - 1.0) * plot_height + 28 <= fig.layout.margin.t
+
+
+def test_the_lower_panels_first_tick_labels_are_pushed_apart_at_its_corner():
+    fig = _diagram()
+    assert fig.layout.xaxis2.ticklabelstandoff and fig.layout.yaxis2.ticklabelstandoff
+
+
+def test_the_animation_survives_the_layout_change():
+    fig = _diagram()
+    assert len(fig.frames) > 1 and fig.layout.sliders and len(fig.layout.sliders[0].steps) == len(fig.frames)

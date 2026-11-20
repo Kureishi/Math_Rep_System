@@ -732,6 +732,15 @@ def _strobe_indices(n: int, n_strobes: int) -> np.ndarray:
     return np.unique(np.linspace(0, n - 1, min(n_strobes, n)).astype(int))
 
 
+# Layout of the motion diagram. The gap between its two panels has to hold the upper panel's tick labels and axis title AND the lower panel's title (about 100 px);
+# at 0.16 of a 520 px figure it was ~67 px, and "position (m)" was drawn over "position (m) vs. time (s)". tests/test_plotter.py checks the arithmetic.
+MOTION_HEIGHT = 640
+MOTION_MARGIN_TOP = 100
+MOTION_MARGIN_BOTTOM = 60
+MOTION_VERTICAL_SPACING = 0.22
+MOTION_MIN_PANEL_GAP_PX = 100
+
+
 def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: np.ndarray,
                            x_label: str = "position", x_unit: str = "", t_unit: str = "",
                            n_frames: int = 50, a_values: np.ndarray | None = None,
@@ -779,7 +788,7 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
         "motion \u2014 " + "red: velocity" + (", green: acceleration" if show_a else "")
         + " (each scaled separately)")
 
-    fig = make_subplots(rows=2, cols=1, row_heights=[0.28, 0.72], vertical_spacing=0.16,
+    fig = make_subplots(rows=2, cols=1, row_heights=[0.28, 0.72], vertical_spacing=MOTION_VERTICAL_SPACING,
                           subplot_titles=(motion_title, f"{x_label}{x_unit_sfx} vs. time{t_unit_sfx}"))
 
     def extra_traces(i: int):
@@ -840,8 +849,10 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
 
     frames = [go.Frame(data=frame_traces(int(i)), traces=list(range(len(base))), name=f"{int(i)}") for i in idx]
     fig.update_layout(
-        height=520, margin=dict(t=60, b=40),
-        updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.14, buttons=[
+        height=MOTION_HEIGHT, margin=dict(t=MOTION_MARGIN_TOP, b=MOTION_MARGIN_BOTTOM),
+        # Play / Pause side by side, in the strip above the first panel's title (the default stacks them downwards, over the plot)
+        updatemenus=[dict(type="buttons", direction="right", showactive=False, x=0.0, xanchor="left", y=1.0 + 58 / (MOTION_HEIGHT - MOTION_MARGIN_TOP - MOTION_MARGIN_BOTTOM),
+                          yanchor="bottom", buttons=[
             dict(label="\u25b6 Play", method="animate",
                   args=[None, {"frame": {"duration": 60, "redraw": True},
                                  "fromcurrent": True, "transition": {"duration": 0}}]),
@@ -859,6 +870,9 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
     fig.update_xaxes(title=f"position{x_unit_sfx}", row=1, col=1)
     fig.update_xaxes(title=f"time{t_unit_sfx}", row=2, col=1)
     fig.update_yaxes(title=f"{x_label}{x_unit_sfx}", row=2, col=1)
+    # the lower panel's x and y axes meet in its bottom-left corner, where their first tick labels (both "-1" at the start) landed on each other
+    fig.update_xaxes(ticklabelstandoff=8, row=2, col=1)
+    fig.update_yaxes(ticklabelstandoff=8, row=2, col=1)
     fig.frames = frames
     return fig
 

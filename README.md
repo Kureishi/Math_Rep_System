@@ -586,7 +586,7 @@ spread it over every core, and `pytest -m "not slow"` to skip the four engine te
   `streamlit run scripts/dark_mode_gallery.py --server.port 8599`, then `python scripts/dark_mode_contrast_scan.py --port 8599` (add `--light` for light mode, `--dialog` for the Share-style modal, which is its own surface; needs
   `pip install playwright && playwright install chromium`, in `requirements-dev.txt`). It computes the contrast of every visible text element (chart text, which is SVG, by its `fill`) in about twenty states (tabs, open
   dropdowns and popovers, hover, focus) and exits 1 if any is below 4.5 : 1 (disabled controls are exempt, as WCAG allows). Run it in both modes after touching `ui/theme.py`;
-  add new component types to the gallery page. Restart the gallery before scanning: a Streamlit server left running from an earlier edit silently serves the old stylesheet.
+  add new component types to the gallery page. `python scripts/chart_text_overlap_scan.py --port 8599` does the same for chart layout: it measures the rendered tick labels, axis titles and subplot titles in both themes and fails if any overlap (unit tests can check a figure's spacing numbers but not what the browser draws). Restart the gallery before scanning: a Streamlit server left running from an earlier edit silently serves the old stylesheet.
 - **Requirements stay in step with the code** (`tests/test_requirements_in_sync.py`): the suite fails if
   the code imports a package no requirements file declares, if `requirements.txt` lists one nothing imports (unless it is allow-listed with the reason), or if the
   optional-package registry (`modules/optional_deps.py`) and `requirements.txt` disagree.
