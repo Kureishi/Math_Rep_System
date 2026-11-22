@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.chains", function="render_chains_tab",
     needs_client=True,
     order=50,
+    group="Solve",
 )

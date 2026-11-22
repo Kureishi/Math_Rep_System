@@ -52,7 +52,7 @@ def test_a_malformed_trajectory_hands_off_nothing():
 def open_lab(label, timeout=240):
     at = AppTest.from_file(str(Path(__file__).parent.parent / "app.py"), default_timeout=timeout)
     at.run()
-    at.sidebar.radio[0].set_value(label)
+    at.session_state["app_mode"] = label
     at.run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     return at

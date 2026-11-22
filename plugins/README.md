@@ -13,4 +13,6 @@ fields are documented in `modules/mode_spec.py`. The page runs inside Streamlit 
 **If a plugin is broken** the app still starts: that file is skipped and the reason is shown on the Health check page. A plugin cannot
 reuse a built-in mode's label (the built-in wins).
 
-**Order:** `order` sets the sidebar position (built-ins are 10, 20, ... 240; plugins default to 5000, after them).
+**Order:** `order` sets the position within the sidebar section (built-ins are 10, 20, ... 240; plugins default to 5000, after them).
+
+**Group:** `group` is the sidebar section: "Solve", "Science", "Simulation labs" or "Tools" (the default); any other name gets a section of its own after those.

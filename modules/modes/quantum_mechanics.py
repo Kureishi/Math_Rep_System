@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.quantum", function="render_quantum_tab",
     needs_client=False,
     order=70,
+    group="Science",
 )

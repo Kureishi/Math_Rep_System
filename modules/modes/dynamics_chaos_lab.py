@@ -7,4 +7,5 @@ MODE = ModeSpec(
     module="ui.dynamics", function="render_dynamics_tab",
     needs_client=False,
     order=178,
+    group="Simulation labs",
 )

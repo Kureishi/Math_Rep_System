@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.health", function="render_health_tab",
     needs_client=True,
     order=180,
+    group="Tools",
 )

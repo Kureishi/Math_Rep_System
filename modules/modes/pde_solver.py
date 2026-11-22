@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.pde", function="render_pde_tab",
     needs_client=False,
     order=110,
+    group="Solve",
 )

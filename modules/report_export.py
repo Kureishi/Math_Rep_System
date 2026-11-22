@@ -91,6 +91,11 @@ def format_availability() -> dict[str, tuple[bool, str]]:
     return out
 
 
+def format_missing(key: str) -> list[optional_deps.Dep]:
+    """The packages `key` needs that are not installed (empty if it can be built), so the dialog can say 'Needs python-docx' and offer the command."""
+    return optional_deps.missing_for(*FORMAT_NEEDS.get(key, ()))
+
+
 def _themed(ctx: ExportContext, fmt: str):
     theme = THEMES.get(ctx.theme) if ctx.theme else None
     captions = ctx.auto_captions if ctx.auto_captions is not None else bool(theme and theme.auto_captions)

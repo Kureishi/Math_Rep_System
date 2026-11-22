@@ -11,16 +11,31 @@
 # Streamlit's own generic rejection.
 maxUploadSize = 500
 
+[client]
+# Hides the developer items of the top-right toolbar and menu -- the "Deploy" button, Rerun, Clear cache, Record a screencast -- which mean
+# nothing in a local, offline app. "viewer" and not "minimal" on purpose: "minimal" removes the whole menu, and with it Settings -> Choose
+# app theme, which is how the light/dark theme below is switched. (Streamlit docs: "viewer" hides the developer options only.)
+toolbarMode = "viewer"
+
 [theme]
-# A deliberately chosen default (not Streamlit's bare defaults) for a
-# more finished, "someone designed this" first impression -- this is
-# the LIGHT theme; the in-app "🌙 Dark mode" sidebar toggle (see app.py)
-# overrides these via CSS custom properties at runtime, since Streamlit
-# itself only supports switching themes at server startup, not from
-# Python code while running.
-base = "light"
+# The look the two themes share. Streamlit offers Light, Dark and "Use system setting" (the default) in its own app menu
+# (top right: Settings -> Choose app theme) once BOTH [theme.light] and [theme.dark] exist, and paints every surface -- inputs,
+# popovers, dialogs, open expanders, tooltips -- in the chosen theme itself, in every state (rest, hover, focus, open). That replaced the
+# app's own "Dark mode" checkbox and a CSS override which could only recolour the surfaces Streamlit had already painted light.
+# A deliberately chosen default (not Streamlit's bare defaults) for a more finished, "someone designed this" first impression.
+font = "sans-serif"
+
+[theme.light]
 primaryColor = "#2E5EAA"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F0F4F9"
 textColor = "#1A1A2E"
-font = "sans-serif"
+
+[theme.dark]
+# primaryColor: white button text on it is 4.6 : 1, and the colour itself is 4.1 : 1 on the page (a lighter blue reads better as a
+# link or focus ring but drops the white label below 4.5 : 1; links have their own, lighter colour below).
+primaryColor = "#3F74C8"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1C1F26"
+textColor = "#E8E8E8"
+linkColor = "#8AB4F8"

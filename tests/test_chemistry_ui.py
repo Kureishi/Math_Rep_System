@@ -11,7 +11,7 @@ MODE = "🧪 Chemistry"
 def at():
     app = _app()
     app.run(timeout=120)
-    app.sidebar.radio[0].set_value(MODE)
+    app.session_state["app_mode"] = MODE
     app.run(timeout=120)
     assert not app.exception
     return app

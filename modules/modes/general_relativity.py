@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.relativity", function="render_relativity_tab",
     needs_client=False,
     order=150,
+    group="Science",
 )

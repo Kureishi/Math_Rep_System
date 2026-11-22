@@ -70,6 +70,16 @@ def missing_for(*modules: str) -> list[Dep]:
     return out
 
 
+def install_command(deps: list[Dep]) -> str:
+    """Just the command that installs `deps` ('pip install python-docx'), for a code block with a copy button; '' if nothing is missing."""
+    return "pip install " + " ".join(d.dist for d in deps) if deps else ""
+
+
+def short_need(deps: list[Dep]) -> str:
+    """One short line naming what is missing ('Needs python-docx'), without the reasons install_hint adds; '' if nothing is missing."""
+    return "Needs " + ", ".join(d.dist for d in deps) if deps else ""
+
+
 def install_hint(deps: list[Dep]) -> str:
     """The exact command, and what it is needed for."""
     if not deps:

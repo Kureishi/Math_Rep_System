@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
-from modules.mode_spec import ModeSpec
+from modules.mode_spec import GROUP_ORDER, ModeSpec
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILTIN_PACKAGE = "modules.modes"
@@ -44,6 +44,19 @@ class Registry:
 
     def spec(self, label: str) -> ModeSpec:
         return next(s for s in self.specs if s.label == label)
+
+    def grouped(self) -> list[tuple[str, list[str]]]:
+        """[(section, [mode labels])] for the sidebar: the sections of GROUP_ORDER first (those with no mode left out), then any
+        section a plugin made up, each in order of first appearance; within a section, the modes keep their display order."""
+        by_group: dict[str, list[str]] = {}
+        for spec in self.specs:
+            by_group.setdefault(spec.group, []).append(spec.label)
+        known = [(g, by_group[g]) for g in GROUP_ORDER if g in by_group]
+        extra = [(g, labels) for g, labels in by_group.items() if g not in GROUP_ORDER]
+        return known + extra
+
+    def group_of(self, label: str) -> str:
+        return self.spec(label).group
 
 
 def _specs_of(module: ModuleType, source: str, errors: list[str]) -> list[ModeSpec]:

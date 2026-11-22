@@ -1,20 +1,23 @@
 """
 A single place for the app's visual polish, so "make it look more
 professional" is one file to touch rather than CSS strings scattered
-across every page. Two entry points:
+across every page. Entry points:
 
 - inject_base_styles(): always-on layout/typography/component polish
-  (card-style containers, refined buttons, badge pills, tighter spacing).
-  Called once from app.py, before anything else renders.
-- dark_mode_css(): the CSS override string for the sidebar's existing
-  "🌙 Dark mode" toggle (moved here from ui/sidebar.py -- same data-testid
-  targeting, same limitations, just kept alongside the rest of the app's
-  styling instead of inline in the sidebar's own render function).
+  (card-style containers, refined buttons, badge pills, tighter spacing,
+  the grouped mode list), written to work on BOTH Streamlit themes, plus
+  a block of contrast fixes that is scoped to the light theme only.
+- page_helper_iframe(): a 1 px frame whose script (a) focuses the jump
+  box on Ctrl/Cmd+K and (b) marks the page with data-mrs-theme="light" or
+  "dark" so the light-only block can switch itself off in dark.
 
-Neither function touches Streamlit's [theme] section in .streamlit/config.toml
-(primaryColor etc.) -- that's the base palette; this module only adds CSS
-Streamlit's theme system has no knobs for (card borders, badge pills, button
-hover motion).
+LIGHT AND DARK ARE STREAMLIT'S OWN. .streamlit/config.toml defines [theme.light] and
+[theme.dark] (supported since Streamlit 1.5x; this project pins 1.62), so Streamlit paints every
+surface -- popovers, dialogs, inputs, open expanders -- itself, in both themes and in every state.
+The person chooses in the app menu (Settings -> Choose app theme: Light, Dark, or Use system
+setting, which is the default). The old "🌙 Dark mode" checkbox, and the ~150 lines of CSS
+that recoloured text on the surfaces Streamlit left white, are gone with it: that override
+could only ever be a patch over a theme Streamlit had already painted light.
 """
 from modules.palette import BADGE_COLORS
 import streamlit as st
@@ -66,10 +69,9 @@ def inject_base_styles() -> None:
                emoji gets clipped by the surrounding block's line box. */
             line-height: 1.35;
         }
-        /* opacity 0.67, not the rounder-looking 0.65 -- 0.65 measures at
-           4.26:1 against a white background, just under WCAG AA's 4.5:1
-           minimum for normal-size text; 0.67 clears it (~4.5:1). */
-        .mrs-hero-sub { color: rgba(49, 51, 63, 0.67); font-size: 0.98rem; margin-bottom: 1.2rem; }
+        /* The subtitle is the page's own text colour at 74 % opacity rather than a fixed grey, so it follows the theme: about 6:1 on white in
+           the light theme and 8:1 on the dark one (a fixed rgba(49,51,63,0.67) was right for light only; 0.65 measured 4.26:1, under WCAG AA's 4.5:1). */
+        .mrs-hero-sub { opacity: 0.74; font-size: 0.98rem; margin-bottom: 1.2rem; }
 
         /* ---- cards: expanders and bordered containers get a consistent,
            slightly-rounded, subtly-shadowed treatment instead of
@@ -80,7 +82,7 @@ def inject_base_styles() -> None:
            sitting flush against a border reads as cramped/unfinished
            regardless of how the border itself looks. */
         [data-testid="stExpander"] {
-            border: 1px solid rgba(49, 51, 63, 0.12);
+            border: 1px solid rgba(128, 128, 128, 0.3);
             border-radius: 10px;
             overflow: hidden;
         }
@@ -145,25 +147,29 @@ def inject_base_styles() -> None:
         }
 
         /* ---- sidebar: a hairline separator from the main content, and
-           slightly denser section headers so a long sidebar (mode list +
-           connection status + history) scans faster. The mode radio list
-           in particular is long (a dozen-plus options) and Streamlit's
-           default radio spacing packs them close enough that adjacent
-           options are easy to misclick -- extra vertical gap between
-           options fixes that without needing to touch the radio markup. */
+           slightly denser section headers so a long sidebar scans faster.
+           The mode list (ui/mode_nav.py) is a column of collapsible groups of
+           buttons: left-aligned like a menu, tighter than a default button,
+           with the group headers a little more compact than a content expander. */
         [data-testid="stSidebar"] {
-            border-right: 1px solid rgba(49, 51, 63, 0.08);
+            border-right: 1px solid rgba(128, 128, 128, 0.22);
         }
         [data-testid="stSidebar"] h2 {
             font-size: 1.02rem;
             margin-top: 0.4rem;
         }
-        [data-testid="stSidebar"] [data-testid="stRadio"] label {
-            padding: 0.22rem 0;
-        }
         [data-testid="stSidebar"] hr {
             margin: 0.9rem 0;
         }
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary { padding: 0.5rem 0.8rem; }
+        [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stExpanderDetails"] { padding: 0.15rem 0.4rem 0.45rem 0.4rem; }
+        [data-testid="stSidebar"] [class*="st-key-nav_"] button { justify-content: flex-start; text-align: left; min-height: 2rem; padding: 0.2rem 0.6rem; }
+        [data-testid="stSidebar"] [class*="st-key-nav_"] button p { text-align: left; }
+        /* the star / load / rename / delete buttons of a history entry sit in a tight row */
+        [data-testid="stSidebar"] [class*="st-key-pinhist_"] button,
+        [data-testid="stSidebar"] [class*="st-key-load_"] button,
+        [data-testid="stSidebar"] [class*="st-key-renamehist_"] button,
+        [data-testid="stSidebar"] [class*="st-key-delhist_"] button { min-height: 1.8rem; padding: 0.1rem 0.4rem; }
 
         /* ---- st.status: align its internal spacing with the card style
            above, so the pipeline-progress box (see ui/word_problem.py)
@@ -172,32 +178,85 @@ def inject_base_styles() -> None:
         [data-testid="stStatusWidget"] {
             border-radius: 10px;
         }
-        /* ---- readable text on the light surfaces (both modes). Measured in a browser with scripts/dark_mode_contrast_scan.py: these fell below WCAG AA's
-           4.5 : 1, in light mode as well as dark. They carry no !important on purpose: the dark-mode block below uses it, so where dark mode needs a different
-           colour for the same element it always wins. ---- */
-        /* code blocks: Streamlit's syntax colours (greens, oranges, light blues, grey punctuation) are 2.6-3.7 : 1 on the near-white code background; darken each
-           token by the same factor so the colours keep their meaning */
-        [data-testid="stCode"] pre code span, [data-testid="stCode"] code span { filter: brightness(0.62); }
-        /* st.json: the solarized scheme is blue 3.7 : 1 and violet 4.4 : 1 on white (the span rule catches a span with a child; the leaf rule catches the rest) */
-        [data-testid="stJson"] span, [data-testid="stJson"] :not(:has(*)) { filter: brightness(0.72); }
-        /* secondary text Streamlit draws at 60 % of its ink colour (4.4 : 1 on its light-grey surfaces): the uploader's size hint, a date field's separators, a
-           slider's end labels, the sidebar's collapse arrow */
-        [data-testid="stFileUploaderDropzoneInstructions"] span, [data-testid="stFileUploaderDropzoneInstructions"] small,
-        [data-testid="stSliderTickBar"] p,
-        [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"] { color: #4B5160; }
-        /* (the date field's colour is set with a more specific selector than a plain attribute rule beats; it is the same colour dark mode uses, so no conflict) */
-        [data-testid="stDateInputField"] span { color: #4B5160 !important; }
-        /* the assistant's chat avatar: a white icon on an orange fill is 2 : 1 */
-        [data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"] { color: #1D2230; }
-        /* Streamlit's success green is 4.1-4.5 : 1 on its tinted fills; the delta under a metric is green when it rises and red (3.9 : 1) when it falls */
-        [data-testid="stAlertContentSuccess"] p,
-        [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]), [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]) p { color: #0B5D27; }
-        [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]), [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]) p { color: #A61B1B; }
-        [data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) [data-testid="stAlertDynamicIcon"] { color: #0B5D27; }
-        /* an error alert's red text is 4.2 : 1 on its pink fill (it is the message shown whenever LM Studio is not running) */
-        [data-testid="stAlertContentError"], [data-testid="stAlertContentError"] p { color: #8B1A1A; }
         </style>
-    """, unsafe_allow_html=True)
+    """ + _light_only_css(), unsafe_allow_html=True)
+
+
+# Contrast fixes measured in a browser (scripts/dark_mode_contrast_scan.py) on Streamlit's LIGHT theme: each of these fell below WCAG AA's 4.5 : 1. They are colours
+# chosen for light surfaces, so they must not reach the dark theme (a darkened code token on a dark background is the same mistake the other way round): every
+# selector is scoped to `:root:not([data-mrs-theme="dark"])`, where the attribute is set by the page helper script below. Until that script has run (a fraction of a
+# second after load) the page counts as light, which is the safe side for the default theme.
+LIGHT_ONLY_RULES: list[tuple[list[str], str]] = [
+    # code blocks: Streamlit's syntax colours (greens, oranges, light blues, grey punctuation) are 2.6-3.7 : 1 on the near-white code background;
+    # darken each token by the same factor so the colours keep their meaning
+    (['[data-testid="stCode"] pre code span', '[data-testid="stCode"] code span'], "filter: brightness(0.62);"),
+    # st.json: the solarized scheme is blue 3.7 : 1 and violet 4.4 : 1 on white (the span rule catches a span with a child; the leaf rule the rest)
+    (['[data-testid="stJson"] span', '[data-testid="stJson"] :not(:has(*))'], "filter: brightness(0.72);"),
+    # secondary text Streamlit draws at 60 % of its ink colour (4.4 : 1 on its light-grey surfaces): the uploader's size hint, a slider's end labels,
+    # the sidebar's collapse arrow
+    (['[data-testid="stFileUploaderDropzoneInstructions"] span', '[data-testid="stFileUploaderDropzoneInstructions"] small',
+      '[data-testid="stSliderTickBar"] p', '[data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"]'], "color: #4B5160;"),
+    (['[data-testid="stDateInputField"] span'], "color: #4B5160 !important;"),
+    # the assistant's chat avatar: a white icon on an orange fill is 2 : 1
+    (['[data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"]'], "color: #1D2230;"),
+    # Streamlit's success green is 4.1-4.5 : 1 on its tinted fills; the delta under a metric is green when it rises and red (3.9 : 1) when it falls
+    (['[data-testid="stAlertContentSuccess"] p', '[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"])',
+      '[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]) p'], "color: #0B5D27;"),
+    (['[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"])', '[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]) p'],
+     "color: #A61B1B;"),
+    (['[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) [data-testid="stAlertDynamicIcon"]'], "color: #0B5D27;"),
+    # an error alert's red text is 4.2 : 1 on its pink fill (it is the message shown whenever LM Studio is not running)
+    (['[data-testid="stAlertContentError"]', '[data-testid="stAlertContentError"] p'], "color: #8B1A1A;"),
+]
+_LIGHT_SCOPE = ':root:not([data-mrs-theme="dark"])'
+
+
+def _light_only_css() -> str:
+    rules = "\n".join(f"{', '.join(f'{_LIGHT_SCOPE} {sel}' for sel in selectors)} {{ {declarations} }}" for selectors, declarations in LIGHT_ONLY_RULES)
+    return f"<style>\n{rules}\n</style>"
+
+
+# The script in the 1 px frame. It reaches out of its sandboxed iframe into the parent page (the usual, slightly fragile trick: Streamlit has no API for a global keyboard shortcut
+# or for reading the theme into CSS). If a future Streamlit changes the DOM it simply stops working: the shortcut does nothing, and the page is treated as light.
+#   Ctrl/Cmd+K   focus the "Jump to..." box. The handler is replaced, not stacked, each time the frame reloads.
+#   theme        every second, read the app's background colour; dark if its luminance is below one half. Polling (one getComputedStyle call) rather than an observer
+#                because the theme can change by the app menu, by the operating system, or by Streamlit re-applying it, and all of them end up as the same background colour.
+PAGE_HELPER_HTML = """
+    <script>
+    (function() {
+        const win = window.parent, doc = win.document;
+        if (win.__mrsKeyHandler) { doc.removeEventListener('keydown', win.__mrsKeyHandler); }
+        win.__mrsKeyHandler = function(e) {
+            const isK = e.key === 'k' || e.key === 'K';
+            if ((e.metaKey || e.ctrlKey) && isK) {
+                e.preventDefault();
+                const inputs = doc.querySelectorAll('input[type="text"]');
+                for (const el of inputs) {
+                    if (el.placeholder && el.placeholder.includes('heat equation')) { el.focus(); break; }
+                }
+            }
+        };
+        doc.addEventListener('keydown', win.__mrsKeyHandler);
+
+        function paintTheme() {
+            const app = doc.querySelector('[data-testid="stApp"]') || doc.body;
+            const m = win.getComputedStyle(app).backgroundColor.match(/[0-9.]+/g);
+            if (!m || m.length < 3) { return; }
+            const luminance = (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+            const theme = luminance < 0.5 ? 'dark' : 'light';
+            if (doc.documentElement.getAttribute('data-mrs-theme') !== theme) { doc.documentElement.setAttribute('data-mrs-theme', theme); }
+        }
+        paintTheme();
+        if (win.__mrsThemeTimer) { win.clearInterval(win.__mrsThemeTimer); }
+        win.__mrsThemeTimer = win.setInterval(paintTheme, 1000);
+    })();
+    </script>
+"""
+
+
+def page_helper_iframe() -> None:
+    """Draw the 1 px frame that runs PAGE_HELPER_HTML (called once per run, from the sidebar)."""
+    st.iframe(src=PAGE_HELPER_HTML, height=1)
 
 
 def render_hero(title: str, subtitle: str) -> None:
@@ -241,196 +300,3 @@ def badge_row(badges: list[tuple[str, str]]) -> None:
     """Renders several badge(text, kind) pairs as one horizontal row."""
     html = '<div class="mrs-badge-row">' + "".join(badge(t, k) for t, k in badges) + "</div>"
     st.markdown(html, unsafe_allow_html=True)
-
-
-def dark_mode_css() -> str:
-    """The dark-mode override string -- unchanged from its previous home
-    inline in ui/sidebar.py, just relocated so all of the app's CSS lives
-    in one module. See the call site in ui/sidebar.py for why this targets
-    data-testid attributes rather than CSS custom properties."""
-    return """
-        <style>
-        [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-            background-color: #0E1117;
-            color: #E8E8E8;
-        }
-        [data-testid="stSidebar"] {
-            background-color: #1C1F26;
-            color: #E8E8E8;
-        }
-        [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
-        [data-testid="stCaptionContainer"], label, .stMarkdown, h1, h2, h3, h4, h5, h6 {
-            color: #E8E8E8 !important;
-        }
-        [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
-        [data-testid="stTextArea"] textarea, [data-baseweb="select"] {
-            background-color: #262B36 !important;
-            color: #E8E8E8 !important;
-        }
-        /* Placeholder text (e.g. the sidebar's "Jump to..." search box)
-           defaults to a low-opacity DARK gray tuned for a light
-           background -- against this dark input background that's nearly
-           invisible. Both the explicit color and opacity:1 are needed:
-           some browsers additionally dim ::placeholder by default
-           regardless of the color's own alpha. */
-        [data-testid="stTextInput"] input::placeholder,
-        [data-testid="stTextArea"] textarea::placeholder,
-        [data-testid="stNumberInput"] input::placeholder {
-            color: rgba(232, 232, 232, 0.6) !important;
-            opacity: 1 !important;
-        }
-        /* The sidebar's right-edge separator was still the LIGHT-mode
-           rgba(49,51,63,...) -- a dark gray at low opacity, which against
-           the dark sidebar background is essentially the same color as
-           the background itself (measured contrast ~1.02:1, i.e.
-           imperceptible). This is the dark-mode equivalent at a similar
-           "hairline" subtlety to the light-mode original, not a stark
-           divider. */
-        [data-testid="stSidebar"] {
-            border-right: 1px solid rgba(232, 232, 232, 0.18) !important;
-        }
-        /* Secondary buttons (anything not the primary "Solve" button)
-           otherwise keep rendering with the LIGHT theme's button chrome
-           (a near-white fill), since Streamlit bakes button colors from
-           the fixed startup theme rather than exposing them as CSS
-           variables this override could redefine in one place -- left
-           alone, every secondary button would show up as a bright white
-           pill floating on the dark page.
-
-           The actual attribute Streamlit puts on a button is
-           data-testid="stBaseButton-<kind>" (verified against the
-           installed package's own frontend bundle), NOT a `kind="..."`
-           HTML attribute -- an earlier version of this rule used
-           `button[kind="secondary"]`, which matched nothing at all, so
-           this override silently never applied: the button kept its
-           light-theme background while a separate, broader rule
-           elsewhere in this file still recolored its text/icon light,
-           producing an invisible light-on-light icon (this is what the
-           history row's reload/delete buttons looked like: blank pills).
-           :not(...primary) covers "secondary" and any other non-primary
-           kind Streamlit might use (e.g. a form-submit variant) without
-           needing to enumerate each one by name. */
-        [data-testid^="stBaseButton-"]:not([data-testid="stBaseButton-primary"]) {
-            background-color: #262B36 !important;
-            color: #E8E8E8 !important;
-            border-color: rgba(232, 232, 232, 0.25) !important;
-        }
-        /* SURFACES THAT STAY LIGHT IN DARK MODE. Streamlit paints a few things from the light theme it started with (the page background and most text are
-           re-coloured above, these are not), and the broad "text is light grey" rule above then lands on them: pale text on a pale surface (measured
-           contrast 1.1-1.2 : 1, i.e. unreadable). Each is given a dark text colour instead of being repainted, so they keep their look. Every rule here is
-           limited to the state in which the surface really is light: a popover's trigger turns dark-tinted on hover, focus and while open, and dark text on
-           that would be the same mistake the other way round. */
-
-        /* a popover's trigger ("Explain step 3", "Copy a..."): near-white at rest, dark-tinted when hovered, focused (it keeps focus after its popover closes)
-           or open -- there the light text above is correct and is left alone */
-        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]),
-        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]) p,
-        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]) span {
-            color: #2B3040 !important;
-        }
-        [data-testid="stPopoverButton"]:not(:hover):not(:focus):not(:focus-visible):not(:active):not([aria-expanded="true"]) svg {
-            fill: #2B3040 !important;
-            color: #2B3040 !important;
-        }
-        /* the header of an OPEN expander (and of st.status, which is one): light fill when open and at rest, dark-tinted on hover and keyboard focus (there the
-           light text above is right) */
-        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible),
-        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible) p,
-        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible) span,
-        [data-testid="stExpander"] details[open] > summary:not(:hover):not(:focus-visible) svg {
-            color: #2B3040 !important;
-            fill: #2B3040 !important;
-        }
-        /* toasts */
-        [data-testid="stToast"], [data-testid="stToast"] p, [data-testid="stToast"] span, [data-testid="stToast"] div,
-        [data-testid="stToast"] [data-testid="stMarkdownContainer"] p, [data-testid="stToast"] button svg {
-            color: #2B3040 !important;
-            fill: #2B3040 !important;
-        }
-        /* the panel a popover opens: text, captions, labels and headings in it */
-        [data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"],
-        [data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"] p,
-        [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"],
-        [data-testid="stPopoverBody"] label, [data-testid="stPopoverBody"] p,
-        [data-testid="stPopoverBody"] h1, [data-testid="stPopoverBody"] h2, [data-testid="stPopoverBody"] h3, [data-testid="stPopoverBody"] h4 {
-            color: #2B3040 !important;
-        }
-        [data-testid="stPopoverBody"] a { color: #0B57D0 !important; }
-        /* a dialog (st.dialog: the Share dialog) is its own white surface; the page-wide "text is light grey" rule above lands on every label, tab, caption and
-           paragraph in it (1.2 : 1). Dark text for the text (the selected tab keeps its underline and is set bolder), and a dark link colour. */
-        [data-testid="stDialog"] [data-testid="stMarkdownContainer"],
-        [data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
-        [data-testid="stDialog"] [data-testid="stMarkdownContainer"] li,
-        [data-testid="stDialog"] [data-testid="stMarkdownContainer"] strong,
-        [data-testid="stDialog"] [data-testid="stCaptionContainer"],
-        [data-testid="stDialog"] [data-testid="stCaptionContainer"] p,
-        [data-testid="stDialog"] [data-testid="stWidgetLabel"] p,
-        [data-testid="stDialog"] label, [data-testid="stDialog"] h1, [data-testid="stDialog"] h2, [data-testid="stDialog"] h3, [data-testid="stDialog"] h4 {
-            color: #2B3040 !important;
-        }
-        [data-testid="stDialog"] [data-testid="stTab"][aria-selected="true"] [data-testid="stMarkdownContainer"] p { font-weight: 600; }
-        [data-testid="stDialog"] a { color: #0B57D0 !important; }
-        /* ...but not the labels of buttons: they have a dark fill, so their light text is right. (A popover trigger and an expander header are NOT exceptions in here:
-           their hover/focus tint is translucent over the white dialog, so they stay light in every state and dark text is right in every state.) */
-        [data-testid="stDialog"] [data-testid^="stBaseButton-"] [data-testid="stMarkdownContainer"] p {
-            color: #E8E8E8 !important;
-        }
-        /* the open list of a selectbox / multiselect (they render in a portal, outside the containers styled above) */
-        [data-testid$="Dropdown"], [data-testid$="Dropdown"] [role="option"], [data-testid$="Dropdown"] p, [data-testid$="Dropdown"] span {
-            color: #2B3040 !important;
-        }
-        /* segmented controls / button groups: an unselected option is a white pill (selected and hovered ones are tinted, where the light text is right) */
-        [data-testid="stButtonGroup"] button[aria-checked="false"]:not(:hover):not(:focus-visible) p,
-        [data-testid="stButtonGroup"] button[aria-checked="false"]:not(:hover):not(:focus-visible) span {
-            color: #2B3040 !important;
-        }
-        /* a date field's "/" separators */
-        [data-testid="stDateInputField"] span { color: #4B5160 !important; }
-        /* the file uploader's "limit 200MB per file" hint */
-        [data-testid="stFileUploaderDropzoneInstructions"] span, [data-testid="stFileUploaderDropzoneInstructions"] small { color: #4B5160 !important; }
-        /* an icon in a (dark) button takes the button's light text colour -- the sidebar's collapse arrow was dark grey on dark grey */
-        [data-testid^="stBaseButton-"]:not([data-testid="stBaseButton-primary"]) [data-testid="stIconMaterial"] { color: #E8E8E8 !important; }
-        /* the assistant's avatar icon is white on an orange fill */
-        [data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"] { color: #1D2230 !important; }
-        /* the success alert's check icon: green on dark green is 3.4 : 1 */
-        [data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) [data-testid="stAlertDynamicIcon"] { color: #6FD39A !important; }
-        /* links in text: the light theme's dark blue is 2.5 : 1 on the dark page */
-        [data-testid="stMarkdownContainer"] a, [data-testid="stCaptionContainer"] a { color: #8AB4F8 !important; }
-        /* A button's hover-help tooltip (st.button(..., help="...")) also
-           renders in a portal with its own light-theme background and a
-           low-opacity gray hint text -- both unreadable against a dark
-           page without an explicit override. */
-        [data-testid="stTooltipContent"] {
-            background-color: #2F3542 !important;
-            color: #F2F2F2 !important;
-            border: 1px solid rgba(232, 232, 232, 0.25) !important;
-        }
-        /* the hint text itself can sit in a child element with its own
-           (dimmer) color/opacity, so color the descendants too */
-        [data-testid="stTooltipContent"] * {
-            color: #F2F2F2 !important;
-            opacity: 1 !important;
-        }
-        /* The open dropdown list for a selectbox/multiselect renders in a
-           portal (appended near the end of <body>, outside the sidebar/
-           main containers above), so it needs its own rule -- it is NOT
-           a descendant of anything already covered here. Same reasoning
-           for a multiselect's selected-item "tag" chips. */
-        [data-baseweb="popover"] [data-baseweb="menu"] {
-            background-color: #262B36 !important;
-        }
-        [data-baseweb="popover"] [data-baseweb="menu"] li {
-            color: #E8E8E8 !important;
-        }
-        [data-baseweb="tag"] {
-            background-color: #33394a !important;
-            color: #E8E8E8 !important;
-        }
-        [data-baseweb="tag"] span, [data-baseweb="tag"] svg {
-            color: #E8E8E8 !important;
-            fill: #E8E8E8 !important;
-        }
-        .mrs-hero-sub { color: rgba(232, 232, 232, 0.65) !important; }
-        [data-testid="stExpander"] { border-color: rgba(232, 232, 232, 0.15) !important; }
-        </style>
-    """

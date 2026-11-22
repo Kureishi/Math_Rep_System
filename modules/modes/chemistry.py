@@ -8,4 +8,5 @@ MODE = ModeSpec(
     module="ui.chemistry", function="render_chemistry_tab",
     needs_client=False,
     order=175,
+    group="Science",
 )

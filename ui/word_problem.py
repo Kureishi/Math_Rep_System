@@ -125,6 +125,8 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                 st.session_state["_after_solve"] = {"label": "Solved" if not result.warnings else "Solved (with warnings)", "lines": solve_log}
             except Exception as exc:  # noqa: BLE001
                 logger.exception("could not save the solved problem to history")
+                st.session_state["last_saved_history_id"] = None
+                st.session_state[view_state.CURRENT_ID_KEY] = None      # so the status line does not name the PREVIOUS problem's record
                 st.session_state["_pipeline_warnings"].append(
                     f"The result could not be saved to history ({type(exc).__name__}: {str(exc)[:140]}). It is shown below, but it will not be there after you leave this page.")
 
@@ -153,6 +155,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
     model = st.session_state["model"]
     report = st.session_state["report"]
     if model:
+        _render_status_line()
         for w in st.session_state.get("_pipeline_warnings") or []:
             st.warning(w, icon="⚠️")
         try:
@@ -162,3 +165,18 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
             show_failure("The results view", exc, "The solved equations are kept; install the package and rerun the app.")
         else:
             render_results(client, ws, model, report, problem_text)
+
+
+def _render_status_line() -> None:
+    """A small line that stays while a problem is on screen. The "Solved" status box above it is a one-off (it disappears on the next interaction, which is how
+    Streamlit's rerun model works), so this is what is left to say that the result is safe: where it was saved, and under which number."""
+    history_id = st.session_state.get(view_state.CURRENT_ID_KEY)
+    solved_here = history_id is not None and history_id == st.session_state.get("last_saved_history_id")
+    warned = bool(st.session_state.get("_pipeline_warnings")) and solved_here
+    try:
+        still_saved = history_id is None or history.exists(history_id)
+    except Exception:  # noqa: BLE001 -- a locked database must not hide the result
+        still_saved = True
+    text = history.status_line(history_id, solved_here, warned, still_saved)
+    icon = "⚠️" if warned or history_id is None or not still_saved else ("✅" if solved_here else "🕘")
+    st.caption(f"{icon} {text}")

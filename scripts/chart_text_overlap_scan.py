@@ -42,9 +42,9 @@ args = ap.parse_args()
 found = []
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": 1500, "height": 1400})
-    for mode, dark in (("light", "0"), ("dark", "1")):
-        page.goto(f"http://localhost:{args.port}/?dark={dark}")
+    for mode in ("light", "dark"):                    # the browser's colour scheme: Streamlit's "Use system setting" theme follows it
+        page = browser.new_page(viewport={"width": 1500, "height": 1400}, color_scheme=mode)
+        page.goto(f"http://localhost:{args.port}/")
         page.wait_for_selector(".js-plotly-plot", timeout=60000)
         page.wait_for_timeout(3500)
         for hit in page.evaluate(JS):

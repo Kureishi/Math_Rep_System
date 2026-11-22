@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.discover", function="render_discover_tab",
     needs_client=False,
     order=160,
+    group="Solve",
 )

@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.statmech", function="render_statmech_tab",
     needs_client=False,
     order=130,
+    group="Science",
 )

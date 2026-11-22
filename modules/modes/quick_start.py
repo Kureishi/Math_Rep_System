@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.quick_start", function="render_quick_start_tab",
     needs_client=False,
     order=230,
+    group="Tools",
 )

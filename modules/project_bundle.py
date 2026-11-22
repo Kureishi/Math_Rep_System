@@ -57,7 +57,7 @@ def export_bundle(history_ids: list | None = None, chain_ids: list | None = None
     itself is session-scoped, not something this module can query on
     its own the way history/chains can."""
     if history_ids is None:
-        history_ids = [r["id"] for r in history.list_recent(limit=history.MAX_HISTORY_RECORDS)]
+        history_ids = history.all_ids()
 
     history_records = []
     for hid in history_ids:
@@ -70,6 +70,7 @@ def export_bundle(history_ids: list | None = None, chain_ids: list | None = None
         extras = {k: v for k, v in extras.items() if v}
         history_records.append({
             "title": history.get_title(hid),
+            "pinned": history.is_pinned(hid),
             "problem_text": problem_text,
             "raw_json": model.raw_json,
             "verification": {
@@ -159,6 +160,8 @@ def import_bundle(bundle_json: str, workspace) -> ImportSummary:
             new_id = history.save(rec["problem_text"], model, report, steps_by_target, rec.get("scenarios", []))
             if rec.get("title"):
                 history.rename(new_id, rec["title"])
+            if rec.get("pinned") is True:
+                history.set_pinned(new_id, True)
             if rec.get("view_state"):
                 history.save_view_state(new_id, rec["view_state"])
             for extra_key, extra_value in (rec.get("extras") or {}).items():

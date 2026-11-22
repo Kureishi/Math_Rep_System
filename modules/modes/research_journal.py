@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.journal", function="render_research_journal_tab",
     needs_client=False,
     order=220,
+    group="Tools",
 )

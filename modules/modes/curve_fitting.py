@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.curve_fitting", function="render_curve_fitting_tab",
     needs_client=False,
     order=20,
+    group="Solve",
 )

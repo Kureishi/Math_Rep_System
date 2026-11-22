@@ -13,11 +13,10 @@ from modules.command_palette import search as palette_search
 from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
 from modules import history, chains
-from ui import view_state
-from ui.common import restore_from_query_param, sync_query_param
 from ui.routing import go
-from ui.theme import dark_mode_css
-from modules.command_palette import MODE_LABELS
+from ui.history_panel import render_history_panel
+from ui.mode_nav import render_mode_nav
+from ui.theme import page_helper_iframe
 from dataclasses import dataclass
 from modules.workspace import Workspace
 
@@ -96,32 +95,10 @@ def _render_ask_choices(client: LMStudioClient) -> None:
             st.warning(f"The language model could not be reached ({type(exc).__name__}).")
 
 
-def _history_rename_form(entry: dict) -> None:
-    """The inline name editor for one history entry: Enter or Save stores the name (an empty name goes back to the domain), Cancel leaves it as it was."""
-    with st.form(key=f"renameform_{entry['id']}", border=False):
-        new_name = st.text_input("Name", value=entry.get("title") or "", placeholder=entry.get("domain") or "Name this problem", max_chars=history.MAX_TITLE_CHARS,
-                                 label_visibility="collapsed", key=f"renameinput_{entry['id']}")
-        f1, f2 = st.columns(2)
-        save = f1.form_submit_button("Save", type="primary")
-        cancel = f2.form_submit_button("Cancel")
-    if save:
-        try:
-            history.rename(entry["id"], new_name)
-        except Exception as exc:  # noqa: BLE001 -- a locked database must not crash the sidebar
-            st.warning(f"Could not rename it ({type(exc).__name__}: {str(exc)[:100]}).")
-            return
-        st.session_state.pop("_renaming_history", None)
-        st.rerun()
-    if cancel:
-        st.session_state.pop("_renaming_history", None)
-        st.rerun()
-
-
 def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
-    """The whole left sidebar: command-palette jump box, dark-mode toggle, mode navigation,
-    unit-system preference, LM Studio connection status, advanced settings, settings profiles,
-    problem history, workspace variables, active chain, recent error patterns, project bundle
-    export/import."""
+    """The whole left sidebar: "Ask anything" and the command-palette jump box, the grouped mode navigation, the problem history
+    (right under it, so it is not pushed down the page), the unit-system preference, recent error patterns, the active chain,
+    LM Studio connection status, advanced settings and settings profiles, workspace variables, and project bundle export/import."""
     with st.sidebar:
         # ---- command palette: fuzzy-searchable quick jump across modes.
         # Placed BEFORE the mode radio deliberately: a "jump" click can then
@@ -151,59 +128,17 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                         st.rerun()
             else:
                 st.caption("No matching mode.")
-        # best-effort Ctrl/Cmd+K focus shortcut: reaches out of the
-        # component's sandboxed iframe into the parent page (a standard, if
-        # slightly fragile, trick for this in Streamlit -- there's no
-        # supported API for a custom global keyboard shortcut) to focus the
-        # search box above. If a future Streamlit DOM structure change
-        # breaks the selector, this silently just doesn't focus anything --
-        # it can't throw a visible error into the app either way.
-        st.iframe(src="""
-            <script>
-            (function() {
-                const doc = window.parent.document;
-                doc.addEventListener('keydown', function(e) {
-                    const isK = e.key === 'k' || e.key === 'K';
-                    if ((e.metaKey || e.ctrlKey) && isK) {
-                        e.preventDefault();
-                        const inputs = doc.querySelectorAll('input[type="text"]');
-                        for (const el of inputs) {
-                            if (el.placeholder && el.placeholder.includes('heat equation')) {
-                                el.focus();
-                                break;
-                            }
-                        }
-                    }
-                });
-            })();
-            </script>
-        """, height=1)
+        # best-effort Ctrl/Cmd+K focus shortcut, and the small script that tells the stylesheet whether the page is in Streamlit's light
+        # or dark theme (see ui/theme.py). One 1 px frame holds both.
+        page_helper_iframe()
 
-        # ---- best-effort in-app dark mode: Streamlit's OWN theme setting
-        # (hamburger menu -> Settings -> Choose app theme) already supports
-        # light/dark/system, but it's not very discoverable and can't be
-        # toggled from Python code -- this is a separate, explicit,
-        # visible switch that injects CSS overrides at runtime instead.
-        # Targets stable data-testid selectors (Streamlit's own recommended
-        # hook for custom CSS across versions) rather than CSS custom
-        # properties, since there's no way to verify from here which
-        # variable names a given Streamlit version actually exposes for
-        # override -- data-testid attributes are the more reliably stable
-        # target. Like the Ctrl+K shortcut above, this can't raise a
-        # visible error even if a future Streamlit DOM change breaks a
-        # selector -- it would just silently stop visually applying.
-        st.session_state.setdefault("dark_mode", False)
-        st.checkbox("🌙 Dark mode", key="dark_mode")
-        if st.session_state["dark_mode"]:
-            st.markdown(dark_mode_css(), unsafe_allow_html=True)
-
-        # ---- navigation: which tool is active. Kept near the very top of
-        # the sidebar (rather than a horizontal radio competing with the main
-        # input box, as it used to be) so switching tools doesn't require
-        # scrolling past whatever's currently in the main content area.
-        restore_from_query_param("app_mode")
-        mode = st.radio("Mode", MODE_LABELS, key="app_mode")
-        sync_query_param("app_mode")
+        # ---- navigation: which tool is active, grouped under Solve / Science / Simulation labs / Tools in collapsible sections (ui/mode_nav.py).
+        # Kept near the very top of the sidebar so switching tools doesn't require scrolling past whatever's currently in the main content
+        # area, and followed at once by the History list: a flat list of every mode used to push History far down the sidebar.
+        mode = render_mode_nav()
+        st.divider()
+        render_history_panel()
+        st.divider()
 
         # ---- global unit-system preference: applied wherever a numeric
         # answer's unit is already known (currently the word-problem-solver
@@ -434,7 +369,7 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
             st.caption("No stored variables yet. Solve a problem and extract a value to reuse it here.")
 
         # ---- session/project bundling: everything above (workspace) plus
-        # everything below (history) plus every chain gets bundled into ONE
+        # everything in the History list plus every chain gets bundled into ONE
         # portable JSON file -- something that can be archived alongside a
         # paper, emailed to a collaborator, or reloaded on a different
         # machine to pick up exactly where a session left off. None of that
@@ -482,44 +417,4 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                 from ui.results.proof_card import render_manifest_replay
                 render_manifest_replay(report_file.name, report_file.getvalue())
 
-        st.divider()
-        st.header("History")
-        recent = history.list_recent()
-        if recent:
-            renaming = st.session_state.get("_renaming_history")
-            for hist_entry in recent:
-                badge = "✅" if hist_entry["passed"] else "⚠️"
-                label = hist_entry["problem_text"][:45] + ("..." if len(hist_entry["problem_text"]) > 45 else "")
-                c1, c2, c3, c4 = st.columns([5, 1, 1, 1])
-                with c1:
-                    st.caption(f"{badge} **{history.display_title(hist_entry)}** -- {hist_entry['timestamp'][:16].replace('T', ' ')}")
-                    st.caption(label)
-                with c4:
-                    st.button("", icon=":material/edit:", key=f"renamehist_{hist_entry['id']}", type="tertiary", help="Rename this entry",
-                              on_click=st.session_state.__setitem__, args=("_renaming_history", hist_entry["id"]))
-                with c2:
-                    if st.button("", icon=":material/restart_alt:", key=f"load_{hist_entry['id']}",
-                                  type="tertiary", help="Load this problem"):
-                        loaded = history.load(hist_entry["id"])
-                        if loaded is not None:
-                            p_text, l_model, l_report, l_steps, l_scenarios = loaded
-                            st.session_state.update(
-                                problem_text=p_text, model=l_model, report=l_report,
-                                steps=l_steps, scenarios=l_scenarios, pdf_bytes=None, plot_snapshots={},
-                            )
-                            # reopen the problem the way it was being explored (Monte Carlo inputs, sweep
-                            # setup, plot axes, ...) -- see ui/view_state.py
-                            n_restored = view_state.restore(hist_entry["id"])
-                            if n_restored:
-                                st.toast(f"Restored {n_restored} saved view setting(s)", icon="🗂️")
-                            st.rerun()
-                with c3:
-                    if st.button("", icon=":material/delete:", key=f"delhist_{hist_entry['id']}",
-                                  type="tertiary", help="Delete from history"):
-                        history.delete(hist_entry["id"])
-                        st.rerun()
-                if renaming == hist_entry["id"]:
-                    _history_rename_form(hist_entry)          # full width, under the entry: in the entry's narrow column "Cancel" wrapped onto two lines
-        else:
-            st.caption("No solved problems yet -- they'll be saved here automatically.")
     return SidebarState(mode=mode, ok=ok)

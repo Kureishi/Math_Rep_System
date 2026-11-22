@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.extraction_diff", function="render_extraction_diff_tab",
     needs_client=True,
     order=60,
+    group="Tools",
 )

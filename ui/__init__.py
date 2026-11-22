@@ -6,7 +6,7 @@ this package:
     ui/__init__.py            PAGES: mode label -> page function, derived from modules/modes/. Pages are
                               imported LAZILY, on first use -- see the note below
     ui/common.py              helpers shared by several pages (upload guard, snapshot buttons, ...)
-    ui/sidebar.py             the sidebar
+    ui/sidebar.py             the sidebar (ui/mode_nav.py: the grouped mode list; ui/history_panel.py: the History list)
     ui/word_problem.py        the default page: input, Solve, pipeline, then the results view
     ui/results/               the results view for a solved problem, one function per section
     ui/<mode>.py              one module per standalone mode

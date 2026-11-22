@@ -1,6 +1,6 @@
 """Measure the text contrast of every visible element of the gallery page, in several UI states, and report anything below WCAG AA (4.5 : 1).
 
-Why a browser: the dark theme is a stylesheet laid over Streamlit's light one, and what a rule does depends on the state of the element it lands on (a popover's
+Why a browser: the dark theme is Streamlit's own ([theme.dark] in config.toml) plus a few app rules, and what a rule does depends on the state of the element it lands on (a popover's
 trigger is white at rest but dark-tinted when hovered, focused or open). Reading the CSS cannot tell you that; computing each element's colours in a real
 browser can. States covered: rest, each tab, an open selectbox / multiselect list, each popover open and after it closes (the trigger keeps focus), hovered
 buttons / segments / expander headers, and keyboard focus on an open expander header. CSS `filter: brightness()` on an element or its ancestors is applied to the
@@ -54,14 +54,14 @@ ap.add_argument("--light", action="store_true", help="scan light mode instead of
 ap.add_argument("--json", help="write every measurement to this file")
 ap.add_argument("--dialog", action="store_true", help="scan the Share-style dialog instead of the page: it is a modal, its own surface, so it is measured on its own")
 args = ap.parse_args()
-dark = "0" if args.light else "1"
+scheme = "light" if args.light else "dark"      # the browser's colour scheme: Streamlit's "Use system setting" theme follows it
 BASE = f"http://localhost:{args.port}/"
 PAGE = {"r": 255, "g": 255, "b": 255, "a": 1} if args.light else {"r": 14, "g": 17, "b": 23, "a": 1}      # the page colour behind everything
 results=[]
 with sync_playwright() as p:
-    b=p.chromium.launch(); pg=b.new_page(viewport={"width":1500,"height":1000})
+    b=p.chromium.launch(); pg=b.new_page(viewport={"width":1500,"height":1000}, color_scheme=scheme)
     if args.dialog:
-        pg.goto(f"{BASE}?dark={dark}&dialog=1"); pg.wait_for_selector('[data-testid="stDialog"]',timeout=40000); pg.wait_for_timeout(2500)
+        pg.goto(f"{BASE}?dialog=1"); pg.wait_for_selector('[data-testid="stDialog"]',timeout=40000); pg.wait_for_timeout(2500)
         scan(pg,"dialog open",results)
         dlg = pg.locator('[data-testid="stDialog"]')
         dlg.locator('[data-testid="stExpander"] details > summary').first.hover(); pg.wait_for_timeout(300); scan(pg,"dialog: hover closed expander header",results)
@@ -81,7 +81,7 @@ with sync_playwright() as p:
         for (t,pth),rs in sorted(bad.items(), key=lambda kv: kv[1][0]['ratio']):
             r=rs[0]; print(f"{r['ratio']:>5}  fg {r['fg']:<22} on {r['bg']:<18} '{t}'  [{', '.join(sorted({x['state'] for x in rs}))}]  {pth}")
         sys.exit(1 if bad else 0)
-    pg.goto(f"{BASE}?dark={dark}"); pg.wait_for_selector('[data-testid="stExpander"]',timeout=40000); pg.wait_for_timeout(2500)
+    pg.goto(f"{BASE}"); pg.wait_for_selector('[data-testid="stExpander"]',timeout=40000); pg.wait_for_timeout(2500)
     scan(pg,"initial",results)
     for tab in ("Explore","Practice","Verify"):
         pg.get_by_role("tab",name=tab).click(); pg.wait_for_timeout(600); scan(pg,"tab "+tab,results)

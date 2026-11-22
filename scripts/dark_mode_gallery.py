@@ -1,4 +1,5 @@
-"""A page that shows one of nearly every Streamlit component, in light or dark mode (?dark=1), under the app's real stylesheet.
+"""A page that shows one of nearly every Streamlit component, under the app's real stylesheet and Streamlit's own theme: light or dark follows the browser's
+colour scheme (the scripts below set it with Playwright's color_scheme), because .streamlit/config.toml defines both [theme.light] and [theme.dark].
 
     streamlit run scripts/dark_mode_gallery.py --server.port 8599
     python scripts/dark_mode_contrast_scan.py --port 8599          # needs: pip install playwright && playwright install chromium
@@ -11,15 +12,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 import streamlit as st
-from ui.theme import inject_base_styles, dark_mode_css, badge_row
+from ui.theme import badge_row, inject_base_styles, page_helper_iframe
 
 st.set_page_config(layout="wide")
-st.session_state["dark_mode"] = st.query_params.get("dark") == "1"      # what ui.a11y.is_dark() reads, so charts follow the page
 inject_base_styles()
-dark = st.query_params.get("dark") == "1"
-if dark:
-    st.markdown(dark_mode_css(), unsafe_allow_html=True)
+dark = st.context.theme.type == "dark"           # what ui.a11y.is_dark() reads, so charts follow the page
 with st.sidebar:
+    page_helper_iframe()                          # sets data-mrs-theme, which switches the light-only contrast fixes off in dark
     with st.expander("LM Studio", expanded=True):
         st.success("Connected to LM Studio.")
         st.error("Could not reach LM Studio at http://localhost:1234/v1. Open LM Studio, load a model, and click Start Server.")

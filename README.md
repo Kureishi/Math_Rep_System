@@ -205,6 +205,12 @@ Markdown, PDF, Python, or a Jupyter notebook.
   the save, so the list is never a step behind), and each entry has a **✏️ rename** button: type a name (Enter or Save; up to 80 characters; an empty name goes back to the
   problem's domain). The name is what the sidebar, the Compare / Practice / Problem-set pickers and project bundles show; it is stored in a `title` column that an existing
   `data/history.db` gains automatically the first time the app starts (your saved problems are untouched).
+  The History list sits right under the mode list and is grouped by day (**Today**, **Yesterday**, weekday names, then dates). A **filter box** keeps the entries whose name, domain or problem text contain every
+  word typed. **★** stars an entry: it is listed first, under "⭐ Starred", is never removed when the history reaches its 100-entry cap (starred entries do not count toward it) and travels in project bundles.
+  **Delete** is immediate, but an **Undo** bar appears at the top of History and puts the entry back under its old number. While a problem is on screen a line such as
+  "✅ Solved · saved to history · #12" stays visible (the "Solved" box itself disappears on the next click).
+- **The mode list is grouped** under **Solve**, **Science**, **Simulation labs** and **Tools**, each a collapsible section (the one holding the current mode opens by itself). A mode's section is its
+  `group=` in `modules/modes/<file>.py` (default "Tools"; a plugin may name a new section).
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**
   (`api_server.py`) covers `/solve`, `/fit`, `/equivalence` and
   `/dimensional-analysis`. Both talk to LM Studio the same way the app does. The REST API needs
@@ -585,14 +591,17 @@ spread it over every core, and `pytest -m "not slow"` to skip the four engine te
   approach, `signal.alarm`, does nothing there. CI also byte-compiles the project
   and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`. One cell (ubuntu, 3.12,
   seed 0) runs the full suite with coverage; the other seven skip the `slow` tests. All use `-n auto`.
-- **Both colour themes stay readable** (`tests/test_dark_mode_css.py`, `scripts/dark_mode_contrast_scan.py`). Streamlit bakes its light theme into some components, so a
-  few surfaces stay light in dark mode (an open expander's header, toasts, a popover's panel and trigger, dropdown lists, unselected segments) and get dark text instead; and in
-  both modes a handful of Streamlit's own colours are under WCAG AA's 4.5 : 1 (chart text in dark mode: Streamlit colours it with the light theme's ink, so the chart theme now sets the font colour explicitly; code and JSON syntax colours, green success text and metric deltas, red error text, 60 %-opacity hint
-  text, the chat avatar icon), so they are darkened in the always-on stylesheet. Each dark-mode rule applies only in the state where the surface really is light (a popover's trigger
-  turns dark-tinted on hover, focus and while open). The unit tests check the stylesheets and the colour arithmetic; the real measurement is a browser scan:
-  `streamlit run scripts/dark_mode_gallery.py --server.port 8599`, then `python scripts/dark_mode_contrast_scan.py --port 8599` (add `--light` for light mode, `--dialog` for the Share-style modal, which is its own surface; needs
+- **Both colour themes stay readable** (`tests/test_dark_mode_css.py`, `scripts/dark_mode_contrast_scan.py`). Light and dark are **Streamlit's own themes**: `.streamlit/config.toml`
+  defines `[theme.light]` and `[theme.dark]`, so Streamlit paints every surface (inputs, popovers, dialogs, open expanders) itself, in every state. Choose in the app menu (top right:
+  Settings → Choose app theme: Light, Dark, or Use system setting, the default). The earlier in-app "🌙 Dark mode" checkbox and its CSS override are gone: the override could only recolour
+  text on surfaces Streamlit had already painted light, which is why those surfaces stayed white. `client.toolbarMode = "viewer"` hides the developer items (Deploy, Rerun, Clear cache) but keeps that menu;
+  `"minimal"` would hide the theme switch too. A handful of Streamlit's light-theme colours are under WCAG AA's 4.5 : 1 (code and JSON syntax colours, green success text and metric deltas, red error text,
+  60 %-opacity hint text, the chat avatar icon); their fixes apply to the light theme only (`ui/theme.py`: `LIGHT_ONLY_RULES`, scoped to `:root:not([data-mrs-theme="dark"])`, an attribute a small script in
+  the sidebar's 1 px frame sets by reading the page's background colour). The unit tests check the config, the scoping and the colour arithmetic; the real measurement is a browser scan:
+  `streamlit run scripts/dark_mode_gallery.py --server.port 8599`, then `python scripts/dark_mode_contrast_scan.py --port 8599` (add `--light` for light mode, `--dialog` for the Share-style modal; the scripts set
+  the browser's colour scheme, which the default "Use system setting" theme follows; needs
   `pip install playwright && playwright install chromium`, in `requirements-dev.txt`). It computes the contrast of every visible text element (chart text, which is SVG, by its `fill`) in about twenty states (tabs, open
-  dropdowns and popovers, hover, focus) and exits 1 if any is below 4.5 : 1 (disabled controls are exempt, as WCAG allows). Run it in both modes after touching `ui/theme.py`;
+  dropdowns and popovers, hover, focus) and exits 1 if any is below 4.5 : 1 (disabled controls are exempt, as WCAG allows). Run it in both modes after touching `ui/theme.py` or the theme sections;
   add new component types to the gallery page. `python scripts/chart_text_overlap_scan.py --port 8599` does the same for chart layout: it measures the rendered tick labels, axis titles and subplot titles in both themes and fails if any overlap (unit tests can check a figure's spacing numbers but not what the browser draws). Restart the gallery before scanning: a Streamlit server left running from an earlier edit silently serves the old stylesheet.
 - **Requirements stay in step with the code** (`tests/test_requirements_in_sync.py`): the suite fails if
   the code imports a package no requirements file declares, if `requirements.txt` lists one nothing imports (unless it is allow-listed with the reason), or if the

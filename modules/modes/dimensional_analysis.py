@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.dimensional", function="render_dimensional_analysis_tab",
     needs_client=False,
     order=90,
+    group="Solve",
 )

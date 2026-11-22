@@ -11,7 +11,7 @@ dicts so reloading a past problem never needs another LLM call.
 import json
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from modules.db_util import ClosingConnection
@@ -91,6 +91,11 @@ def _migration_004_add_title(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "problems", "title", "TEXT")
 
 
+def _migration_005_add_pinned(conn: sqlite3.Connection) -> None:
+    """1 = the person starred the entry: it is listed first and is never pruned (0 / NULL = an ordinary entry)."""
+    _add_column_if_missing(conn, "problems", "pinned", "INTEGER DEFAULT 0")
+
+
 # Ordered, append-only: migrations[i] takes the schema from version i to
 # i+1. To change the schema going forward, ADD a new migration function
 # to the end of this list -- never edit an already-shipped one (a
@@ -98,7 +103,7 @@ def _migration_004_add_title(conn: sqlite3.Connection) -> None:
 # behavior, since apply_migrations only runs what schema_version says
 # hasn't happened yet).
 _MIGRATIONS = [_migration_001_initial_schema, _migration_002_add_equation_shapes,
-               _migration_003_add_concept_tags, _migration_004_add_title]
+               _migration_003_add_concept_tags, _migration_004_add_title, _migration_005_add_pinned]
 
 MAX_TITLE_CHARS = 80
 
@@ -137,12 +142,18 @@ def _prune_old_records(conn: sqlite3.Connection):
     """Keeps only the MAX_HISTORY_RECORDS most recent rows (by id, which
     is monotonically increasing) -- called after every save() so the
     table never grows past the cap, rather than needing a separate
-    maintenance step someone has to remember to run."""
-    conn.execute(
-        "DELETE FROM problems WHERE id NOT IN "
-        "(SELECT id FROM problems ORDER BY id DESC LIMIT ?)",
-        (MAX_HISTORY_RECORDS,),
-    )
+    maintenance step someone has to remember to run.
+
+    Starred (pinned) entries are exempt: they are never pruned and do not count toward the cap, so a favourite is still there
+    after a hundred newer problems."""
+    try:
+        conn.execute(
+            "DELETE FROM problems WHERE COALESCE(pinned, 0) = 0 AND id NOT IN "
+            "(SELECT id FROM problems WHERE COALESCE(pinned, 0) = 0 ORDER BY id DESC LIMIT ?)",
+            (MAX_HISTORY_RECORDS,),
+        )
+    except sqlite3.OperationalError:       # a connection that has not run the pinned-column migration (an older schema): nothing can be starred yet
+        conn.execute("DELETE FROM problems WHERE id NOT IN (SELECT id FROM problems ORDER BY id DESC LIMIT ?)", (MAX_HISTORY_RECORDS,))
 
 
 def save(problem_text: str, model: ProblemModel, report: VerificationReport,
@@ -182,13 +193,30 @@ def save(problem_text: str, model: ProblemModel, report: VerificationReport,
 
 
 def list_recent(limit: int = 25) -> list[dict]:
+    """The newest entries first, WITHOUT their payloads (id, timestamp, problem_text, domain, passed, title, pinned). Starred entries
+    are not moved to the front here (see `sections`, which does that for display)."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, timestamp, problem_text, domain, passed, title FROM problems "
+            "SELECT id, timestamp, problem_text, domain, passed, title, COALESCE(pinned, 0) FROM problems "
             "ORDER BY id DESC LIMIT ?", (limit,),
         ).fetchall()
     return [
-        {"id": r[0], "timestamp": r[1], "problem_text": r[2], "domain": r[3], "passed": bool(r[4]), "title": r[5]}
+        {"id": r[0], "timestamp": r[1], "problem_text": r[2], "domain": r[3], "passed": bool(r[4]), "title": r[5], "pinned": bool(r[6])}
+        for r in rows
+    ]
+
+
+def list_with_pinned(limit: int = 25) -> list[dict]:
+    """Like list_recent, but every starred entry is included however old it is (they are exempt from pruning, so there can be more
+    than `limit` rows in all)."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, timestamp, problem_text, domain, passed, title, COALESCE(pinned, 0) FROM problems "
+            "WHERE COALESCE(pinned, 0) = 1 OR id IN (SELECT id FROM problems ORDER BY id DESC LIMIT ?) "
+            "ORDER BY id DESC", (limit,),
+        ).fetchall()
+    return [
+        {"id": r[0], "timestamp": r[1], "problem_text": r[2], "domain": r[3], "passed": bool(r[4]), "title": r[5], "pinned": bool(r[6])}
         for r in rows
     ]
 
@@ -304,6 +332,136 @@ def load_view_state(entry_id: int) -> dict:
 def delete(entry_id: int):
     with _connect() as conn:
         conn.execute("DELETE FROM problems WHERE id = ?", (entry_id,))
+
+
+# ------------------------------------------------------------------------------------------ undoing a delete
+
+def snapshot(entry_id: int) -> dict | None:
+    """Everything stored for one entry (every column, payload included) as a plain dict, so a delete can be undone with `restore`.
+    None if there is no such entry."""
+    with _connect() as conn:
+        cur = conn.execute("SELECT * FROM problems WHERE id = ?", (entry_id,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return dict(zip([c[0] for c in cur.description], row))
+
+
+def delete_with_undo(entry_id: int) -> dict | None:
+    """Delete an entry and hand back what `restore` needs to bring it back (None if there was nothing to delete)."""
+    saved = snapshot(entry_id)
+    if saved is not None:
+        delete(entry_id)
+    return saved
+
+
+def restore(saved: dict) -> bool:
+    """Put a deleted entry back exactly as it was, under its old id (so anything that refers to the id still does). False if that id
+    is taken again or `saved` is not a snapshot. It is not pruned until the next save, which prunes as usual."""
+    allowed = {"id", "timestamp", "problem_text", "domain", "passed", "payload", "equation_shapes", "concept_tags", "title", "pinned"}
+    if not isinstance(saved, dict) or not {"id", "timestamp", "problem_text", "payload"} <= saved.keys():
+        return False
+    cols = [c for c in saved if c in allowed]
+    with _connect() as conn:
+        if conn.execute("SELECT 1 FROM problems WHERE id = ?", (saved["id"],)).fetchone():
+            return False
+        conn.execute(f"INSERT INTO problems ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})", [saved[c] for c in cols])
+    return True
+
+
+# ------------------------------------------------------------------------------------------ favourites, filtering, grouping by day
+
+def set_pinned(entry_id: int, pinned: bool) -> bool:
+    """Star or un-star an entry. False if there is no such entry."""
+    with _connect() as conn:
+        cur = conn.execute("UPDATE problems SET pinned = ? WHERE id = ?", (1 if pinned else 0, entry_id))
+        return cur.rowcount > 0
+
+
+def exists(entry_id: int) -> bool:
+    with _connect() as conn:
+        return conn.execute("SELECT 1 FROM problems WHERE id = ?", (entry_id,)).fetchone() is not None
+
+
+def is_pinned(entry_id: int) -> bool:
+    with _connect() as conn:
+        row = conn.execute("SELECT COALESCE(pinned, 0) FROM problems WHERE id = ?", (entry_id,)).fetchone()
+    return bool(row and row[0])
+
+
+def all_ids() -> list[int]:
+    """The id of every entry, newest first (a project bundle takes all of them, including starred ones older than the newest hundred)."""
+    with _connect() as conn:
+        return [r[0] for r in conn.execute("SELECT id FROM problems ORDER BY id DESC").fetchall()]
+
+
+def matches(entry: dict, query: str) -> bool:
+    """Does the entry match what was typed in the filter box? Every word must appear (in any order, ignoring case) in the entry's
+    name, its domain or its problem text. An empty query matches everything."""
+    words = (query or "").lower().split()
+    if not words:
+        return True
+    haystack = " ".join(str(entry.get(k) or "") for k in ("title", "domain", "problem_text")).lower()
+    return all(w in haystack for w in words)
+
+
+def filter_entries(entries: list[dict], query: str) -> list[dict]:
+    return [e for e in entries if matches(e, query)]
+
+
+def status_line(history_id: int | None, solved_here: bool, warned: bool, still_saved: bool) -> str:
+    """The small persistent line shown with a problem on screen, e.g. 'Solved · saved to history · #12'. `solved_here`: it was solved in this session
+    (else it was opened from history); `warned`: the solve finished with warnings; `still_saved`: the record is still in the database (it may have been
+    deleted since, which the Undo bar can reverse)."""
+    if history_id is None:
+        return ("Solved with warnings" if warned else "Solved") + " · not saved to history"
+    head = ("Solved with warnings" if warned else "Solved") if solved_here else "Opened from history"
+    if not still_saved:
+        return f"{head} · deleted from history · #{history_id}"
+    return f"{head} · saved to history · #{history_id}" if solved_here else f"{head} · #{history_id}"
+
+
+PINNED_LABEL = "⭐ Starred"
+
+
+def _entry_date(entry: dict) -> date | None:
+    try:
+        return datetime.fromisoformat(entry["timestamp"]).date()
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def day_label(day: date | None, today: date | None = None) -> str:
+    """'Today', 'Yesterday', the weekday for the rest of the last week ('Monday'), else the date ('12 Nov 2026'). An unreadable date is 'Earlier'."""
+    if day is None:
+        return "Earlier"
+    today = today or date.today()
+    days_ago = (today - day).days
+    if days_ago == 0:
+        return "Today"
+    if days_ago == 1:
+        return "Yesterday"
+    if 1 < days_ago < 7:
+        return day.strftime("%A")
+    return f"{day.day} {day.strftime('%b %Y')}"
+
+
+def sections(entries: list[dict], today: date | None = None) -> list[tuple[str, list[dict]]]:
+    """[(heading, entries)] for the History list: starred entries first under one heading, then the rest grouped by day, newest first.
+    A starred entry appears once, under the star. Empty groups are left out. `entries` is expected newest first (as list_recent gives it)."""
+    out: list[tuple[str, list[dict]]] = []
+    starred = [e for e in entries if e.get("pinned")]
+    if starred:
+        out.append((PINNED_LABEL, starred))
+    for entry in entries:
+        if entry.get("pinned"):
+            continue
+        label = day_label(_entry_date(entry), today)
+        if out and out[-1][0] == label:
+            out[-1][1].append(entry)
+        else:
+            out.append((label, [entry]))
+    return out
 
 
 def find_similar(model: ProblemModel, exclude_id: int | None = None,

@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.recall", function="render_recall_tab",
     needs_client=True,
     order=190,
+    group="Tools",
 )

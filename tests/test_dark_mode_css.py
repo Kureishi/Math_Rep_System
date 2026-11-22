@@ -1,205 +1,106 @@
-"""Dark mode: text must stay readable on every surface Streamlit leaves light, in every state that surface can be in.
+"""Light and dark themes are Streamlit's own ([theme.light] / [theme.dark] in .streamlit/config.toml), not a CSS override.
 
-The stylesheet is checked here as text and by arithmetic. What it DOES to a real page is measured in a browser by scripts/dark_mode_contrast_scan.py (a dev tool: it
-needs Playwright and a Chromium, which CI does not have): it reported 25 low-contrast spots (down to 1.1 : 1) before these rules and none after.
+What is checked here is text and arithmetic: the config defines both themes with readable colours, the contrast fixes that were measured on the LIGHT theme are scoped
+so they cannot reach the dark one, and the helper script that tells the stylesheet which theme is showing is wired in. What the pages LOOK like is measured in a browser by
+scripts/dark_mode_contrast_scan.py (a dev tool: it needs Playwright and a Chromium, which CI does not have).
 """
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from ui.theme import dark_mode_css, inject_base_styles
+from ui import theme
 
-CSS = dark_mode_css()
 ROOT = Path(__file__).resolve().parent.parent
+CONFIG = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
 
 
-def _base_css() -> str:
-    """The always-on stylesheet (what inject_base_styles hands to st.markdown), captured."""
+def luminance(hex_colour: str) -> float:
+    r, g, b = (int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    f = lambda v: v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4          # noqa: E731
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+
+def contrast(a: str, b: str) -> float:
+    la, lb = sorted((luminance(a), luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+# ------------------------------------------------------------------------------------------ the themes are Streamlit's own
+
+def test_both_themes_are_defined_so_streamlit_offers_light_dark_and_system():
+    assert {"light", "dark"} <= CONFIG["theme"].keys()
+    for name in ("light", "dark"):
+        assert {"primaryColor", "backgroundColor", "secondaryBackgroundColor", "textColor"} <= CONFIG["theme"][name].keys(), name
+
+
+def test_there_is_no_base_key_in_the_light_or_dark_section():
+    """Streamlit 1.62 rejects it there ('is not a valid config option'): base belongs to [theme] only."""
+    assert "base" not in CONFIG["theme"]["light"] and "base" not in CONFIG["theme"]["dark"]
+
+
+@pytest.mark.parametrize("name", ["light", "dark"])
+def test_text_is_readable_on_the_page_and_on_the_widget_surface(name):
+    t = CONFIG["theme"][name]
+    assert contrast(t["textColor"], t["backgroundColor"]) >= 7
+    assert contrast(t["textColor"], t["secondaryBackgroundColor"]) >= 7
+
+
+@pytest.mark.parametrize("name", ["light", "dark"])
+def test_a_primary_button_label_is_readable(name):
+    """Streamlit draws a primary button's label in white."""
+    assert contrast("#FFFFFF", CONFIG["theme"][name]["primaryColor"]) >= 4.5
+
+
+def test_links_are_readable_on_the_dark_page():
+    t = CONFIG["theme"]["dark"]
+    assert contrast(t["linkColor"], t["backgroundColor"]) >= 4.5
+
+
+def test_the_developer_toolbar_is_hidden_but_the_theme_switch_is_kept():
+    """'minimal' would hide the whole menu, Settings -> Choose app theme included."""
+    assert CONFIG["client"]["toolbarMode"] == "viewer"
+
+
+def test_the_apps_own_dark_mode_override_is_gone():
+    assert not hasattr(theme, "dark_mode_css")
+
+
+# ------------------------------------------------------------------------------------------ the light-only fixes stay out of the dark theme
+
+def _all_css() -> str:
     import streamlit as st
     seen: list[str] = []
     real = st.markdown
     st.markdown = lambda body, *a, **k: seen.append(body)                 # type: ignore[assignment]
     try:
-        inject_base_styles()
+        theme.inject_base_styles()
     finally:
         st.markdown = real                                                  # type: ignore[assignment]
     return seen[0]
 
 
-BASE = _base_css()
+def test_every_light_only_selector_is_scoped_to_not_dark():
+    css = _all_css()
+    light_block = css[css.index(theme.LIGHT_ONLY_RULES[0][0][0].split(" ")[0]) - 40:]
+    for selectors, _ in theme.LIGHT_ONLY_RULES:
+        for sel in selectors:
+            assert f'{theme._LIGHT_SCOPE} {sel}' in light_block, sel
+    # and no unscoped copy of those colours is left in the always-on rules
+    always_on = css[:css.index("<style>", 10)] if css.count("<style>") > 1 else css
+    for colour in ("#0B5D27", "#A61B1B", "#8B1A1A", "#4B5160", "brightness(0.62)"):
+        assert colour not in always_on, colour
 
 
-def rule_for(selector_fragment: str) -> str:
-    """The declaration block of the first rule whose selector list contains `selector_fragment`."""
-    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", CSS):
-        if selector_fragment in m.group(1):
-            return m.group(2)
-    raise AssertionError(f"no rule for {selector_fragment!r}")
+def test_the_always_on_rules_use_no_fixed_light_theme_colours():
+    css = _all_css()
+    always_on = css[:css.index("<style>", 10)]
+    assert "rgba(49, 51, 63" not in always_on                            # the light theme's ink as a fixed border / text colour
 
 
-def selectors_with(fragment: str) -> list[str]:
-    out = []
-    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", CSS):
-        out += [s.strip() for s in m.group(1).split(",") if fragment in s and "#2B3040" in m.group(2)]
-    return out
-
-
-def luminance(hex_or_rgb) -> float:
-    r, g, b = (int(hex_or_rgb[i:i + 2], 16) for i in (1, 3, 5)) if isinstance(hex_or_rgb, str) else hex_or_rgb
-    f = lambda v: (v / 255) / 12.92 if v / 255 <= 0.03928 else (((v / 255) + 0.055) / 1.055) ** 2.4          # noqa: E731
-    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
-
-
-def contrast(a, b) -> float:
-    la, lb = sorted((luminance(a), luminance(b)), reverse=True)
-    return (la + 0.05) / (lb + 0.05)
-
-
-# ------------------------------------------------------------------------------------------ state: dark text only where the surface is light
-
-def test_a_popover_trigger_has_dark_text_only_at_rest():
-    """It is near-white at rest but dark-tinted when hovered, focused (it keeps focus once its popover closes) or open: dark text there is unreadable."""
-    sels = selectors_with("stPopoverButton")
-    assert sels
-    for sel in sels:
-        for state in (":not(:hover)", ":not(:focus)", ":not(:focus-visible)", ":not(:active)", ':not([aria-expanded="true"])'):
-            assert state in sel, (state, sel)
-
-
-def test_an_open_expander_header_has_dark_text_but_not_while_hovered_or_keyboard_focused():
-    sels = selectors_with('details[open] > summary')
-    assert len(sels) >= 4
-    assert all(":not(:hover)" in s and ":not(:focus-visible)" in s for s in sels)
-
-
-def test_an_unselected_segment_has_dark_text_but_not_while_hovered():
-    sels = selectors_with("stButtonGroup")
-    assert sels and all('[aria-checked="false"]' in s and ":not(:hover)" in s for s in sels)
-
-
-@pytest.mark.parametrize("fragment", [
-    '[data-testid="stToast"]', '[data-testid="stPopoverBody"]', '[data-testid$="Dropdown"]', '[data-testid="stDateInputField"]',
-    '[data-testid="stFileUploaderDropzoneInstructions"]', '[data-testid^="stChatMessageAvatar"]', '[data-testid="stSidebarCollapseButton"]',
-])
-def test_every_light_surface_has_a_rule(fragment):
-    if fragment == '[data-testid="stSidebarCollapseButton"]':        # covered by the generic "icon in a dark button takes the button's text colour" rule
-        assert '[data-testid^="stBaseButton-"]:not([data-testid="stBaseButton-primary"]) [data-testid="stIconMaterial"]' in CSS
-    else:
-        assert fragment in CSS
-
-
-def test_links_in_captions_get_the_light_link_colour_too():
-    assert '[data-testid="stCaptionContainer"] a' in CSS
-
-
-def test_code_blocks_and_json_are_darkened_leaf_by_leaf_not_wholesale():
-    """In the always-on stylesheet, so light mode gets it too (the same colours are 2.6-3.7 : 1 on white in either mode)."""
-    assert re.search(r'\[data-testid="stCode"\] pre code span[^{]*\{\s*filter: brightness\(0\.\d+\)', BASE)
-    assert re.search(r'\[data-testid="stJson"\] span[^{]*\{\s*filter: brightness\(0\.\d+\)', BASE)
-    assert "filter: brightness" not in CSS                      # not duplicated in the dark block
-
-
-@pytest.mark.parametrize("fragment", [
-    '[data-testid="stAlertContentSuccess"] p', '[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) [data-testid="stAlertDynamicIcon"]', '[data-testid="stAlertContentError"]', '[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"])',
-    '[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"])', '[data-testid="stSliderTickBar"] p', '[data-testid="stFileUploaderDropzoneInstructions"] span',
-    '[data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"]', '[data-testid^="stChatMessageAvatar"] [data-testid="stIconMaterial"]',
-])
-def test_light_mode_has_a_rule_for_each_surface_the_scan_found(fragment):
-    assert fragment in BASE
-
-
-def test_the_always_on_rules_never_use_important_so_dark_mode_can_always_override_them():
-    start = BASE.index("*/", BASE.index("readable text on the light surfaces")) + 2          # after the comment that introduces the block
-    block = re.sub(r"/\*.*?\*/", "", BASE[start:BASE.index("</style>")], flags=re.S)        # declarations only, not the comments
-    offenders = [line.strip() for line in block.splitlines() if "!important" in line and "stDateInputField" not in line]
-    assert not offenders, offenders                           # the one exception, the date field, is the colour dark mode uses too
-
-
-# ------------------------------------------------------------------------------------------ arithmetic: the colours chosen clear WCAG AA (4.5 : 1)
-
-@pytest.mark.parametrize("fg, bg, minimum", [
-    ("#2B3040", (255, 255, 255), 7), ("#2B3040", (248, 250, 252), 7),               # dark text on the light surfaces (toast, popover, menus, expander header, trigger)
-    ("#E8E8E8", (38, 43, 54), 7),                                                 # the same text where the surface goes dark-tinted
-    ("#8AB4F8", (14, 17, 23), 7), ("#0B57D0", (255, 255, 255), 4.5),                # links: on the dark page, and inside a light popover
-    ("#4B5160", (240, 244, 249), 4.5), ("#1D2230", (255, 164, 33), 7),              # uploader hint, avatar icon
-    ("#0B5D27", (219, 239, 233), 6.5), ("#0B5D27", (233, 249, 238), 7), ("#0B5D27", (255, 255, 255), 7),        # light mode: success text and a rising metric delta
-    ("#6FD39A", (16, 35, 29), 7),                                                                                # dark mode: the success alert's icon
-    ("#A61B1B", (255, 255, 255), 7), ("#8B1A1A", (242, 224, 228), 7),                                         # a falling delta, error text on its pink fill
-])
-def test_the_chosen_colours_clear_wcag_aa(fg, bg, minimum):
-    assert contrast(fg, bg) >= minimum
-
-
-def test_light_mode_text_colours_are_the_ones_the_stylesheet_declares():
-    for hexcolour in ("#0B5D27", "#A61B1B", "#8B1A1A", "#4B5160", "#1D2230"):
-        assert hexcolour in BASE
-
-
-def test_a_code_token_colour_darkened_by_the_filter_clears_aa():
-    """Streamlit's lightest-contrast tokens on its near-white code background (rgb 9,171,59 green; 237,111,19 orange; 128,132,149 grey) after brightness(0.62)."""
-    k = float(re.search(r'stCode"\] pre code span[^{]*\{\s*filter: brightness\(([\d.]+)\)', BASE).group(1))
-    for rgb in ((9, 171, 59), (237, 111, 19), (128, 132, 149), (28, 131, 225), (41, 176, 157)):
-        assert contrast(tuple(c * k for c in rgb), (248, 250, 252)) >= 4.5, rgb
-
-
-# ------------------------------------------------------------------------------------------ the tool that measures it
-
-def test_the_contrast_tooling_is_in_the_repo_and_documented():
-    for name in ("dark_mode_gallery.py", "dark_mode_contrast_scan.py", "chart_text_overlap_scan.py"):
-        compile((ROOT / "scripts" / name).read_text(encoding="utf-8"), name, "exec")
-    assert "dark_mode_contrast_scan" in (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "dark_mode_contrast_scan" in (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
-    assert "playwright" in (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
-
-
-# ------------------------------------------------------------------------------------------ the Share dialog (a modal is its own white surface)
-
-def test_a_dialogs_text_is_dark_and_its_selected_tab_is_bolder():
-    sels = selectors_with('[data-testid="stDialog"]')
-    assert any('[data-testid="stMarkdownContainer"] p' in s for s in sels) and any("label" in s for s in sels)
-    assert any("stCaptionContainer" in s for s in sels) and any("stWidgetLabel" in s for s in sels)
-    assert 'stDialog"] [data-testid="stTab"][aria-selected="true"]' in CSS and "font-weight: 600" in rule_for('[aria-selected="true"] [data-testid="stMarkdownContainer"] p')
-    assert 'stDialog"] a' in CSS
-
-
-def test_buttons_in_a_dialog_keep_light_text_but_a_popover_trigger_and_expander_header_do_not_get_an_exception():
-    """A button has a dark fill, so its label stays light. A popover trigger / expander header sits on the white dialog with only a translucent hover tint, so it stays LIGHT in every
-    state and dark text is right in every state (measured: a 'light text on hover' exception put 1.0 : 1 text on 227,235,243)."""
-    assert "color: #E8E8E8 !important" in rule_for('[data-testid="stDialog"] [data-testid^="stBaseButton-"] [data-testid="stMarkdownContainer"] p')
-    assert 'stDialog"] [data-testid="stPopoverButton"]' not in CSS
-    assert 'stDialog"] details' not in CSS
-
-
-@pytest.mark.parametrize("fg, bg, minimum", [("#2B3040", (255, 255, 255), 7), ("#0B57D0", (255, 255, 255), 4.5), ("#E8E8E8", (38, 43, 54), 7)])
-def test_the_dialog_colours_clear_wcag_aa(fg, bg, minimum):
-    assert contrast(fg, bg) >= minimum
-
-
-# ------------------------------------------------------------------------------------------ charts
-
-def test_chart_text_is_set_explicitly_because_streamlit_colours_it_with_the_light_themes_ink():
-    """Measured in a browser: with the app's CSS-only dark mode, every chart's text was rgb(26,26,46) (config.toml's textColor) on the dark page, whatever the template said."""
-    from modules import palette
-    assert palette.plotly_theme(True)["font"]["color"] == palette.CHART_TEXT_DARK_MODE == "#E8E8E8"
-    assert palette.plotly_theme(False)["font"]["color"] == palette.CHART_TEXT_LIGHT_MODE == "#1A1A2E"
-    assert contrast(palette.CHART_TEXT_DARK_MODE, (14, 17, 23)) >= 7 and contrast(palette.CHART_TEXT_LIGHT_MODE, (255, 255, 255)) >= 7
-    toml = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
-    assert palette.CHART_TEXT_LIGHT_MODE.lower() in toml.lower()         # the light colour is the theme's own ink, so light mode is unchanged
-
-
-def test_show_figure_gives_light_chart_text_in_dark_mode_and_dark_in_light_mode():
-    from streamlit.testing.v1 import AppTest
-
-    def page():
-        import plotly.graph_objects as go
-        import streamlit as st
-        from ui.a11y import show_figure
-        fig = go.Figure(go.Scatter(x=[0, 1], y=[0, 1]))
-        show_figure(fig, key="chart")
-        st.write(f"font={fig.layout.font.color}")
-    for dark, expected in ((True, "#E8E8E8"), (False, "#1A1A2E")):
-        at = AppTest.from_function(page, default_timeout=60)
-        at.session_state["dark_mode"] = dark
-        at.run()
-        assert not at.exception and any(m.value == f"font={expected}" for m in at.markdown), (dark, [m.value for m in at.markdown])
+def test_the_helper_script_marks_the_theme_and_keeps_the_jump_shortcut():
+    html = theme.PAGE_HELPER_HTML
+    assert "data-mrs-theme" in html and "stApp" in html
+    assert "removeEventListener" in html and "heat equation" in html      # the handler is replaced, not stacked
+    assert re.search(r"setInterval\(paintTheme", html)

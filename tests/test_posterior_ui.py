@@ -7,7 +7,7 @@ MODE = "🎲 Posterior sampling (MCMC)"
 def _open():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     assert not at.exception
     return at

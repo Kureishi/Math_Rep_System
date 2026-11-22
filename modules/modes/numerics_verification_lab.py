@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.lab", function="render_lab_tab",
     needs_client=False,
     order=140,
+    group="Simulation labs",
 )

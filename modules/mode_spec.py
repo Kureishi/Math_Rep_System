@@ -1,6 +1,10 @@
 """The declaration of one app mode. No imports, so any file can use it without circularity."""
 from dataclasses import dataclass
 
+# The sidebar sections, in the order they are shown. A mode whose `group` is not listed here gets a section of its own after these.
+GROUP_ORDER: tuple[str, ...] = ("Solve", "Science", "Simulation labs", "Tools")
+DEFAULT_GROUP = "Tools"
+
 
 @dataclass(frozen=True)
 class ModeSpec:
@@ -14,6 +18,8 @@ class ModeSpec:
     needs_client  True if the page takes the LM Studio client as its argument (it talks to the model)
     order         position in the sidebar: lower comes first. Built-in modes are spaced by 10 so a new one can slot
                   between two others without renumbering anything; plugins default to the end
+    group         the sidebar section the mode is listed under: one of GROUP_ORDER ("Solve", "Science", "Simulation labs",
+                  "Tools"), or a name of your own, which gets a section after those. Within a section the order is `order`
     """
     label: str
     keywords: tuple[str, ...] = ()
@@ -21,6 +27,7 @@ class ModeSpec:
     function: str = ""
     needs_client: bool = False
     order: int = 5000
+    group: str = DEFAULT_GROUP
 
     def problems(self) -> list[str]:
         """What is wrong with this spec (empty if it is fine)."""
@@ -41,4 +48,6 @@ class ModeSpec:
             out.append("needs_client must be True or False")
         if isinstance(self.order, bool) or not isinstance(self.order, int):
             out.append("order must be an integer")
+        if not isinstance(self.group, str) or not self.group.strip():
+            out.append("group must be a non-empty string")
         return out

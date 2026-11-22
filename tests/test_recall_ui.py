@@ -24,7 +24,7 @@ def isolated(tmp_path, monkeypatch):
 def test_the_page_finds_a_past_problem_with_different_numbers_and_can_open_it():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     assert not at.exception
     next(t for t in at.text_area if t.key == "recall_query").set_value(CAR.replace("8", "12").replace("20", "30").replace("6", "9"))
@@ -40,7 +40,7 @@ def test_the_page_finds_a_past_problem_with_different_numbers_and_can_open_it():
 def test_a_new_problem_is_reported_as_new():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     next(t for t in at.text_area if t.key == "recall_query").set_value("Estimate the half-life of a radioactive sample")
     next(b for b in at.button if b.key == "recall_go").click()

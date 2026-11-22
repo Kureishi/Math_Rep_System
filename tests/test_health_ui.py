@@ -7,7 +7,7 @@ MODE = "🩺 Health check"
 def test_the_page_runs_the_checks_and_offers_a_pasteable_report():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     assert not at.exception
     text = " ".join(m.value for m in at.markdown)

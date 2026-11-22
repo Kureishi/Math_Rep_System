@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="", function="",
     needs_client=False,
     order=10,
+    group="Solve",
 )

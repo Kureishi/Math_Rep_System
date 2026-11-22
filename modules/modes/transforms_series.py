@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.transforms_series", function="render_transforms_series_tab",
     needs_client=False,
     order=100,
+    group="Solve",
 )

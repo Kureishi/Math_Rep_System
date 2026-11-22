@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.batch", function="render_batch_solver_tab",
     needs_client=True,
     order=40,
+    group="Solve",
 )

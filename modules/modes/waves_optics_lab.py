@@ -7,4 +7,5 @@ MODE = ModeSpec(
     module="ui.waves", function="render_waves_tab",
     needs_client=False,
     order=177,
+    group="Simulation labs",
 )

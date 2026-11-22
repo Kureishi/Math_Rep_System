@@ -26,7 +26,8 @@ from modules.equation_engine import ProblemModel, target_kind
 from modules.report_content import (
     DEFAULT_PRESET, PRESETS, SECTION_DESCRIPTIONS, SECTION_IDS, SECTION_TITLES,
 )
-from modules.report_export import FORMATS, ExportContext, available_sections, format_availability
+from modules import optional_deps
+from modules.report_export import FORMATS, ExportContext, available_sections, format_availability, format_missing
 from modules.report_theme import THEMES
 from modules.share_text import build_latex, build_plain_text
 from modules.verifier import VerificationReport
@@ -125,9 +126,13 @@ def _export_tab(ctx: ExportContext) -> None:
                 download_button(spec.key, f"{spec.icon} {spec.label}", ctx, chosen, key=f"share_dl_{spec.key}")
                 st.caption(spec.note)
             else:
-                # one format missing a package must not hide the others (or crash the dialog): say which package, and the command that fixes it
+                # one format missing a package must not hide the others (or crash the dialog): say which package in a few words, and give the
+                # command that fixes it in a code block (its copy icon, top right of the block, puts it on the clipboard)
+                gone = format_missing(spec.key)
                 st.button(f"{spec.icon} {spec.label}", key=f"share_dl_{spec.key}_off", disabled=True)
-                st.caption(f"Unavailable: {why}")
+                st.caption(optional_deps.short_need(gone) or "Unavailable")
+                if gone:
+                    st.code(optional_deps.install_command(gone), language="bash")
 
 
 def _card_tab(model, report, problem_text) -> None:

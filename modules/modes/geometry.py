@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.geometry", function="render_geometry_tab",
     needs_client=False,
     order=240,
+    group="Solve",
 )

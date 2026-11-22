@@ -7,4 +7,5 @@ MODE = ModeSpec(
     module="ui.circuits", function="render_circuits_tab",
     needs_client=False,
     order=179,
+    group="Simulation labs",
 )

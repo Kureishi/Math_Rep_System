@@ -7,4 +7,5 @@ MODE = ModeSpec(
     module="ui.practice", function="render_practice_tab",
     needs_client=False,
     order=215,
+    group="Tools",
 )

@@ -66,8 +66,14 @@ def test_a_custom_description_replaces_the_generated_one_and_cannot_inject_marku
     assert "Rises then falls" in body and "<script>" not in body and "&lt;script&gt;" in body
 
 
-def test_the_chart_follows_the_apps_own_dark_mode_switch():
-    light, dark = layout(chart_app())["template"]["layout"], layout(chart_app(dark_mode=True))["template"]["layout"]
+def test_the_chart_follows_streamlits_dark_theme(monkeypatch):
+    """The theme comes from Streamlit itself (st.context.theme.type); the app's own 🌙 checkbox no longer exists."""
+    light = layout(chart_app())["template"]["layout"]
+    src = CHART.replace("from ui.a11y import show_figure", "import ui.a11y as _a\n_orig = _a.is_dark\n_a.is_dark = lambda: True\nfrom ui.a11y import show_figure") + "\n_a.is_dark = _orig\n"
+    at = AppTest.from_string(src.replace("**ALT", "**{}"), default_timeout=60)
+    at.run()
+    assert not at.exception
+    dark = layout(at)["template"]["layout"]
     assert dark["paper_bgcolor"] != light["paper_bgcolor"] and dark["paper_bgcolor"] == "rgb(17,17,17)"
 
 
@@ -98,7 +104,7 @@ st.write("got-selection-object" if event is not None and hasattr(event, "selecti
 def test_a_real_page_describes_its_charts():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value("🧭 Discover equations")
+    at.session_state["app_mode"] = "🧭 Discover equations"
     at.run(timeout=120)
     next(b for b in at.button if b.key == "discover_run").click()
     at.run(timeout=180)
@@ -174,7 +180,7 @@ def test_each_gpu_capable_result_reports_where_it_was_computed():
 def test_a_langevin_result_on_the_real_page_shows_where_it_was_computed():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value("🔥 Statistical mechanics")
+    at.session_state["app_mode"] = "🔥 Statistical mechanics"
     at.run(timeout=120)
     before = sum("🖥️ CPU" in m.value for m in at.markdown)            # the random-matrix tab computes on load
     next(b for b in at.button if b.key == "sst_run").click()

@@ -21,7 +21,7 @@ def at():
     app = _app()
     app.session_state["_practice_today"] = TODAY
     app.run(timeout=120)
-    app.sidebar.radio[0].set_value(MODE)
+    app.session_state["app_mode"] = MODE
     app.run(timeout=120)
     assert not app.exception
     return app

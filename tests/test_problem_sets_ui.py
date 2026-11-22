@@ -9,7 +9,7 @@ MODE = "🧑‍🏫 Problem sets"
 def _open():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     assert not at.exception
     return at
@@ -37,7 +37,7 @@ def test_a_set_is_made_and_then_a_class_is_graded_with_a_diagnosed_mistake():
 def test_choosing_another_library_problem_reloads_the_page_without_error():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     next(s for s in at.selectbox if s.key == "pset_library").set_value("Pendulum period")
     at.run(timeout=120)

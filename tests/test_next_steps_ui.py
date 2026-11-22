@@ -123,7 +123,7 @@ render_next_steps([], "none")
 def fitted_app(family):
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value("📈 Curve fitting")
+    at.session_state["app_mode"] = "📈 Curve fitting"
     at.run(timeout=120)
     data = "x,y\n" + "\n".join(f"{x},{2.0 * 1.3 ** x + (0.05 if i % 2 else -0.05):.4f}" for i, x in enumerate(range(0, 10)))
     at.text_area(key="fit_csv_paste").set_value(data)

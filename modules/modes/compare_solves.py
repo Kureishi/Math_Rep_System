@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.compare", function="render_compare_tab",
     needs_client=False,
     order=80,
+    group="Solve",
 )

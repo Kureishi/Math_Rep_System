@@ -165,6 +165,8 @@ math-rep-system/
 │   │                          #   (the sidebar dark-mode toggle's CSS, kept here so all of
 │   │                          #   the app's styling lives in one file)
 │   ├── sidebar.py                # the whole left sidebar as one function
+│   ├── mode_nav.py               # the grouped, collapsible mode list (Solve / Science / Simulation labs / Tools)
+│   ├── history_panel.py          # the History list: day groups, filter, stars, rename, delete with Undo
 │   ├── word_problem.py            # the default page: input, Solve button, calls
 │   │                          #   modules/pipeline.py, then ui/results/
 │   ├── batch.py, chains.py, curve_fitting.py, dimensional.py, equivalence.py,
@@ -573,14 +575,21 @@ Decisions and operational details that don't belong in the README.
   dataclass fields), never identity or `repr`, and anything unhashable recomputes:
   slower, never stale. Cached figures are shared, so they are never modified.
 
-- **Both themes are measured, not eyeballed** (`ui/theme.py`: `inject_base_styles` + `dark_mode_css`, `scripts/dark_mode_gallery.py` + `scripts/dark_mode_contrast_scan.py`). Two
-  layers. The *always-on* stylesheet fixes colours that are under 4.5 : 1 in either theme (code/JSON syntax colours by a per-token `filter: brightness()`, green success text and
-  deltas, red error text, 60 %-opacity hints, the chat avatar icon); its rules carry no `!important`, so the dark layer can always override them. The *dark* layer re-colours the page and
-  most text, which then lands on the surfaces Streamlit leaves light (open expander header, toast, popover panel and trigger, dropdown list, unselected segment): those get dark text instead
-  of being repainted, and every such rule is limited to the state in which the surface is light (rest), because the same element is dark-tinted on hover/focus/open and dark text
-  there is the same bug reversed (an earlier version of the popover rule made exactly that mistake after a popover closed). Two things the first version missed, both found by measuring: *charts* (SVG text is coloured by `fill`, and the browser applies the Streamlit theme's `textColor` over the Plotly template, so in the CSS-only dark mode every chart's text was dark ink on the dark page; `palette.plotly_theme` now sets the layout font colour explicitly), and *dialogs* (a modal is its own white surface, so the page-wide light text landed on all of it; inside one, a popover trigger or expander header is light in every state, so unlike on the page dark text needs no state exclusions there). Selectors come from the live DOM: this Streamlit renders
-  dropdowns with react-aria, so the `[data-baseweb=...]` selectors the file used to carry matched nothing. The scan computes WCAG contrast for every visible text node in each state in
-  headless Chromium (applying `filter: brightness()`) and fails below 4.5 : 1; it is a dev tool, so CI checks the stylesheets and the colour arithmetic instead.
+- **Both themes are measured, not eyeballed** (`.streamlit/config.toml` `[theme.light]` / `[theme.dark]`, `ui/theme.py`, `scripts/dark_mode_gallery.py` + `scripts/dark_mode_contrast_scan.py`). The themes are
+  Streamlit's own: with both sections defined Streamlit offers Light / Dark / Use system setting in its menu and paints every surface itself, in every state. The previous design (an in-app checkbox that
+  injected a CSS override over the light theme) could only repaint what Streamlit had already drawn light, so popover triggers, inputs, open expander headers and the Share dialog stayed white, each
+  needing dark text limited to the state in which it really was light; that layer (about 150 lines) is deleted, along with `dark_mode_css()` and the `dark_mode` session key (`ui.a11y.is_dark` reads
+  `st.context.theme.type`, which Streamlit documents as possibly stale for one run after a theme change). What remains in `ui/theme.py` is (1) theme-neutral rules (borders in `rgba(128,128,128,x)`, the
+  subtitle at 74 % opacity of the text colour) and (2) `LIGHT_ONLY_RULES`, the contrast fixes measured on the light theme (per-token `filter: brightness()` on code/JSON, green success text and deltas, red error
+  text, 60 %-opacity hints, the chat avatar icon), each scoped to `:root:not([data-mrs-theme="dark"])`. Nothing in Streamlit's DOM or CSS says which theme is showing (checked: no `--st-*` variables, no
+  root attribute), so `PAGE_HELPER_HTML` (the 1 px frame that also binds Ctrl/Cmd+K) reads the app's background colour once a second and sets the attribute; before it has run, or if it fails, the
+  page counts as light, which is the safe side for the default. `base` is not a valid key inside `[theme.light]`/`[theme.dark]` in 1.62 (config.py rejects it); `client.toolbarMode = "viewer"` hides
+  Deploy and the developer items but keeps the menu, whereas `"minimal"` removes the theme switch. The scan computes WCAG contrast for every visible text node in each state in headless Chromium
+  (applying `filter: brightness()`, with Playwright's `color_scheme` choosing the theme) and fails below 4.5 : 1; it is a dev tool, so CI checks the config, the scoping and the colour arithmetic instead.
+
+- **Mode navigation and History are separate sidebar modules** (`ui/mode_nav.py`, `ui/history_panel.py`). The mode list is buttons that set `session_state["app_mode"]` from an `on_click` callback, in sections from
+  `ModeSpec.group` (`REGISTRY.grouped()`); because no widget owns that key any more it can be written at any point of a run. History's delete is a callback that stores a full-row snapshot in the session
+  (`history.delete_with_undo`) for the Undo bar; `history.restore` re-inserts it under the old id. Starring is a `pinned` column (migration 005); pruning keeps every starred row and counts only the others toward the cap.
 
 - **The sidebar is drawn before the page, so anything the page saves needs one more run to show up** (`ui/word_problem.py`). A Streamlit script runs top to bottom: the History list
   was built from the database at the start of the run, then the solve saved a new row, so the list was one entry behind until the next interaction. After a *successful* save the page

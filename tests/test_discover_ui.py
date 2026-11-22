@@ -13,7 +13,7 @@ MODE = "🧭 Discover equations"
 def test_the_page_runs_a_demo_and_shows_the_equations_with_a_verdict():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     assert not at.exception
     next(b for b in at.button if b.key == "discover_run").click()
@@ -27,7 +27,7 @@ def test_the_page_runs_a_demo_and_shows_the_equations_with_a_verdict():
 def test_bad_pasted_data_is_explained_not_crashed():
     at = _app()
     at.run(timeout=120)
-    at.sidebar.radio[0].set_value(MODE)
+    at.session_state["app_mode"] = MODE
     at.run(timeout=120)
     next(r for r in at.radio if r.key == "discover_source").set_value("Paste or upload data")
     at.run(timeout=120)

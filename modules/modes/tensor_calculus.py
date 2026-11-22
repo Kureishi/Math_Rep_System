@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.tensor", function="render_tensor_calculus_tab",
     needs_client=False,
     order=120,
+    group="Solve",
 )

@@ -734,9 +734,13 @@ def _strobe_indices(n: int, n_strobes: int) -> np.ndarray:
 
 # Layout of the motion diagram. The gap between its two panels has to hold the upper panel's tick labels and axis title AND the lower panel's title (about 100 px);
 # at 0.16 of a 520 px figure it was ~67 px, and "position (m)" was drawn over "position (m) vs. time (s)". tests/test_plotter.py checks the arithmetic.
-MOTION_HEIGHT = 640
+MOTION_PLOT_HEIGHT = 480               # the two panels together (unchanged); the rest of the figure is margin
 MOTION_MARGIN_TOP = 100
-MOTION_MARGIN_BOTTOM = 60
+# Room under the lower panel for its tick labels and "time (s)" title (about 50 px), then the slider: its "t = ..." read-out sits ABOVE the track,
+# so it needs clear space of its own below the axis title (the padding above the slider, MOTION_SLIDER_PAD_TOP), the track and its labels (~50 px)
+MOTION_SLIDER_PAD_TOP = 48             # was Plotly's default of 20, which put "t = 0" about 10 px under the axis title
+MOTION_MARGIN_BOTTOM = 60 + (MOTION_SLIDER_PAD_TOP - 20) + 20
+MOTION_HEIGHT = MOTION_PLOT_HEIGHT + MOTION_MARGIN_TOP + MOTION_MARGIN_BOTTOM
 MOTION_VERTICAL_SPACING = 0.22
 MOTION_MIN_PANEL_GAP_PX = 100
 
@@ -859,7 +863,7 @@ def build_motion_diagram(t_values: np.ndarray, x_values: np.ndarray, v_values: n
             dict(label="\u23f8 Pause", method="animate",
                   args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}]),
         ])],
-        sliders=[dict(currentvalue={"prefix": "t = "}, x=0.05, len=0.9, steps=[
+        sliders=[dict(currentvalue={"prefix": "t = "}, x=0.05, len=0.9, pad=dict(t=MOTION_SLIDER_PAD_TOP, b=10), steps=[
             dict(method="animate", args=[[f"{int(i)}"],
                   {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}],
                   label=f"{t_values[int(i)]:.2g}") for i in idx])],

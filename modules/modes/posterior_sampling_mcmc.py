@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.posterior", function="render_posterior_tab",
     needs_client=False,
     order=200,
+    group="Solve",
 )

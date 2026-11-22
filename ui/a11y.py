@@ -16,9 +16,9 @@ SHOW_DESCRIPTIONS_KEY = "a11y_show_descriptions"
 
 
 def is_dark() -> bool:
-    """True if the app is in dark mode: its own 🌙 switch, or Streamlit's dark theme."""
-    if st.session_state.get("dark_mode"):
-        return True
+    """True if the page is in Streamlit's dark theme (chosen in the app menu, or following the operating system). Streamlit infers the
+    type from the app's background colour and documents that it can be wrong for one run right after the theme changes; the next
+    interaction redraws the charts correctly."""
     try:
         return st.context.theme.type == "dark"
     except Exception:  # noqa: BLE001 -- older Streamlit, or no browser context (tests)

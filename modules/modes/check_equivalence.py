@@ -6,4 +6,5 @@ MODE = ModeSpec(
     module="ui.equivalence", function="render_equivalence_tab",
     needs_client=False,
     order=30,
+    group="Solve",
 )
