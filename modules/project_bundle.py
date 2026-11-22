@@ -69,6 +69,7 @@ def export_bundle(history_ids: list | None = None, chain_ids: list | None = None
         extras = {k: history.load_extra(hid, k) for k in ("followups", "tutor", "provenance")}
         extras = {k: v for k, v in extras.items() if v}
         history_records.append({
+            "title": history.get_title(hid),
             "problem_text": problem_text,
             "raw_json": model.raw_json,
             "verification": {
@@ -156,6 +157,8 @@ def import_bundle(bundle_json: str, workspace) -> ImportSummary:
             steps_by_target = {t: [SolutionStep(**s) for s in steps]
                                  for t, steps in rec["steps_by_target"].items()}
             new_id = history.save(rec["problem_text"], model, report, steps_by_target, rec.get("scenarios", []))
+            if rec.get("title"):
+                history.rename(new_id, rec["title"])
             if rec.get("view_state"):
                 history.save_view_state(new_id, rec["view_state"])
             for extra_key, extra_value in (rec.get("extras") or {}).items():

@@ -34,7 +34,7 @@ def _source() -> tuple[str, dict, str] | None:
     if not entries:
         st.info("No verified problems in your history yet. Solve one first, or start from the library.")
         return None
-    pick = st.selectbox("Problem", entries, format_func=lambda e: f"#{e['id']} · {e['problem_text'][:70]}", key="pset_history")
+    pick = st.selectbox("Problem", entries, format_func=history.picker_label, key="pset_history")
     loaded = history.load(pick["id"])
     if loaded is None:
         st.warning("That problem is no longer in the history.")

@@ -32,7 +32,7 @@ def _current_snapshot() -> SolveSnapshot | None:
 
 
 def _history_options() -> dict[str, int]:
-    return {f"[{r['id']}] {r['problem_text'].strip().splitlines()[0][:60] if r['problem_text'].strip() else ''}": r["id"]
+    return {f"[{r['id']}] {r['title'] or (r['problem_text'].strip().splitlines()[0][:60] if r['problem_text'].strip() else '')}": r["id"]
             for r in history.list_recent()}
 
 

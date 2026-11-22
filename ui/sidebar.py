@@ -96,6 +96,27 @@ def _render_ask_choices(client: LMStudioClient) -> None:
             st.warning(f"The language model could not be reached ({type(exc).__name__}).")
 
 
+def _history_rename_form(entry: dict) -> None:
+    """The inline name editor for one history entry: Enter or Save stores the name (an empty name goes back to the domain), Cancel leaves it as it was."""
+    with st.form(key=f"renameform_{entry['id']}", border=False):
+        new_name = st.text_input("Name", value=entry.get("title") or "", placeholder=entry.get("domain") or "Name this problem", max_chars=history.MAX_TITLE_CHARS,
+                                 label_visibility="collapsed", key=f"renameinput_{entry['id']}")
+        f1, f2 = st.columns(2)
+        save = f1.form_submit_button("Save", type="primary")
+        cancel = f2.form_submit_button("Cancel")
+    if save:
+        try:
+            history.rename(entry["id"], new_name)
+        except Exception as exc:  # noqa: BLE001 -- a locked database must not crash the sidebar
+            st.warning(f"Could not rename it ({type(exc).__name__}: {str(exc)[:100]}).")
+            return
+        st.session_state.pop("_renaming_history", None)
+        st.rerun()
+    if cancel:
+        st.session_state.pop("_renaming_history", None)
+        st.rerun()
+
+
 def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
     """The whole left sidebar: command-palette jump box, dark-mode toggle, mode navigation,
     unit-system preference, LM Studio connection status, advanced settings, settings profiles,
@@ -465,13 +486,17 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         st.header("History")
         recent = history.list_recent()
         if recent:
+            renaming = st.session_state.get("_renaming_history")
             for hist_entry in recent:
                 badge = "✅" if hist_entry["passed"] else "⚠️"
                 label = hist_entry["problem_text"][:45] + ("..." if len(hist_entry["problem_text"]) > 45 else "")
-                c1, c2, c3 = st.columns([3, 1, 1])
+                c1, c2, c3, c4 = st.columns([5, 1, 1, 1])
                 with c1:
-                    st.caption(f"{badge} **{hist_entry['domain'] or '—'}** -- {hist_entry['timestamp'][:16].replace('T', ' ')}")
+                    st.caption(f"{badge} **{history.display_title(hist_entry)}** -- {hist_entry['timestamp'][:16].replace('T', ' ')}")
                     st.caption(label)
+                with c4:
+                    st.button("", icon=":material/edit:", key=f"renamehist_{hist_entry['id']}", type="tertiary", help="Rename this entry",
+                              on_click=st.session_state.__setitem__, args=("_renaming_history", hist_entry["id"]))
                 with c2:
                     if st.button("", icon=":material/restart_alt:", key=f"load_{hist_entry['id']}",
                                   type="tertiary", help="Load this problem"):
@@ -493,6 +518,8 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                                   type="tertiary", help="Delete from history"):
                         history.delete(hist_entry["id"])
                         st.rerun()
+                if renaming == hist_entry["id"]:
+                    _history_rename_form(hist_entry)          # full width, under the entry: in the entry's narrow column "Cancel" wrapped onto two lines
         else:
             st.caption("No solved problems yet -- they'll be saved here automatically.")
     return SidebarState(mode=mode, ok=ok)

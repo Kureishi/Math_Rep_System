@@ -385,7 +385,7 @@ math-rep-system/
     ├── research_journal.py            # stitches a chosen set of history entries into ONE
     │                                 #   running Markdown document
     ├── workspace.py                  # cross-problem variable memory (session_state)
-    ├── history.py                     # SQLite-backed solved-problem history (and, inside each
+    ├── history.py                     # SQLite-backed solved-problem history (names: rename()/display_title()/picker_label(); migration 004 adds `title`) (and, inside each
     │                                 #   record's JSON, the saved exploration view)
     ├── progress.py                    # the optional progress hook long computations call at their
     │                                 #   checkpoints (and chunk_bounds / scaled helpers)
@@ -581,6 +581,12 @@ Decisions and operational details that don't belong in the README.
   there is the same bug reversed (an earlier version of the popover rule made exactly that mistake after a popover closed). Two things the first version missed, both found by measuring: *charts* (SVG text is coloured by `fill`, and the browser applies the Streamlit theme's `textColor` over the Plotly template, so in the CSS-only dark mode every chart's text was dark ink on the dark page; `palette.plotly_theme` now sets the layout font colour explicitly), and *dialogs* (a modal is its own white surface, so the page-wide light text landed on all of it; inside one, a popover trigger or expander header is light in every state, so unlike on the page dark text needs no state exclusions there). Selectors come from the live DOM: this Streamlit renders
   dropdowns with react-aria, so the `[data-baseweb=...]` selectors the file used to carry matched nothing. The scan computes WCAG contrast for every visible text node in each state in
   headless Chromium (applying `filter: brightness()`) and fails below 4.5 : 1; it is a dev tool, so CI checks the stylesheets and the colour arithmetic instead.
+
+- **The sidebar is drawn before the page, so anything the page saves needs one more run to show up** (`ui/word_problem.py`). A Streamlit script runs top to bottom: the History list
+  was built from the database at the start of the run, then the solve saved a new row, so the list was one entry behind until the next interaction. After a *successful* save the page
+  calls `st.rerun()` once; what the first run showed that the second would lose (the "Solved" status box and its stage list, the "Saved to history" toast) is parked in
+  `session_state["_after_solve"]` and shown once by the next run, which keeps the page looking the same. A failed save does not rerun (nothing new to show; the warning stays). Renaming
+  works the same way in reverse: the rename form is drawn under its entry from `_renaming_history` and `st.rerun()` redraws the list.
 
 - **Failures are explained, and one never takes the others with it** (`llm_diagnosis.py`, `optional_deps.py`, `ui/safe.py`, `ui/diagnosis.py`).
   *Explained:* `LMStudioClient.chat()` returns the reply as an `LLMText` (a `str` that also carries `.meta`: model, finish reason, tokens used against the limit, whether

@@ -201,7 +201,10 @@ Markdown, PDF, Python, or a Jupyter notebook.
 
 **Sessions, data and access**
 - **History**, **templates**, **settings profiles** and the **variable workspace**.
-  **Project bundle** export/import moves everything between machines.
+  **Project bundle** export/import moves everything between machines. A solved problem appears in the sidebar's **History** the moment it is solved (the page redraws once after
+  the save, so the list is never a step behind), and each entry has a **✏️ rename** button: type a name (Enter or Save; up to 80 characters; an empty name goes back to the
+  problem's domain). The name is what the sidebar, the Compare / Practice / Problem-set pickers and project bundles show; it is stored in a `title` column that an existing
+  `data/history.db` gains automatically the first time the app starts (your saved problems are untouched).
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**
   (`api_server.py`) covers `/solve`, `/fit`, `/equivalence` and
   `/dimensional-analysis`. Both talk to LM Studio the same way the app does. The REST API needs

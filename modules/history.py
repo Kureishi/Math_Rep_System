@@ -86,6 +86,11 @@ def _migration_003_add_concept_tags(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "problems", "concept_tags", "TEXT")
 
 
+def _migration_004_add_title(conn: sqlite3.Connection) -> None:
+    """A name the person gave the entry (NULL = show the problem's domain, as before)."""
+    _add_column_if_missing(conn, "problems", "title", "TEXT")
+
+
 # Ordered, append-only: migrations[i] takes the schema from version i to
 # i+1. To change the schema going forward, ADD a new migration function
 # to the end of this list -- never edit an already-shipped one (a
@@ -93,7 +98,9 @@ def _migration_003_add_concept_tags(conn: sqlite3.Connection) -> None:
 # behavior, since apply_migrations only runs what schema_version says
 # hasn't happened yet).
 _MIGRATIONS = [_migration_001_initial_schema, _migration_002_add_equation_shapes,
-               _migration_003_add_concept_tags]
+               _migration_003_add_concept_tags, _migration_004_add_title]
+
+MAX_TITLE_CHARS = 80
 
 
 def _connect() -> sqlite3.Connection:
@@ -177,13 +184,43 @@ def save(problem_text: str, model: ProblemModel, report: VerificationReport,
 def list_recent(limit: int = 25) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT id, timestamp, problem_text, domain, passed FROM problems "
+            "SELECT id, timestamp, problem_text, domain, passed, title FROM problems "
             "ORDER BY id DESC LIMIT ?", (limit,),
         ).fetchall()
     return [
-        {"id": r[0], "timestamp": r[1], "problem_text": r[2], "domain": r[3], "passed": bool(r[4])}
+        {"id": r[0], "timestamp": r[1], "problem_text": r[2], "domain": r[3], "passed": bool(r[4]), "title": r[5]}
         for r in rows
     ]
+
+
+def clean_title(title: str | None) -> str | None:
+    """A title as it is stored: whitespace collapsed, trimmed, at most MAX_TITLE_CHARS long; None (= use the default) if nothing is left."""
+    collapsed = " ".join((title or "").split())[:MAX_TITLE_CHARS].rstrip()
+    return collapsed or None
+
+
+def rename(entry_id: int, title: str | None) -> bool:
+    """Name a history entry (an empty name clears it, back to showing the domain). False if there is no such entry."""
+    with _connect() as conn:
+        cur = conn.execute("UPDATE problems SET title = ? WHERE id = ?", (clean_title(title), entry_id))
+        return cur.rowcount > 0
+
+
+def get_title(entry_id: int) -> str | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT title FROM problems WHERE id = ?", (entry_id,)).fetchone()
+    return row[0] if row else None
+
+
+def display_title(entry: dict) -> str:
+    """What to call an entry in a list: the person's name for it, else its domain, else a dash."""
+    return entry.get("title") or entry.get("domain") or "—"
+
+
+def picker_label(entry: dict, width: int = 70) -> str:
+    """The label other pickers (Compare, Practice, Problem sets) show for an entry: '#id · name' when it has been named, otherwise '#id · the start of the problem'."""
+    head = entry.get("title") or entry["problem_text"][:width]
+    return f"#{entry['id']} · {head}"
 
 
 def load(entry_id: int):

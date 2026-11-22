@@ -87,6 +87,8 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
         known_context = ws.as_context_string()
 
         st.session_state["_pipeline_warnings"] = []
+        saved_ok = False
+        solve_log: list[str] = []
         try:
             # One persistent status panel for the whole pipeline, instead of a
             # sequence of st.spinner()s that each vanish once their step ends --
@@ -104,6 +106,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                     status.update(label=label)
                     yield
                     st.write(f"✅ {label}")
+                    solve_log.append(label)
 
                 result = run_pipeline(client, problem_text, known_context=known_context, stage=stage)
                 status.update(label="Solved" if not result.warnings else "Solved (with warnings)", state="complete", expanded=False)
@@ -118,7 +121,8 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                 saved_id = history.save(problem_text, model, report, steps, scenarios)
                 st.session_state["last_saved_history_id"] = saved_id
                 view_state.start_fresh(saved_id, provenance.capture())     # default settings; record how it was solved
-                st.toast("Saved to history", icon="💾")
+                saved_ok = True
+                st.session_state["_after_solve"] = {"label": "Solved" if not result.warnings else "Solved (with warnings)", "lines": solve_log}
             except Exception as exc:  # noqa: BLE001
                 logger.exception("could not save the solved problem to history")
                 st.session_state["_pipeline_warnings"].append(
@@ -134,7 +138,18 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                 pass
             render_diagnosis(diagnose_exception(e), key="solve_failure")
 
+        if saved_ok:
+            # The sidebar was drawn at the START of this run, before the solve saved anything, so its History list is one entry behind. One rerun redraws it with the
+            # new entry (the result itself is in session_state and renders as before); the "Solved" status box and the toast are re-shown once, below.
+            st.rerun()
+
     # ---------------------------------------------------------------- display
+    after = st.session_state.pop("_after_solve", None)
+    if after:
+        with st.status(after["label"], state="complete", expanded=False):
+            for line in after["lines"]:
+                st.write(f"✅ {line}")
+        st.toast("Saved to history", icon="💾")
     model = st.session_state["model"]
     report = st.session_state["report"]
     if model:

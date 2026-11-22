@@ -177,7 +177,7 @@ def _items_tab() -> None:
                 st.warning(str(exc))
     entries = [e for e in history.list_recent(60) if e["passed"]]
     if entries:
-        picks = st.multiselect("From my history (verified problems)", entries, format_func=lambda e: f"#{e['id']} · {e['problem_text'][:70]}", key="prac_hist_pick")
+        picks = st.multiselect("From my history (verified problems)", entries, format_func=history.picker_label, key="prac_hist_pick")
         if picks and st.button("Add the selected", key="prac_hist_add"):
             added, problems = 0, []
             for e in picks:
