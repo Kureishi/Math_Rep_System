@@ -12,12 +12,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 import streamlit as st
+from ui.build_stamp import LOADED
 from ui.theme import badge_row, inject_base_styles, page_helper_iframe
 
 st.set_page_config(layout="wide")
 inject_base_styles()
 dark = st.context.theme.type == "dark"           # what ui.a11y.is_dark() reads, so charts follow the page
 with st.sidebar:
+    st.caption(f"build {LOADED}")                 # the scans compare this with the files on disk and refuse to run against a stale server
     page_helper_iframe()                          # sets data-mrs-theme, which switches the light-only contrast fixes off in dark
     with st.expander("LM Studio", expanded=True):
         st.success("Connected to LM Studio.")
@@ -111,3 +113,14 @@ if st.query_params.get("dialog") == "1":
     share_dialog()
 st.divider()
 st.markdown("**Bold** markdown, `inline code`, [a link](https://example.com), and a table:\n\n| a | b |\n|---|---|\n| 1 | 2 |")
+
+# multi-panel figures: the layouts most likely to put chart text on top of other chart text (a 2-row figure with an axis title and a subplot title between the rows,
+# a 3-column one with a long subplot title), drawn through show_figure exactly as the app does, so scripts/chart_text_overlap_scan.py covers them too
+from modules import waves as wv, waves_plots as wp
+from plotly.subplots import make_subplots
+show_figure(wp.diffraction_figure(wv.diffraction_1d("double slit", 550e-9, 1.5, 50e-6, 250e-6)), width="stretch", key="gallery_diffraction")
+three = make_subplots(rows=1, cols=3, horizontal_spacing=0.1, subplot_titles=("Norm − 1", "Energy ⟨H⟩ − E₀", "Ehrenfest: ⟨x⟩ and ∫⟨p⟩/m dt"))
+for col in (1, 2, 3):
+    three.add_trace(go.Scatter(x=[0, 1, 2], y=[0, col, 0], name=f"series {col}"), row=1, col=col)
+    three.update_xaxes(title_text="time (s)", row=1, col=col)
+show_figure(three, width="stretch", key="gallery_three_panel")

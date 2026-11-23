@@ -863,3 +863,23 @@ Decisions and operational details that don't belong in the README.
   verified with the deterministic checks only and says so; the independent LLM re-solve
   is not repeated. Equations are paired as identical, equivalent (SymPy decides,
   under the usual timeout), changed or one-sided.
+
+## Working notes (tools and gotchas)
+
+Things learned the hard way while polishing the UI; each is backed by a test or a script so it cannot quietly come back.
+
+- **Verification tools** (dev only: `pip install playwright && playwright install chromium`, in `requirements-dev.txt`). `scripts/dark_mode_gallery.py` renders nearly every Streamlit component, a Share-style dialog and
+  the multi-panel charts; `scripts/dark_mode_contrast_scan.py` measures text contrast on it (`--light`, `--dialog`, `--width 800`); `scripts/chart_text_overlap_scan.py` finds overlapping chart text (`--width 800`).
+  Without a browser, `MRS_AUDIT_FIGURES=1 pytest tests/test_*plots*.py` checks the pixel arithmetic of every multi-panel figure the tests build (`modules/layout_audit.py`).
+- **Restart the gallery before scanning.** A Streamlit server keeps the modules it imported, so one left running measures the OLD stylesheet without saying so. The gallery prints `build <fingerprint>`
+  (`ui/build_stamp.py`, taken at import) and both scans compare it with the files on disk, exiting 2 with "restart the gallery" if they differ (`tests/test_build_stamp.py`).
+- **Theme rules must be state-aware.** A popover trigger or an expander header is white at rest but dark-tinted on hover, focus and while open, so a blanket text colour fixes one state and breaks another.
+  The themes are now Streamlit's own (it paints every state itself), and the few app rules left are scoped to the light theme; whenever a rule touches a component, run the contrast scan, which covers rest, each tab,
+  open dropdowns and popovers, hover, and keyboard focus, in both themes.
+- **Chart text colour is set in Python.** Streamlit applies its light-theme ink over a Plotly template, so `palette.plotly_theme` sets `layout.font.color` explicitly (`tests/test_chart_font_colour.py`).
+- **`st.rerun()` drops toasts.** Park the message with `ui.actions.flash(text, icon)` (shown at the start of the next run) instead of calling `st.toast` before a rerun; `tests/test_toast_rerun.py` fails on a
+  function that does both (two reviewed exceptions are listed there).
+- **CI** runs Python 3.12 and 3.14 on Ubuntu and Windows, requires `mypy modules/ ui/ app.py cli.py config.py api_server.py` to be clean (with the pinned numpy: a newer numpy raises four unrelated typing errors) and
+  requires every text `open()` / `read_text()` / `write_text()` to name its encoding (`tests/test_repo_hygiene.py`). Use `Path.as_posix()` in anything compared across Windows and Linux.
+- **Packaging.** `python scripts/package_zip.py [out.zip]` builds the delivery zip and leaves out `data/` (the person's own `*.db` history, chains, templates), caches, virtual environments and logs
+  (`tests/test_package_zip.py`).

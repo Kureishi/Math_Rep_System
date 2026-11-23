@@ -20,6 +20,13 @@ from streamlit.runtime.scriptrunner_utils.script_run_context import ThreadState
 
 PENDING_UPDATES_KEY = "_pending_updates"
 PENDING_TOAST_KEY = "_pending_toast"
+FLASH_KEY = "_flash_toasts"           # [(text, icon)]: toasts parked across a st.rerun()
+
+
+def flash(text: str, icon: str = "✅") -> None:
+    """Show a toast on the NEXT run. Use this, not st.toast, whenever the code goes on to call st.rerun(): a rerun discards the toasts of the run it interrupts, so the message
+    would never appear. Safe in callbacks too."""
+    st.session_state.setdefault(FLASH_KEY, []).append((text, icon))
 
 
 def queue_updates(updates: Mapping[str, Any], toast: str | None = None) -> None:
@@ -39,6 +46,8 @@ def apply_pending_updates() -> int:
     toast = st.session_state.pop(PENDING_TOAST_KEY, None)
     if toast:
         st.toast(toast, icon="✅")
+    for text, icon in st.session_state.pop(FLASH_KEY, None) or []:
+        st.toast(text, icon=icon)
     return len(pending)
 
 

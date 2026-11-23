@@ -10,10 +10,12 @@ text colour, as the browser paints it.
     python scripts/dark_mode_contrast_scan.py --port 8599            # dark mode (default); --light for light mode
     python scripts/dark_mode_contrast_scan.py --port 8599 --dialog   # the Share-style modal, which is its own surface (add --light for light mode)
 
-Exits 1 if anything is below 4.5 : 1. Inactive (disabled) controls are exempt, as WCAG allows, and a slider's value label is skipped (see the comment in the script). Needs `pip install playwright` and `playwright install chromium` (a dev tool: not needed to run the app).
+Exits 1 if anything is below 4.5 : 1, and 2 (without scanning) if the gallery server is stale: restart it after every edit, because a server left running keeps serving the stylesheet it imported (the page prints a 'build <fingerprint>' line that is compared with the files on disk). Inactive (disabled) controls are exempt, as WCAG allows, and a slider's value label is skipped (see the comment in the script). Needs `pip install playwright` and `playwright install chromium` (a dev tool: not needed to run the app).
 """
 import argparse
 import json
+
+from _scan_common import check_server_is_current
 import re
 import sys
 
@@ -62,7 +64,7 @@ results=[]
 with sync_playwright() as p:
     b=p.chromium.launch(); pg=b.new_page(viewport={"width":args.width,"height":1000}, color_scheme=scheme)
     if args.dialog:
-        pg.goto(f"{BASE}?dialog=1"); pg.wait_for_selector('[data-testid="stDialog"]',timeout=40000); pg.wait_for_timeout(2500)
+        pg.goto(f"{BASE}?dialog=1"); pg.wait_for_selector('[data-testid="stDialog"]',timeout=40000); pg.wait_for_timeout(2500); check_server_is_current(pg)
         scan(pg,"dialog open",results)
         dlg = pg.locator('[data-testid="stDialog"]')
         dlg.locator('[data-testid="stExpander"] details > summary').first.hover(); pg.wait_for_timeout(300); scan(pg,"dialog: hover closed expander header",results)
@@ -82,7 +84,7 @@ with sync_playwright() as p:
         for (t,pth),rs in sorted(bad.items(), key=lambda kv: kv[1][0]['ratio']):
             r=rs[0]; print(f"{r['ratio']:>5}  fg {r['fg']:<22} on {r['bg']:<18} '{t}'  [{', '.join(sorted({x['state'] for x in rs}))}]  {pth}")
         sys.exit(1 if bad else 0)
-    pg.goto(f"{BASE}"); pg.wait_for_selector('[data-testid="stExpander"]',timeout=40000); pg.wait_for_timeout(2500)
+    pg.goto(f"{BASE}"); pg.wait_for_selector('[data-testid="stExpander"]',timeout=40000); pg.wait_for_timeout(2500); check_server_is_current(pg)
     scan(pg,"initial",results)
     for tab in ("Explore","Practice","Verify"):
         pg.get_by_role("tab",name=tab).click(); pg.wait_for_timeout(600); scan(pg,"tab "+tab,results)

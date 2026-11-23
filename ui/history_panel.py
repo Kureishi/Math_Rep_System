@@ -13,6 +13,7 @@ import streamlit as st
 
 from modules import history
 from ui import view_state
+from ui.actions import flash
 
 SHOWN_UNFILTERED = 25                 # entries listed when the filter is empty (starred ones are always listed)
 _FILTER_KEY = "history_filter"
@@ -62,7 +63,7 @@ def _undo() -> None:
     except Exception as exc:  # noqa: BLE001
         st.toast(f"Could not restore it ({type(exc).__name__}).", icon="⚠️")
         return
-    st.toast("Restored" if ok else "Could not restore it: its number has been used again.", icon="↩️" if ok else "⚠️")
+    flash("Restored" if ok else "Could not restore it: its number has been used again.", "↩️" if ok else "⚠️")
 
 
 def _dismiss_undo() -> None:
@@ -85,7 +86,7 @@ def _load(entry: dict) -> None:
     # reopen the problem the way it was being explored (Monte Carlo inputs, sweep setup, plot axes, ...) -- see ui/view_state.py
     n_restored = view_state.restore(entry["id"])
     if n_restored:
-        st.toast(f"Restored {n_restored} saved view setting(s)", icon="🗂️")
+        flash(f"Restored {n_restored} saved view setting(s)", "🗂️")        # the caller reruns right after: st.toast would be discarded
 
 
 # ------------------------------------------------------------------------------------------ rendering

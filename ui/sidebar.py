@@ -15,6 +15,7 @@ from modules.settings_profiles import save_profile, list_profiles, load_profile,
 from modules import history, chains
 from ui.routing import go
 from modules import motion_prefs
+from ui.actions import flash
 from ui.history_panel import render_history_panel
 from ui.mode_nav import render_mode_nav
 from ui.theme import page_helper_iframe, render_theme_toggle
@@ -338,7 +339,7 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
             with save_cols[1]:
                 if st.button("💾 Save as...", key="settings_profile_save") and new_profile_name.strip():
                     save_profile(new_profile_name, settings)
-                    st.toast(f"Saved settings profile '{new_profile_name}'", icon="⚙️")
+                    flash(f"Saved settings profile '{new_profile_name}'", "⚙️")          # not st.toast: the rerun below would discard it
                     st.rerun()
 
             if existing_profiles:
@@ -407,7 +408,7 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                 st.success(f"Imported {import_summary.history_imported} problem(s), "
                             f"{import_summary.chains_imported} chain(s), and "
                             f"{import_summary.workspace_imported} workspace value(s).")
-                st.toast("Project bundle imported", icon="📦")
+                flash("Project bundle imported", "📦")                               # not st.toast: the rerun below would discard it
                 for err in import_summary.errors:
                     st.warning(err)
                 if (import_summary.history_imported or import_summary.chains_imported

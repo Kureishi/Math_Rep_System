@@ -13,6 +13,9 @@ The layout NUMBERS of every multi-panel figure the tests build can be checked wi
 import argparse
 import sys
 
+sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
+from _scan_common import check_server_is_current  # noqa: E402
+
 from playwright.sync_api import sync_playwright
 
 JS = r"""
@@ -48,6 +51,7 @@ with sync_playwright() as p:
         page = browser.new_page(viewport={"width": args.width, "height": 1400}, color_scheme=mode)
         page.goto(f"http://localhost:{args.port}/")
         page.wait_for_selector(".js-plotly-plot", timeout=60000)
+        check_server_is_current(page)
         page.wait_for_timeout(3500)
         for hit in page.evaluate(JS):
             found.append((mode, hit))
