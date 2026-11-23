@@ -209,6 +209,16 @@ Markdown, PDF, Python, or a Jupyter notebook.
   word typed. **★** stars an entry: it is listed first, under "⭐ Starred", is never removed when the history reaches its 100-entry cap (starred entries do not count toward it) and travels in project bundles.
   **Delete** is immediate, but an **Undo** bar appears at the top of History and puts the entry back under its old number. While a problem is on screen a line such as
   "✅ Solved · saved to history · #12" stays visible (the "Solved" box itself disappears on the next click).
+- **Mode suggestion banner is one line.** "🧭 Looks like **🧪 Chemistry**" with **Switch**, **Keep it here** and a bell-off button ("don't suggest again"); the reason, the confidence and
+  whether the mode needs LM Studio are in the tooltip. The same switch is the checkbox "Suggest another mode…" in Advanced settings (this session).
+- **Every icon-only button has a tooltip** (`tests/test_button_labels.py` fails if one is added without `help=`), and every button shows a keyboard focus ring (`outline: currentColor`, so it contrasts in both themes).
+- **First use of the double pendulum** shows "Deriving the equations of motion with SymPy (first use only)…" while the ~3.5 s derivation runs (it is cached afterwards).
+- **Animations: Reduce motion and Animation speed** (Advanced settings; `modules/motion_prefs.py`). Speed 0.25x to 4x scales every Play button's frame duration; Reduce motion removes the Play button, so the chart shows
+  one frame and the slider steps through the rest. Figures are copied, never edited, so the cache stays intact. The app's own hover transitions also stop under the operating system's "reduce motion".
+- **Narrow windows.** Subplot titles too long for their panel wrap onto two lines (`layout_audit.fit_subplot_titles`, applied by `show_figure`); panel gaps that the arithmetic showed too small were widened
+  (diffraction figure, 3-panel quantum / mean-field / kinetics figures, the linked time view); below 900 px the main area gives back some side padding and rows of columns wrap. At 800 px **with the sidebar open** the page is only
+  about 400 px wide, which no 3-panel chart fits: collapse the sidebar (the audit passes at 700 px). Check with `MRS_AUDIT_FIGURES=1 pytest tests/test_*plots*.py` (static pixel arithmetic over every `make_subplots`
+  figure the tests build, written to `figure_layout_audit.txt`) and, in a browser, `python scripts/chart_text_overlap_scan.py --width 800`.
 - **The mode list is grouped** under **Solve**, **Science**, **Simulation labs** and **Tools**, each a collapsible section (the one holding the current mode opens by itself). A mode's section is its
   `group=` in `modules/modes/<file>.py` (default "Tools"; a plugin may name a new section).
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**
@@ -592,8 +602,8 @@ spread it over every core, and `pytest -m "not slow"` to skip the four engine te
   and runs `mypy modules/ ui/ app.py cli.py config.py api_server.py`. One cell (ubuntu, 3.12,
   seed 0) runs the full suite with coverage; the other seven skip the `slow` tests. All use `-n auto`.
 - **Both colour themes stay readable** (`tests/test_dark_mode_css.py`, `scripts/dark_mode_contrast_scan.py`). Light and dark are **Streamlit's own themes**: `.streamlit/config.toml`
-  defines `[theme.light]` and `[theme.dark]`, so Streamlit paints every surface (inputs, popovers, dialogs, open expanders) itself, in every state. Choose in the app menu (top right:
-  Settings → Choose app theme: Light, Dark, or Use system setting, the default). The earlier in-app "🌙 Dark mode" checkbox and its CSS override are gone: the override could only recolour
+  defines `[theme.light]` and `[theme.dark]`, so Streamlit paints every surface (inputs, popovers, dialogs, open expanders) itself, in every state. Switch with the sidebar's **🌙 Dark mode** toggle (it stores the choice the way Streamlit's own Settings dialog does and reloads the page, because Streamlit
+  reads the choice only when a page loads), or in the app menu (top right: Settings → Choose app theme: Light, Dark, or Use system setting, the default). The earlier checkbox's CSS override is gone: the override could only recolour
   text on surfaces Streamlit had already painted light, which is why those surfaces stayed white. `client.toolbarMode = "viewer"` hides the developer items (Deploy, Rerun, Clear cache) but keeps that menu;
   `"minimal"` would hide the theme switch too. A handful of Streamlit's light-theme colours are under WCAG AA's 4.5 : 1 (code and JSON syntax colours, green success text and metric deltas, red error text,
   60 %-opacity hint text, the chat avatar icon); their fixes apply to the light theme only (`ui/theme.py`: `LIGHT_ONLY_RULES`, scoped to `:root:not([data-mrs-theme="dark"])`, an attribute a small script in

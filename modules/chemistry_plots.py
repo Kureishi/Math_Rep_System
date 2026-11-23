@@ -67,7 +67,7 @@ def linearised_figure(report: ch.KineticsReport) -> go.Figure:
     t, c = report.t, report.c
     fits = {f.order: f for f in report.fits}
     panels = [(0, "[A]", c), (1, "ln [A]", np.log(np.where(c > 0, c, np.nan))), (2, "1 / [A]", 1.0 / np.where(c > 0, c, np.nan))]
-    fig = make_subplots(rows=1, cols=3, horizontal_spacing=0.08,
+    fig = make_subplots(rows=1, cols=3, horizontal_spacing=0.1,
                         subplot_titles=[f"{label}: R² = {fits[o].r2_linearised:.4f}" if o in fits and fits[o].r2_linearised is not None else label for o, label, _ in panels])
     for col, (order, label, y) in enumerate(panels, start=1):
         ok = np.isfinite(y)

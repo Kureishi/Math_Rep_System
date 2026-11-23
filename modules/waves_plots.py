@@ -10,7 +10,7 @@ from modules.palette import BLUE, GREEN, INK, PURPLE, SEQUENTIAL, VERMILLION
 def diffraction_figure(p: wv.DiffractionPattern, log_scale: bool = False) -> go.Figure:
     """The pattern on the screen (FFT result with the closed form drawn through it), the aperture beneath it, and the screen as a strip."""
     mm = 1e3
-    fig = make_subplots(rows=2, cols=1, row_heights=[0.72, 0.28], vertical_spacing=0.14,
+    fig = make_subplots(rows=2, cols=1, row_heights=[0.72, 0.28], vertical_spacing=0.2,
                         subplot_titles=("Intensity on the screen (FFT) and the closed-form pattern", "The aperture that was transformed"))
     x = p.x * mm
     y_fft, y_th = p.intensity, p.analytic

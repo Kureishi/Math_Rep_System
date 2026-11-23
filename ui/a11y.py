@@ -10,7 +10,7 @@ from typing import Any
 
 import streamlit as st
 
-from modules import palette
+from modules import layout_audit, motion_prefs, palette
 
 SHOW_DESCRIPTIONS_KEY = "a11y_show_descriptions"
 
@@ -34,11 +34,18 @@ def announce(text: str) -> None:
         st.html(f'<span class="mrs-sr-only">{html.escape(text)}</span>')
 
 
+SPEED_KEY = "animation_speed"              # the Advanced-settings select slider (modules/motion_prefs.SPEEDS)
+REDUCE_MOTION_KEY = "reduce_motion"         # the Advanced-settings checkbox
+
+
 def show_figure(fig: Any, alt: str | None = None, **kwargs: Any) -> Any:
     """Draw a Plotly figure with the app's theme, colour-blind-safe colours and a text description (`alt`, or one generated from the
     figure). Accepts everything st.plotly_chart does and RETURNS what it returns: with on_select the click or selection state, which
-    the click-to-act panels (ui/plot_select.py) depend on. The theme is applied in place but idempotently, so a cached figure is safe."""
+    the click-to-act panels (ui/plot_select.py) depend on. The theme is applied in place but idempotently, so a cached figure is safe. Animated figures are
+    drawn at the person's chosen speed, or without a Play button if they chose to reduce motion (modules/motion_prefs.py, which copies rather than edits)."""
     palette.apply_theme(fig, is_dark())
+    layout_audit.fit_subplot_titles(fig)             # long subplot titles wrap instead of running into their neighbours in a narrow window
+    fig = motion_prefs.apply(fig, st.session_state.get(SPEED_KEY, motion_prefs.DEFAULT_SPEED), bool(st.session_state.get(REDUCE_MOTION_KEY)))   # a copy if it changes anything
     kwargs.setdefault("theme", None)                 # the theme is applied above; Streamlit's would override it
     event = st.plotly_chart(fig, **kwargs)
     announce(alt or palette.describe_figure(fig))

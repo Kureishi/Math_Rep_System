@@ -108,7 +108,7 @@ def fss_figure(fit, label: str = "") -> go.Figure:
 # ------------------------------------------------------------------------------------------ mean field
 
 def meanfield_figure(cv: ComparisonCurves, tc_mf: float, tc_bethe: float, tc_exact: float, mc: ScanResult | None = None) -> go.Figure:
-    fig = make_subplots(rows=1, cols=3, subplot_titles=["spontaneous magnetisation m(T)", "energy per site u(T)", "specific heat c(T)"], horizontal_spacing=0.07)
+    fig = make_subplots(rows=1, cols=3, subplot_titles=["spontaneous magnetisation m(T)", "energy per site u(T)", "specific heat c(T)"], horizontal_spacing=0.1)
     fig.add_trace(go.Scatter(x=cv.T, y=cv.m_mf, name="mean field", line=dict(color=_PAL[3])), row=1, col=1)
     fig.add_trace(go.Scatter(x=cv.T, y=cv.m_bethe, name="Bethe", line=dict(color=_PAL[1], dash="dash")), row=1, col=1)
     fig.add_trace(go.Scatter(x=cv.T, y=cv.m_exact_2d, name="Onsager (exact)", line=dict(color=_PAL[0], width=3)), row=1, col=1)

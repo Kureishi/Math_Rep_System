@@ -7,7 +7,8 @@ pairs that overlap by more than 1 px in each direction (a button's own label doe
     streamlit run scripts/dark_mode_gallery.py --server.port 8599 &
     python scripts/chart_text_overlap_scan.py --port 8599
 
-Exits 1 if anything overlaps. Add a figure to the gallery page to cover it. Needs `pip install playwright && playwright install chromium` (a dev tool).
+Exits 1 if anything overlaps. `--width 800` checks a narrow window (the sidebar is still open at 800 px, which leaves the page about 400 px wide).
+The layout NUMBERS of every multi-panel figure the tests build can be checked without a browser: `MRS_AUDIT_FIGURES=1 pytest tests/test_*plots*.py` (modules/layout_audit.py). Add a figure to the gallery page to cover it. Needs `pip install playwright && playwright install chromium` (a dev tool).
 """
 import argparse
 import sys
@@ -38,12 +39,13 @@ JS = r"""
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--port", type=int, default=8599)
+ap.add_argument("--width", type=int, default=1500, help="browser window width in px: 1500 (default), or 800 to check narrow windows (the sidebar is open at 800)")
 args = ap.parse_args()
 found = []
 with sync_playwright() as p:
     browser = p.chromium.launch()
     for mode in ("light", "dark"):                    # the browser's colour scheme: Streamlit's "Use system setting" theme follows it
-        page = browser.new_page(viewport={"width": 1500, "height": 1400}, color_scheme=mode)
+        page = browser.new_page(viewport={"width": args.width, "height": 1400}, color_scheme=mode)
         page.goto(f"http://localhost:{args.port}/")
         page.wait_for_selector(".js-plotly-plot", timeout=60000)
         page.wait_for_timeout(3500)

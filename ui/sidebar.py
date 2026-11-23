@@ -14,9 +14,10 @@ from modules.project_bundle import export_bundle, import_bundle
 from modules.settings_profiles import save_profile, list_profiles, load_profile, delete_profile, apply_profile
 from modules import history, chains
 from ui.routing import go
+from modules import motion_prefs
 from ui.history_panel import render_history_panel
 from ui.mode_nav import render_mode_nav
-from ui.theme import page_helper_iframe
+from ui.theme import page_helper_iframe, render_theme_toggle
 from dataclasses import dataclass
 from modules.workspace import Workspace
 
@@ -131,6 +132,7 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
         # best-effort Ctrl/Cmd+K focus shortcut, and the small script that tells the stylesheet whether the page is in Streamlit's light
         # or dark theme (see ui/theme.py). One 1 px frame holds both.
         page_helper_iframe()
+        render_theme_toggle()
 
         # ---- navigation: which tool is active, grouped under Solve / Science / Simulation labs / Tools in collapsible sections (ui/mode_nav.py).
         # Kept near the very top of the sidebar so switching tools doesn't require scrolling past whatever's currently in the main content
@@ -234,6 +236,14 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                      "Needs an NVIDIA GPU and CuPy (requirements-gpu.txt); otherwise everything runs on the CPU.")
             gpu.set_mode(gpu_choice)
             st.caption(gpu.describe())
+            st.session_state.setdefault("mode_suggestions", True)
+            st.checkbox("Suggest another mode when the text clearly belongs there", key="mode_suggestions",
+                        help="A one-line suggestion under the problem box, for example for a chemical reaction or a table of data. It only suggests; Represent & Solve still works.")
+            st.checkbox("Reduce motion", key="reduce_motion",
+                        help="Animated charts get no Play button: they show one frame and you step through the rest with the slider under the chart.")
+            st.select_slider("Animation speed", options=list(motion_prefs.SPEEDS), value=motion_prefs.DEFAULT_SPEED, key="animation_speed",
+                             format_func=lambda v: f"{v:g}x", disabled=bool(st.session_state.get("reduce_motion")),
+                             help="How fast the Play button runs an animation: 2x is twice as fast, 0.5x half as fast.")
             st.checkbox("Show a text description under every chart", key="a11y_show_descriptions",
                         help="Every chart always has a text description for screen readers. Turn this on to see it on screen too.")
 

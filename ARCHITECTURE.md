@@ -576,7 +576,7 @@ Decisions and operational details that don't belong in the README.
   slower, never stale. Cached figures are shared, so they are never modified.
 
 - **Both themes are measured, not eyeballed** (`.streamlit/config.toml` `[theme.light]` / `[theme.dark]`, `ui/theme.py`, `scripts/dark_mode_gallery.py` + `scripts/dark_mode_contrast_scan.py`). The themes are
-  Streamlit's own: with both sections defined Streamlit offers Light / Dark / Use system setting in its menu and paints every surface itself, in every state. The previous design (an in-app checkbox that
+  Streamlit's own: with both sections defined Streamlit offers Light / Dark / Use system setting in its menu and paints every surface itself, in every state. The sidebar's 🌙 toggle (`ui/theme.render_theme_toggle`) writes Streamlit's `stActiveTheme-<path>-v2` localStorage key and reloads, since the frontend reads that key only at load (verified in the 1.62 bundle: no storage listener, no server-side way to force light or dark). The previous design (an in-app checkbox that
   injected a CSS override over the light theme) could only repaint what Streamlit had already drawn light, so popover triggers, inputs, open expander headers and the Share dialog stayed white, each
   needing dark text limited to the state in which it really was light; that layer (about 150 lines) is deleted, along with `dark_mode_css()` and the `dark_mode` session key (`ui.a11y.is_dark` reads
   `st.context.theme.type`, which Streamlit documents as possibly stale for one run after a theme change). What remains in `ui/theme.py` is (1) theme-neutral rules (borders in `rgba(128,128,128,x)`, the

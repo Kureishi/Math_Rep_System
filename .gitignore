@@ -11,3 +11,4 @@ htmlcov/
 # Your own plugin modes (plugins/README.md); the examples and the README are tracked.
 plugins/*.py
 !plugins/_*.py
+figure_layout_audit.txt

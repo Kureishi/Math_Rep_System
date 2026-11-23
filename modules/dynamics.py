@@ -413,6 +413,11 @@ def pendulum_sympy():
     return rhs, rhs.jacobian(state), (q1, q2, w1, w2), (m1, m2, l1, l2, g)
 
 
+def pendulum_is_derived() -> bool:
+    """Has the SymPy derivation already run in this process (so the next use is instant)? The first use takes about 3.5 s, which the page explains with a spinner."""
+    return pendulum_sympy.cache_info().currsize > 0
+
+
 def verify_pendulum_rhs(p: PendulumParams, samples: int = 25, seed: int = 0) -> tuple[float, float]:
     """(largest relative difference of the RHS, of the Jacobian is not computed here) between the hand-vectorised right-hand side and the
     one derived from the Lagrangian with SymPy, at random states. Returns (rhs_error, 0.0)."""

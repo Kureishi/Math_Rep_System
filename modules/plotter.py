@@ -1087,7 +1087,7 @@ def build_time_linked_view(ts: np.ndarray, series: list[tuple[str, np.ndarray]],
     all_vals = np.concatenate([v for _, v in series])
     v_lo, v_hi = padded(all_vals, 0.1)
 
-    fig = make_subplots(rows=1, cols=2, column_widths=[0.55, 0.45], horizontal_spacing=0.1,
+    fig = make_subplots(rows=1, cols=2, column_widths=[0.55, 0.45], horizontal_spacing=0.13,
                          subplot_titles=("Time series", f"Phase plane: {name_x}\u2013{name_y}"))
     for k, (name, vals) in enumerate(series):
         fig.add_trace(go.Scatter(x=ts, y=vals, mode="lines", name=name,

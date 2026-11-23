@@ -68,6 +68,16 @@ def _nbody_tab() -> None:
             render_checks(ck, "Observed against nominal order")
 
 
+DERIVING_MESSAGE = "Deriving the equations of motion with SymPy (first use only)…"
+
+
+def _ensure_pendulum_derived() -> None:
+    """The first double-pendulum computation of a process derives its equations from the Lagrangian (about 3.5 s, then cached): say so instead of leaving the page silent."""
+    if not dy.pendulum_is_derived():
+        with st.spinner(DERIVING_MESSAGE):
+            dy.pendulum_sympy()
+
+
 def _pendulum_tab() -> None:
     th1 = num("θ1 (degrees)", 120.0, "dy_th1", -180.0, 180.0)
     th2 = num("θ2 (degrees)", 90.0, "dy_th2", -180.0, 180.0)
@@ -75,6 +85,7 @@ def _pendulum_tab() -> None:
     m_ratio = num("m2 / m1", 1.0, "dy_mr", 0.05, 20.0)
     p = dy.PendulumParams(1.0, m_ratio, 1.0, 1.0, 9.81)
     state0 = (np.radians(th1), np.radians(th2), 0.0, 0.0)
+    _ensure_pendulum_derived()
     r = cached("dy_pend", (th1, th2, t_end, m_ratio), lambda: dy.run_pendulum(p, state0, t_end))
     badge_row([(f"energy: {r.energy_drift.kind}", "pass" if r.checks.checks[0].passed else "fail"), (f"max |ΔE/E| = {r.energy_drift.max_rel:.1e}", "neutral")])
     show_figure(dp.pendulum_figure(r), width="stretch")
@@ -122,6 +133,7 @@ def _pendulum_lyapunov() -> None:
     st.markdown("**Is this pendulum chaotic?** The Lyapunov spectrum of the double pendulum for the starting angles above (an ensemble of nearby starts).")
     if not st.button("Estimate the exponents", key="dy_pl_btn"):
         return
+    _ensure_pendulum_derived()
     p = dy.PendulumParams(1.0, st.session_state.get("dy_mr", 1.0), 1.0, 1.0, 9.81)
     s0 = np.array([np.radians(st.session_state.get("dy_th1", 120.0)), np.radians(st.session_state.get("dy_th2", 90.0)), 0.0, 0.0])
     ly = dy.lyapunov_spectrum("pendulum", p, s0, members=64, t_run=30.0, seed=1)

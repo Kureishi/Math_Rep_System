@@ -237,3 +237,94 @@ def test_the_time_readout_has_clear_space_below_the_axis_title():
     assert fig.layout.sliders[0].pad.t >= 40                                   # Plotly's default is 20: "t = 0" sat ~10 px under "time (s)"
     assert fig.layout.margin.b >= plotter.MOTION_SLIDER_PAD_TOP + 60            # tick labels + axis title, then the padding, then the track
     assert fig.layout.height - fig.layout.margin.t - fig.layout.margin.b == plotter.MOTION_PLOT_HEIGHT   # the panels themselves are no smaller
+
+
+# ------------------------------------------------------------------------------------------ animation speed and reduced motion
+
+def _play_ms(fig):
+    return [b.args[1]["frame"]["duration"] for m in fig.layout.updatemenus for b in m.buttons if b.args and len(b.args) > 1 and isinstance(b.args[1], dict)]
+
+
+def _animated():
+    import numpy as np
+    from modules import plotter
+    t = np.linspace(0, 6, 61)
+    return plotter.build_motion_diagram(t, 8 * t + t ** 2, 8 + 2 * t)
+
+
+def test_speed_scales_the_play_duration_and_leaves_the_original_alone():
+    from modules import motion_prefs as mp
+    fig = _animated()
+    base = _play_ms(fig)
+    assert _play_ms(mp.apply(fig, 2.0))[0] == base[0] // 2 and _play_ms(mp.apply(fig, 0.5))[0] == base[0] * 2
+    assert _play_ms(fig) == base                                              # a cached figure is never edited
+    assert mp.apply(fig) is fig and mp.clamp_speed(99) == 4.0 and mp.clamp_speed("x") == 1.0 and mp.clamp_speed(0) == 0.25
+    assert _play_ms(mp.apply(fig, 4.0))[1] == 0                               # Pause keeps a duration of 0
+
+
+def test_reduce_motion_removes_play_but_keeps_every_frame_and_the_slider():
+    from modules import motion_prefs as mp
+    fig = _animated()
+    calm = mp.apply(fig, 1.0, True)
+    assert not mp.has_animation(calm) and len(calm.frames) == len(fig.frames) and len(calm.layout.sliders) == 1
+    assert mp.has_animation(fig) and mp.has_animation(mp.apply(fig, 1.0, False))   # turning it off again brings Play back
+
+
+def test_a_figure_without_frames_is_untouched_whatever_the_setting():
+    import plotly.graph_objects as go
+    from modules import motion_prefs as mp
+    fig = go.Figure(go.Scatter(x=[0, 1], y=[0, 1]))
+    assert mp.apply(fig, 4.0, True) is fig and not mp.has_animation(fig)
+
+
+def test_show_figure_draws_with_the_chosen_speed_and_reduce_motion(monkeypatch):
+    import streamlit as st
+    from ui import a11y
+    drawn = []
+    monkeypatch.setattr(st, "plotly_chart", lambda fig, **k: drawn.append(fig))
+    monkeypatch.setattr(a11y, "announce", lambda *a, **k: None)
+    monkeypatch.setattr(st, "session_state", {a11y.SPEED_KEY: 2.0})
+    fig = _animated()
+    a11y.show_figure(fig)
+    assert _play_ms(drawn[-1])[0] == _play_ms(fig)[0] // 2
+    monkeypatch.setattr(st, "session_state", {a11y.REDUCE_MOTION_KEY: True})
+    a11y.show_figure(fig)
+    from modules import motion_prefs as mp
+    assert not mp.has_animation(drawn[-1])
+
+
+def test_the_advanced_settings_offer_reduce_motion_and_a_speed():
+    at = AppTest.from_file(APP, default_timeout=200)
+    at.run()
+    assert not at.exception
+    assert at.sidebar.checkbox(key="reduce_motion").value is False and at.sidebar.select_slider(key="animation_speed").value == 1.0
+    at.sidebar.checkbox(key="reduce_motion").check().run()
+    assert not at.exception and at.sidebar.select_slider(key="animation_speed").disabled
+
+
+# ------------------------------------------------------------------------------------------ the pendulum's first-use spinner
+
+def test_the_pendulum_explains_its_first_use_pause_and_only_then(monkeypatch):
+    import streamlit as st
+    from modules import dynamics as dy
+    from ui import dynamics as ui_dy
+    shown = []
+
+    class Spin:
+        def __init__(self, text, **k): shown.append(text)
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    derived = {"done": False}
+    monkeypatch.setattr(st, "spinner", Spin)
+    monkeypatch.setattr(dy, "pendulum_is_derived", lambda: derived["done"])
+    monkeypatch.setattr(dy, "pendulum_sympy", lambda: derived.update(done=True))
+    ui_dy._ensure_pendulum_derived()
+    ui_dy._ensure_pendulum_derived()
+    assert shown == [ui_dy.DERIVING_MESSAGE] and "first use only" in ui_dy.DERIVING_MESSAGE and derived["done"]
+
+
+def test_pendulum_is_derived_tracks_the_cache():
+    from modules import dynamics as dy
+    dy.pendulum_sympy.cache_clear()
+    assert dy.pendulum_is_derived() is False

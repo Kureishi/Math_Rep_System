@@ -81,7 +81,8 @@ def _page(text=None):
 
 
 def _banner(at):
-    return [i for i in at.info if "looks like a request for" in i.value]
+    """The one-line banner: its text is a markdown line, the reason is in its tooltip (`help`)."""
+    return [m for m in at.markdown if m.value.startswith("🧭 Looks like")]
 
 
 def _button(at, key):
@@ -92,7 +93,9 @@ def test_the_banner_appears_for_a_reaction_and_says_where_and_why():
     at = _page("Balance Fe + O2 -> Fe2O3")
     assert not at.exception
     banner = _banner(at)
-    assert banner and "🧪 Chemistry" in banner[0].value and "sure" in banner[0].value and "without LM Studio" in banner[0].value
+    assert banner and "🧪 Chemistry" in banner[0].value and len(banner) == 1
+    assert "sure" in banner[0].help and "without LM Studio" in banner[0].help               # the why is in the tooltip, not on the page
+    assert not [i for i in at.info if "looks like" in i.value.lower()]                       # no multi-line info box any more
     assert _button(at, "route_banner_go") is not None and _button(at, "route_banner_stay") is not None
 
 
@@ -150,3 +153,19 @@ def test_a_solved_problem_on_screen_suppresses_the_banner():
 def test_the_banner_does_not_stop_represent_and_solve_from_being_available():
     at = _page("Balance Fe + O2 -> Fe2O3")
     assert any("Represent" in b.label for b in at.button)
+
+
+def test_dont_suggest_again_turns_the_banner_off_and_the_setting_turns_it_back_on():
+    at = _page("Balance Fe + O2 -> Fe2O3")
+    _button(at, "route_banner_off").click()
+    at.run()
+    assert not at.exception and not _banner(at) and at.session_state["mode_suggestions"] is False
+    assert any(c.key == "mode_suggestions" for c in at.sidebar.checkbox)
+    at.sidebar.checkbox(key="mode_suggestions").check().run()
+    assert _banner(at)
+
+
+def test_the_banner_is_one_row_with_every_button_labelled():
+    at = _page("Balance Fe + O2 -> Fe2O3")
+    for key in ("route_banner_go", "route_banner_stay", "route_banner_off"):
+        assert _button(at, key).help

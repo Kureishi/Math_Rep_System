@@ -78,7 +78,7 @@ def _all_css() -> str:
         theme.inject_base_styles()
     finally:
         st.markdown = real                                                  # type: ignore[assignment]
-    return seen[0]
+    return "\n".join(seen)
 
 
 def test_every_light_only_selector_is_scoped_to_not_dark():
@@ -88,14 +88,13 @@ def test_every_light_only_selector_is_scoped_to_not_dark():
         for sel in selectors:
             assert f'{theme._LIGHT_SCOPE} {sel}' in light_block, sel
     # and no unscoped copy of those colours is left in the always-on rules
-    always_on = css[:css.index("<style>", 10)] if css.count("<style>") > 1 else css
+    always_on = _bodies()[0]
     for colour in ("#0B5D27", "#A61B1B", "#8B1A1A", "#4B5160", "brightness(0.62)"):
         assert colour not in always_on, colour
 
 
 def test_the_always_on_rules_use_no_fixed_light_theme_colours():
-    css = _all_css()
-    always_on = css[:css.index("<style>", 10)]
+    always_on = _bodies()[0]
     assert "rgba(49, 51, 63" not in always_on                            # the light theme's ink as a fixed border / text colour
 
 
@@ -104,3 +103,50 @@ def test_the_helper_script_marks_the_theme_and_keeps_the_jump_shortcut():
     assert "data-mrs-theme" in html and "stApp" in html
     assert "removeEventListener" in html and "heat equation" in html      # the handler is replaced, not stacked
     assert re.search(r"setInterval\(paintTheme", html)
+
+
+def _bodies() -> list[str]:
+    import streamlit as st
+    seen: list[str] = []
+    real = st.markdown
+    st.markdown = lambda body, *a, **k: seen.append(body)                 # type: ignore[assignment]
+    try:
+        theme.inject_base_styles()
+    finally:
+        st.markdown = real                                                  # type: ignore[assignment]
+    return seen
+
+
+def test_each_stylesheet_is_its_own_markdown_call_and_none_can_render_as_a_code_block():
+    """Regression: the light-only <style> block was concatenated onto the indented one; Streamlit dedents by the smallest indent, so the first block kept 8 spaces and Markdown
+    showed the CSS as a code block at the top of the page. Streamlit's own dedent is applied here, as it is when the body is sent."""
+    import textwrap
+    bodies = _bodies()
+    assert len(bodies) == 2
+    for body in bodies:
+        cleaned = textwrap.dedent(body).strip()
+        assert cleaned.startswith("<style>") and cleaned.endswith("</style>") and cleaned.count("<style>") == 1
+        assert not any(line.startswith("    <style") or line.startswith("\t<style") for line in cleaned.splitlines())
+        assert not cleaned.startswith(" ")
+
+
+def test_the_theme_toggle_stores_streamlits_choice_and_reloads():
+    for choice in ("Dark", "Light", "System"):
+        html = theme.theme_switch_html(choice)
+        assert "stActiveTheme-" in html and f"JSON.stringify('{choice}')" in html and "location.reload()" in html and "-v2" in html
+
+
+def test_the_sidebar_has_a_dark_mode_toggle_that_requests_a_theme_switch(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    asked: list[str] = []
+    real = theme.theme_switch_html
+    monkeypatch.setattr(theme, "theme_switch_html", lambda choice: (asked.append(choice), real(choice))[1])
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=200)
+    at.run()
+    assert not at.exception and asked == []                                  # nothing is stored or reloaded until the toggle is used
+    toggle = at.sidebar.toggle(key=theme.THEME_TOGGLE_KEY)
+    assert toggle.value is False and "reloads" in toggle.help
+    toggle.set_value(True).run()
+    assert not at.exception and asked == ["Dark"]
+    at.run()
+    assert asked == ["Dark"]                                                 # the request is spent: no reload loop on the next run

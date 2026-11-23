@@ -100,7 +100,7 @@ def wavepacket_animation_figure(result: DynamicsResult, show_real: bool = True) 
 def dynamics_diagnostics_figure(result: DynamicsResult) -> go.Figure:
     """Norm drift, energy drift, and Ehrenfest's theorem on one figure."""
     t = result.series_times
-    fig = make_subplots(rows=1, cols=3, subplot_titles=("Norm − 1", "Energy ⟨H⟩ − E₀", "Ehrenfest: ⟨x⟩ and ∫⟨p⟩/m dt"))
+    fig = make_subplots(rows=1, cols=3, horizontal_spacing=0.1, subplot_titles=("Norm − 1", "Energy ⟨H⟩ − E₀", "Ehrenfest: ⟨x⟩ and ∫⟨p⟩/m dt"))
     fig.add_trace(go.Scatter(x=t, y=result.norm - 1.0, name="norm − 1", line=dict(color=_PALETTE[0])), row=1, col=1)
     fig.add_trace(go.Scatter(x=t, y=result.energy - result.energy[0], name="E − E₀", line=dict(color=_PALETTE[1])), row=1, col=2)
     fig.add_trace(go.Scatter(x=t, y=result.mean_x, name="⟨x⟩ (simulation)", line=dict(color=_PALETTE[2])), row=1, col=3)

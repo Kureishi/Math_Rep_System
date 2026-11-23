@@ -302,3 +302,49 @@ def optimization_unconstrained_json():
 @pytest.fixture
 def optimization_constrained_json():
     return OPTIMIZATION_CONSTRAINED_JSON
+
+
+# ------------------------------------------------------------------------------------------ optional: audit every multi-panel figure the tests build
+# MRS_AUDIT_FIGURES=1 pytest tests/test_*plots*.py   -> modules/layout_audit.py is run, at three page widths, on every figure made with make_subplots during the run, and the
+# likely problems are written to figure_layout_audit.txt (and listed in the terminal summary). Off by default: it keeps every figure alive.
+import os as _os
+
+if _os.environ.get("MRS_AUDIT_FIGURES"):
+    import plotly.subplots as _subplots
+
+    _AUDITED: list = []
+    _real_make_subplots = _subplots.make_subplots
+
+    def _recording_make_subplots(*args, **kwargs):
+        fig = _real_make_subplots(*args, **kwargs)
+        _AUDITED.append((_current_test(), fig))
+        return fig
+
+    def _current_test() -> str:
+        return _os.environ.get("PYTEST_CURRENT_TEST", "?").split(" ")[0]
+
+    _subplots.make_subplots = _recording_make_subplots
+    for _mod in ("modules.plotter", "modules.sm_plots", "modules.discover_plots", "modules.showcase_plots", "modules.mcmc_plots", "modules.circuits_plots",
+                 "modules.dynamics_plots", "modules.chemistry_plots", "modules.quantum_plots", "modules.waves_plots"):
+        try:
+            __import__(_mod)
+            if hasattr(__import__(_mod, fromlist=["x"]), "make_subplots"):
+                setattr(__import__(_mod, fromlist=["x"]), "make_subplots", _recording_make_subplots)
+        except Exception:                                                        # noqa: BLE001 -- an optional dev tool must never break the suite
+            pass
+
+
+def pytest_terminal_summary(terminalreporter):
+    if not _os.environ.get("MRS_AUDIT_FIGURES"):
+        return
+    from modules import layout_audit
+    seen: dict[tuple, str] = {}
+    for test, fig in _AUDITED:
+        layout_audit.fit_subplot_titles(fig)                      # as ui.a11y.show_figure does before drawing
+        for width_name, issues in layout_audit.audit_all_widths(fig).items():
+            for issue in issues:
+                seen.setdefault((str(issue), width_name), test)
+    lines = [f"[{w}] {i}   (built in {t})" for (i, w), t in sorted(seen.items(), key=lambda kv: (kv[0][1], kv[0][0]))]
+    from pathlib import Path
+    Path("figure_layout_audit.txt").write_text(f"{len(_AUDITED)} multi-panel figures audited\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    terminalreporter.write_line(f"figure layout audit: {len(_AUDITED)} figures, {len(lines)} likely problem(s) (see figure_layout_audit.txt)")

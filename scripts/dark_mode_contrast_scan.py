@@ -50,6 +50,7 @@ def scan(pg, label, results):
         r['state']=label; results.append(r)
 ap = argparse.ArgumentParser()
 ap.add_argument("--port", type=int, default=8599)
+ap.add_argument("--width", type=int, default=1500, help="browser window width in px (800 checks a narrow window; the sidebar is open at 800)")
 ap.add_argument("--light", action="store_true", help="scan light mode instead of dark")
 ap.add_argument("--json", help="write every measurement to this file")
 ap.add_argument("--dialog", action="store_true", help="scan the Share-style dialog instead of the page: it is a modal, its own surface, so it is measured on its own")
@@ -59,7 +60,7 @@ BASE = f"http://localhost:{args.port}/"
 PAGE = {"r": 255, "g": 255, "b": 255, "a": 1} if args.light else {"r": 14, "g": 17, "b": 23, "a": 1}      # the page colour behind everything
 results=[]
 with sync_playwright() as p:
-    b=p.chromium.launch(); pg=b.new_page(viewport={"width":1500,"height":1000}, color_scheme=scheme)
+    b=p.chromium.launch(); pg=b.new_page(viewport={"width":args.width,"height":1000}, color_scheme=scheme)
     if args.dialog:
         pg.goto(f"{BASE}?dialog=1"); pg.wait_for_selector('[data-testid="stDialog"]',timeout=40000); pg.wait_for_timeout(2500)
         scan(pg,"dialog open",results)

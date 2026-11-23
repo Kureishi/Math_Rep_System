@@ -116,6 +116,24 @@ def inject_base_styles() -> None:
             transform: translateY(-1px);
             box-shadow: 0 3px 10px rgba(0, 0, 0, 0.10);
         }
+        /* Narrow windows (about 800 px or less): the main area is already tight, so give it back some of its side padding, and let a row of columns wrap
+           instead of squeezing four buttons into 80 px each. Only below 900 px, so the normal layout is untouched. The sidebar is excluded. */
+        @media (max-width: 900px) {
+            [data-testid="stMain"] .block-container, [data-testid="stMainBlockContainer"] { padding-left: 1rem; padding-right: 1rem; }
+            [data-testid="stMain"] [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+            [data-testid="stMain"] [data-testid="stColumn"] { min-width: min(100%, 11rem); }
+        }
+        /* People who ask their operating system for less motion get none from the app's own CSS either (the hover lift on buttons and cards, the expander arrow);
+           the charts' animations have their own "Reduce motion" setting (Advanced settings), which removes the Play button. */
+        @media (prefers-reduced-motion: reduce) {
+            * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+        }
+        /* A visible keyboard focus ring on every button, including the icon-only tertiary ones (history rows, close buttons), whose default focus
+           cue is faint. currentColor is the button's own text colour, so the ring contrasts with whatever surface the button is on, in both themes. */
+        [data-testid^="stBaseButton-"]:focus-visible, .stButton > button:focus-visible, .stDownloadButton > button:focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+        }
         .stButton > button[data-testid^="stBaseButton-primary"] {
             box-shadow: 0 1px 4px rgba(46, 94, 170, 0.35);
         }
@@ -179,7 +197,10 @@ def inject_base_styles() -> None:
             border-radius: 10px;
         }
         </style>
-    """ + _light_only_css(), unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+    # A SEPARATE call, never concatenated onto the string above: Streamlit dedents a markdown body by its smallest indent, and this block starts at column 0, so joining
+    # them left the indented block above at 8 spaces, which Markdown renders as a code block -- the stylesheet showed up as text at the top of the page.
+    st.markdown(_light_only_css(), unsafe_allow_html=True)
 
 
 # Contrast fixes measured in a browser (scripts/dark_mode_contrast_scan.py) on Streamlit's LIGHT theme: each of these fell below WCAG AA's 4.5 : 1. They are colours
@@ -257,6 +278,37 @@ PAGE_HELPER_HTML = """
 def page_helper_iframe() -> None:
     """Draw the 1 px frame that runs PAGE_HELPER_HTML (called once per run, from the sidebar)."""
     st.iframe(src=PAGE_HELPER_HTML, height=1)
+
+
+# The theme is Streamlit's own, and its frontend reads the person's choice (System / Light / Dark) from the browser's localStorage when the page LOADS: there is no way to switch
+# it live from Python, and no storage listener to nudge. So the sidebar's toggle does what Streamlit's own Settings dialog does -- stores the choice under Streamlit's key --
+# and reloads the page. The reload starts a new session (whatever was on screen is gone; the History list still has every solved problem), which is why the toggle says so.
+# The key's "-v2" is Streamlit's CACHED_THEME_VERSION in 1.62; if a later Streamlit changes it the toggle falls back to a harmless reload (the app menu still works).
+THEME_STORAGE_KEY_JS = "'stActiveTheme-' + win.location.pathname + '-v2'"
+THEME_TOGGLE_KEY = "theme_dark_toggle"
+_THEME_REQUEST_KEY = "_theme_request"
+
+
+def theme_switch_html(choice: str) -> str:
+    """The script (for the 1 px frame) that stores `choice` ('Dark', 'Light' or 'System') as the theme and reloads the page."""
+    assert choice in ("Dark", "Light", "System")
+    return ("<script>(function(){ try { const win = window.parent; "
+            f"win.localStorage.setItem({THEME_STORAGE_KEY_JS}, JSON.stringify('{choice}')); win.location.reload(); }} catch (e) {{}} }})();</script>")
+
+
+def _request_theme() -> None:
+    st.session_state[_THEME_REQUEST_KEY] = "Dark" if st.session_state.get(THEME_TOGGLE_KEY) else "Light"
+
+
+def render_theme_toggle() -> None:
+    """The sidebar's 🌙 Dark mode toggle: on when the page is in the dark theme, and switching it stores the choice and reloads (see above)."""
+    from ui.a11y import is_dark
+    st.toggle("🌙 Dark mode", value=is_dark(), key=THEME_TOGGLE_KEY, on_change=_request_theme,
+              help="Switches the whole app between Streamlit's light and dark themes. The page reloads (a problem on screen is gone; History keeps it). "
+                   "To follow your system again, use the menu at the top right: Settings, then Use system setting.")
+    choice = st.session_state.pop(_THEME_REQUEST_KEY, None)
+    if choice:
+        st.iframe(src=theme_switch_html(choice), height=1)
 
 
 def render_hero(title: str, subtitle: str) -> None:
