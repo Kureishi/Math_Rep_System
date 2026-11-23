@@ -3,7 +3,7 @@ The sidebar's History list: grouped by day ("Today", "Yesterday", ...), starred 
 rename, and a delete that can be undone.
 
   filter        every word typed must appear in an entry's name, domain or problem text (modules/history.py: matches)
-  ★ / ☆         star an entry: it is listed first, under "⭐ Starred", and is never pruned when the list reaches its size cap
+  star button   star an entry: it is listed first, under "⭐ Starred", and is never pruned when the list reaches its size cap
   rename        the pencil opens a name editor under the entry (unchanged)
   delete        immediate, but the History header then shows what was deleted with an "Undo" button (Streamlit's toasts cannot hold a
                 button, so the undo bar stays until the next delete, a click on its ✕, or the end of the session). Undo puts the entry back
@@ -109,7 +109,10 @@ def _render_entry(entry: dict, renaming) -> None:
     st.caption(f"{badge} **{history.display_title(entry)}** -- {entry['timestamp'][11:16]}")
     st.caption(preview)
     star, load, rename, delete, _ = st.columns([1, 1, 1, 1, 4])
-    star.button("★" if entry["pinned"] else "☆", key=f"pinhist_{entry['id']}", type="tertiary", on_click=_toggle_pin, args=(entry["id"], not entry["pinned"]),
+    # An icon, not the text glyphs ★ / ☆: those come from whatever font the browser falls back to and rendered clipped in the narrow column. A starred entry shows the
+    # yellow star emoji, an unstarred one Streamlit's own outlined star, drawn in the same icon font as the load / rename / delete buttons beside it.
+    star.button("", icon="⭐" if entry["pinned"] else ":material/star_outline:", key=f"pinhist_{entry['id']}", type="tertiary", on_click=_toggle_pin,
+                args=(entry["id"], not entry["pinned"]),
                 help="Remove the star" if entry["pinned"] else "Star this entry: it is listed first and is never removed when the history is full")
     if load.button("", icon=":material/restart_alt:", key=f"load_{entry['id']}", type="tertiary", help="Load this problem"):
         _load(entry)

@@ -150,3 +150,17 @@ def test_the_sidebar_has_a_dark_mode_toggle_that_requests_a_theme_switch(monkeyp
     assert not at.exception and asked == ["Dark"]
     at.run()
     assert asked == ["Dark"]                                                 # the request is spent: no reload loop on the next run
+
+
+def test_the_one_pixel_frames_are_transparent_and_take_no_room():
+    """Regression: a frame inside a dark page got an opaque white canvas, a thin white line beside the Dark mode toggle."""
+    assert 'name="color-scheme" content="dark light"' in theme.PAGE_HELPER_HTML and "background: transparent" in theme.PAGE_HELPER_HTML
+    assert theme.theme_switch_html("Dark").startswith(theme.FRAME_HEAD)
+    css = _bodies()[0]
+    assert 'iframe[height="1"]' in css and "opacity: 0" in css and "height: 0" in css
+
+
+def test_the_history_star_is_an_icon_not_a_text_glyph(db_free=None):
+    from pathlib import Path
+    src = (ROOT / "ui" / "history_panel.py").read_text(encoding="utf-8")
+    assert '"★"' not in src and '"☆"' not in src and "material/star_outline" in src

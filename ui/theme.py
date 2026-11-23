@@ -128,6 +128,11 @@ def inject_base_styles() -> None:
         @media (prefers-reduced-motion: reduce) {
             * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
         }
+        /* The 1 px helper frames (ui/theme.py: page_helper_iframe, the theme switch) are invisible and take no room, whatever the theme. */
+        iframe[height="1"], iframe[style*="height: 1px"] { opacity: 0; pointer-events: none; border: 0; }
+        [data-testid="stElementContainer"]:has(> iframe[height="1"]), [data-testid="stElementContainer"]:has(iframe[style*="height: 1px"]) {
+            height: 0; min-height: 0; margin: 0; padding: 0; overflow: hidden;
+        }
         /* A visible keyboard focus ring on every button, including the icon-only tertiary ones (history rows, close buttons), whose default focus
            cue is faint. currentColor is the button's own text colour, so the ring contrasts with whatever surface the button is on, in both themes. */
         [data-testid^="stBaseButton-"]:focus-visible, .stButton > button:focus-visible, .stDownloadButton > button:focus-visible {
@@ -242,7 +247,11 @@ def _light_only_css() -> str:
 #   Ctrl/Cmd+K   focus the "Jump to..." box. The handler is replaced, not stacked, each time the frame reloads.
 #   theme        every second, read the app's background colour; dark if its luminance is below one half. Polling (one getComputedStyle call) rather than an observer
 #                because the theme can change by the app menu, by the operating system, or by Streamlit re-applying it, and all of them end up as the same background colour.
-PAGE_HELPER_HTML = """
+# The frame's own page is transparent and follows the colour scheme of the page around it: without `color-scheme: dark light` a frame inside a dark page gets Chromium's opaque
+# WHITE canvas, which showed as a thin white line in the sidebar. FRAME_HEAD is shared by every 1 px frame the app draws.
+FRAME_HEAD = '<meta name="color-scheme" content="dark light"><style>html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }</style>'
+
+PAGE_HELPER_HTML = FRAME_HEAD + """
     <script>
     (function() {
         const win = window.parent, doc = win.document;
@@ -292,7 +301,7 @@ _THEME_REQUEST_KEY = "_theme_request"
 def theme_switch_html(choice: str) -> str:
     """The script (for the 1 px frame) that stores `choice` ('Dark', 'Light' or 'System') as the theme and reloads the page."""
     assert choice in ("Dark", "Light", "System")
-    return ("<script>(function(){ try { const win = window.parent; "
+    return (FRAME_HEAD + "<script>(function(){ try { const win = window.parent; "
             f"win.localStorage.setItem({THEME_STORAGE_KEY_JS}, JSON.stringify('{choice}')); win.location.reload(); }} catch (e) {{}} }})();</script>")
 
 
