@@ -49,6 +49,13 @@ class Settings:
     # The longest reply the model may write. "Thinking" models spend this on reasoning before they answer, and an empty or cut-off reply is the usual
     # symptom of it being too small (the failure explanation says so); raise it here, in the sidebar's Advanced settings, or with LM_MAX_TOKENS.
     max_tokens: int = int(os.getenv("LM_MAX_TOKENS", "2048"))
+    # "Thinking" models (Qwen3.x, DeepSeek-R1, ...) reason before they answer, and a reply that is all reasoning arrives EMPTY. See modules/llm_thinking.py.
+    #   thinking_mode "auto"   ask for no thinking, stream the reply, stop a runaway reasoning stream, retry once under a JSON schema, and read finished JSON from the reasoning text
+    #                 "hints"  only ask for no thinking and read the reply as before (no streaming, no retry)
+    #                 "leave"  send nothing extra: the model's own settings in LM Studio decide
+    thinking_mode: str = os.getenv("LM_THINKING_MODE", "auto")
+    # How many tokens of reasoning are allowed, with no answer started, before the stream is stopped and the next step of the ladder is tried (0 = no limit).
+    reasoning_budget_tokens: int = int(os.getenv("LM_REASONING_BUDGET", "1500"))
 
 
 # Bumped by hand when behaviour that affects results or exports changes. It is stamped on every export

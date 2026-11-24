@@ -78,6 +78,11 @@ def _facts(diag: dict, cfg, reply: str = "", stage: str | None = None) -> list[t
     rows.append(("Reply length", f"{len(reply)} characters"))
     if diag.get("reasoning_chars"):
         rows.append(("Separate reasoning text", f"{diag['reasoning_chars']} characters (not part of the reply)"))
+    attempts = diag.get("attempts") or []
+    if attempts:
+        tried = "; ".join(f"{a['step']}: " + ("stopped early (reasoning used its budget)" if a.get("stopped_early") else f"finished '{a.get('finish_reason')}'") + f", {a.get('content_chars', 0)} reply chars"
+                          for a in attempts)
+        rows.append(("What the app tried", tried))
     return rows
 
 
@@ -104,7 +109,12 @@ def diagnose_llm_output(err: LLMOutputError, stage: str | None = None, cfg=None)
     if kind == "empty":
         d.title = "The model sent back an empty reply"
         d.summary = "LM Studio answered, but there was no text in the answer, so there was nothing to turn into equations."
-        if _out_of_tokens(diag):
+        if diag.get("attempts") and diag.get("reasoning_chars"):
+            causes.append(Cause("The model is a “thinking” model that reasons at length before answering. The app asked it not to think, stopped the reasoning when it used up its budget "
+                                 f"({diag.get('reasoning_budget_tokens') or cfg.reasoning_budget_tokens} tokens), and retried under a JSON schema, but this model kept reasoning.",
+                                 "Do NOT raise “Max response tokens”: that only lets it think for longer. In LM Studio turn thinking off when you load the model (its model settings, "
+                                 "“Enable Thinking”), or load a non-thinking (instruct) variant, then press Represent & Solve again.", "most likely"))
+        if _out_of_tokens(diag) and not diag.get("attempts"):
             causes.append(Cause(f"The reply hit the length limit ({diag.get('completion_tokens')} of {diag.get('max_tokens') or cfg.max_tokens} tokens) before any text was produced. "
                                  "This is typical of “thinking” models, which spend their whole budget reasoning first.",
                                  limit_hint + ", or load a non-thinking (instruct) model for extraction.", "most likely"))

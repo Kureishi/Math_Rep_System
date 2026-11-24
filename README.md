@@ -219,6 +219,12 @@ Markdown, PDF, Python, or a Jupyter notebook.
   (diffraction figure, 3-panel quantum / mean-field / kinetics figures, the linked time view); below 900 px the main area gives back some side padding and rows of columns wrap. At 800 px **with the sidebar open** the page is only
   about 400 px wide, which no 3-panel chart fits: collapse the sidebar (the audit passes at 700 px). Check with `MRS_AUDIT_FIGURES=1 pytest tests/test_*plots*.py` (static pixel arithmetic over every `make_subplots`
   figure the tests build, written to `figure_layout_audit.txt`) and, in a browser, `python scripts/chart_text_overlap_scan.py --width 800`.
+- **Thinking models (Qwen3.x, DeepSeek-R1, ...) no longer end in "The model sent back an empty reply"** (`modules/llm_thinking.py`, `LMStudioClient.chat`; Advanced settings → *Thinking models*, *Reasoning budget*;
+  `LM_THINKING_MODE`, `LM_REASONING_BUDGET`). A thinking model spends its token budget reasoning, LM Studio returns that reasoning in a separate field, and the answer field comes back empty; raising
+  "Max response tokens" only lets it think for longer. In **Auto** the app (1) asks for no thinking (`chat_template_kwargs.enable_thinking=false`; LM Studio ignores it for some models, which is harmless), (2) streams the
+  reply and **stops it** when the reasoning alone has used the budget (default 1500 tokens) with no answer started, (3) retries once under a JSON schema (so the output starts as JSON) and (4) uses a finished JSON
+  object found in the reasoning text when the answer field is empty. Any option LM Studio rejects is dropped and not sent again. If every step fails, the explanation lists what was tried and says what to do: **turn thinking off when you
+  load the model in LM Studio** (its "Enable Thinking" model setting; the reliable switch) or use a non-thinking instruct variant, and *not* raise the token limit. Ordinary models cost exactly one call, as before.
 - **The mode list is grouped** under **Solve**, **Science**, **Simulation labs** and **Tools**, each a collapsible section (the one holding the current mode opens by itself). A mode's section is its
   `group=` in `modules/modes/<file>.py` (default "Tools"; a plugin may name a new section).
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**

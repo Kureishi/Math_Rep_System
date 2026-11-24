@@ -587,6 +587,13 @@ Decisions and operational details that don't belong in the README.
   Deploy and the developer items but keeps the menu, whereas `"minimal"` removes the theme switch. The scan computes WCAG contrast for every visible text node in each state in headless Chromium
   (applying `filter: brightness()`, with Playwright's `color_scheme` choosing the theme) and fails below 4.5 : 1; it is a dev tool, so CI checks the config, the scoping and the colour arithmetic instead.
 
+- **Thinking models** (`modules/llm_thinking.py`, `LMStudioClient.chat`). The failure was an empty answer field with 6-7k characters in `reasoning_content`; more `max_tokens` made it worse (a loop never ends). The ladder in `chat()`:
+  plain call with the no-thinking hint, streamed and cut off at `reasoning_budget_tokens` of reasoning (`collect_stream` closes the stream, which stops generation); then, for `json_mode` calls only, one call with
+  `response_format` json_schema (a generic object-or-array schema: call sites differ in shape); the JSON is read from the reasoning text when the answer field is empty (`recover_json`: the LAST object with at least two keys,
+  because drafts precede the final one; safe because the pipeline re-verifies whatever the model wrote). Options the server rejects (400/422) are dropped for the life of the client. Per LM Studio's tracker the per-request
+  switch is not honoured for some Qwen releases and a schema is applied to the reasoning stream (so the JSON may arrive in `reasoning_content`), which is why the ladder does not depend on either working.
+  `.meta["attempts"]` feeds the failure explanation (`modules/llm_diagnosis.py`).
+
 - **Mode navigation and History are separate sidebar modules** (`ui/mode_nav.py`, `ui/history_panel.py`). The mode list is buttons that set `session_state["app_mode"]` from an `on_click` callback, in sections from
   `ModeSpec.group` (`REGISTRY.grouped()`); because no widget owns that key any more it can be written at any point of a run. History's delete is a callback that stores a full-row snapshot in the session
   (`history.delete_with_undo`) for the Undo bar; `history.restore` re-inserts it under the old id. Starring is a `pinned` column (migration 005); pruning keeps every starred row and counts only the others toward the cap.

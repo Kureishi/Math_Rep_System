@@ -269,6 +269,17 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                 help="The longest reply the model may write. “Thinking” models spend part of this on reasoning before they answer, and an empty or cut-off "
                      "reply is the usual sign it is too small: raise it (8192 or more) for those. Also settable with the LM_MAX_TOKENS environment variable.",
             ))
+            _modes: dict[str, str] = {"auto": "Auto (recommended)", "hints": "Ask for no thinking only", "leave": "Leave it to LM Studio"}
+            settings.thinking_mode = st.selectbox(
+                "Thinking models", list(_modes), index=list(_modes).index(settings.thinking_mode) if settings.thinking_mode in _modes else 0,
+                format_func=lambda key: _modes[key],
+                help="Models that “think” before answering (Qwen3, DeepSeek-R1, ...) often use their whole reply budget on reasoning and send back an EMPTY reply; a bigger budget just "
+                     "lets them think longer. Auto asks the model not to think, stops a runaway reasoning stream, retries once under a JSON schema, and reads the answer out of the "
+                     "reasoning text if that is where it ended up. The reliable fix is still to turn thinking off for the model in LM Studio.")
+            settings.reasoning_budget_tokens = int(st.number_input(
+                "Reasoning budget (tokens)", min_value=0, max_value=16384, value=int(settings.reasoning_budget_tokens), step=250,
+                disabled=settings.thinking_mode != "auto",
+                help="In Auto, a reply that has spent this many tokens reasoning without starting its answer is stopped and the next step is tried. 0 = no limit."))
             settings.numeric_tolerance = st.select_slider(
                 "Numeric balance tolerance",
                 options=[1e-9, 1e-6, 1e-3, 1e-2],
@@ -303,6 +314,8 @@ def render_sidebar(client: LMStudioClient, ws: Workspace) -> SidebarState:
                 settings.temperature_narration = defaults.temperature_narration
                 settings.max_verification_retries = defaults.max_verification_retries
                 settings.max_tokens = defaults.max_tokens
+                settings.thinking_mode = defaults.thinking_mode
+                settings.reasoning_budget_tokens = defaults.reasoning_budget_tokens
                 settings.numeric_tolerance = defaults.numeric_tolerance
                 settings.cross_check_tolerance = defaults.cross_check_tolerance
                 settings.computation_timeout_seconds = defaults.computation_timeout_seconds

@@ -11,12 +11,14 @@ import json
 import re
 import os
 import socket
+from typing import Any
 from urllib.parse import urlparse
 
-from openai import OpenAI, APIConnectionError
+from openai import APIConnectionError, BadRequestError, OpenAI, UnprocessableEntityError
 
 from config import settings
 from modules.app_logging import logger
+from modules.llm_thinking import GENERIC_JSON_SCHEMA, Collected, collect_stream, recover_json
 
 # The connection check runs from the sidebar on page load, and everything
 # drawn after the sidebar (i.e. the whole main panel) waits on it -- so it
@@ -173,31 +175,44 @@ class LMStudioClient:
 
     def chat(self, system: str, user: str, temperature: float,
               json_mode: bool = False, model: str | None = None) -> str:
-        # NOTE: LM Studio's OpenAI-compat server is stricter than OpenAI's
-        # own API here -- it rejects response_format={"type": "json_object"}
-        # with a 400 ("must be 'json_schema' or 'text'"). Rather than build
-        # a full json_schema per call site (extraction, narration, and
-        # scenarios each have different shapes), we just ask for JSON in the
-        # prompt and rely on extract_json()'s forgiving parser below, which
-        # already strips code fences/prose. json_mode is kept as a parameter
-        # so call sites can still signal intent even though it's a no-op here.
+        """One chat completion, returned as text that also carries how the call went (`.meta`).
+
+        With `settings.thinking_mode == "auto"` (the default) a "thinking" model that would otherwise return an EMPTY reply is handled by a short ladder, because raising the token
+        limit does not help it (it just thinks for longer; some loop): (1) the call asks for no thinking and is streamed, and stopped once the reasoning alone has used
+        `settings.reasoning_budget_tokens` with no answer started; (2) if there is still no answer and the caller wants JSON (`json_mode`), the call is repeated under a JSON schema, which
+        makes the output start as JSON; (3) a finished JSON object found in the reasoning text is used when the answer field is empty. What was tried is in `.meta["attempts"]`.
+        NOTE: LM Studio rejects response_format={"type": "json_object"} with a 400 ("must be 'json_schema' or 'text'"), so the schema form is the only one used, and only on the retry.
+        Anything it rejects (the no-thinking hints, the schema) is dropped and the call repeated once without it.
+        """
+        model_name = model or settings.reasoning_model
+        mode = getattr(settings, "thinking_mode", "auto")
+        plan: list[tuple[str, bool]] = [("plain", False)]
+        if mode == "auto" and json_mode:
+            plan.append(("json schema", True))
+        attempts: list[dict] = []
         try:
-            resp = self._client.chat.completions.create(
-                model=model or settings.reasoning_model,
-                temperature=temperature,
-                max_tokens=settings.max_tokens,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            )
-            content = resp.choices[0].message.content
-            meta = _call_meta(resp, model or settings.reasoning_model, content)
-            if content is None or not content.strip():
-                raise LLMOutputError("The model returned an empty response (no text content) -- "
-                                      "try again or check LM Studio's loaded model.", raw_output=content or "",
-                                      kind="empty", diagnostics=meta)
-            return LLMText(content, meta)
+            last: Collected | None = None
+            for label, use_schema in plan:
+                res = self._one_call(system, user, temperature, model_name, use_schema=use_schema, stream=(mode == "auto"))
+                last = res
+                text = res.content
+                recovered = False
+                if not text.strip() and res.reasoning and (use_schema or res.finish_reason == "stop"):
+                    found = recover_json(res.reasoning)
+                    if found:
+                        text, recovered = found, True
+                attempts.append({"step": label, "finish_reason": res.finish_reason, "content_chars": len(res.content), "reasoning_chars": len(res.reasoning),
+                                 "stopped_early": res.aborted, "recovered_from_reasoning": recovered})
+                if text.strip():
+                    meta = self._meta_from(res, model_name, attempts)
+                    meta["recovered_from_reasoning"] = recovered
+                    if recovered:
+                        logger.warning("chat(): the answer field was empty; used the JSON found in the reasoning text (%d chars)", len(text))
+                    return LLMText(text, meta)
+            meta = self._meta_from(last or Collected(), model_name, attempts)
+            raise LLMOutputError("The model returned an empty response (no text content) -- "
+                                  "try again or check LM Studio's loaded model.", raw_output="",
+                                  kind="empty", diagnostics=meta)
         except Exception as e:  # noqa: BLE001
             # Logged HERE, at the one gateway every LLM call in the app
             # goes through, rather than in each of the many try/except
@@ -207,9 +222,60 @@ class LMStudioClient:
             # the UI is good, but it also means a recurring failure would
             # otherwise leave no trace once the page reruns. Re-raised
             # unchanged; this only adds a log line, not new behavior.
-            logger.warning("LM Studio chat() call failed (model=%s): %s",
-                             model or settings.reasoning_model, e)
+            logger.warning("LM Studio chat() call failed (model=%s): %s", model_name, e)
             raise
+
+    # What the server refused once (the no-thinking hints, the JSON schema) is not sent again for the life of this client.
+    _hints_rejected = False
+    _schema_rejected = False
+
+    def _one_call(self, system: str, user: str, temperature: float, model_name: str, *, use_schema: bool, stream: bool) -> Collected:
+        mode = getattr(settings, "thinking_mode", "auto")
+        budget = int(getattr(settings, "reasoning_budget_tokens", 0) or 0)
+        base: dict[str, Any] = dict(model=model_name, temperature=temperature, max_tokens=settings.max_tokens,
+                          messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+        optional: dict[str, Any] = {}
+        if mode != "leave" and not self._hints_rejected:
+            optional["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        if use_schema and not self._schema_rejected:
+            optional["response_format"] = {"type": "json_schema", "json_schema": {"name": "reply", "schema": GENERIC_JSON_SCHEMA}}
+        streaming = stream and budget > 0 and not use_schema           # a schema-bound reply is short and starts as JSON: no need to cut it off
+        try:
+            resp = self._client.chat.completions.create(**base, **optional, **({"stream": True} if streaming else {}))  # type: ignore[call-overload]
+        except (BadRequestError, UnprocessableEntityError) as exc:
+            if not optional:
+                raise
+            logger.warning("LM Studio rejected the optional request fields %s (%s); repeating the call without them", sorted(optional), exc)
+            self._hints_rejected = self._hints_rejected or "extra_body" in optional
+            self._schema_rejected = self._schema_rejected or "response_format" in optional
+            resp = self._client.chat.completions.create(**base, **({"stream": True} if streaming else {}))  # type: ignore[call-overload]
+        if hasattr(resp, "choices"):                                   # an ordinary (non-streamed) completion
+            choice = resp.choices[0] if resp.choices else None
+            msg = getattr(choice, "message", None)
+            reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None) or ""
+            out = Collected(content=getattr(msg, "content", None) or "", reasoning=reasoning if isinstance(reasoning, str) else "",
+                            finish_reason=getattr(choice, "finish_reason", None))
+            usage = getattr(resp, "usage", None)
+            out.extra = {"model": getattr(resp, "model", None), "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                         "completion_tokens": getattr(usage, "completion_tokens", None)}
+            return out
+        return collect_stream(resp, budget)
+
+    @staticmethod
+    def _meta_from(res: Collected, requested_model: str, attempts: list[dict]) -> dict:
+        extra = res.extra or {}
+        return {
+            "model": extra.get("model") or requested_model,
+            "finish_reason": res.finish_reason if not res.aborted else "length",
+            "prompt_tokens": extra.get("prompt_tokens"),
+            "completion_tokens": extra.get("completion_tokens") if extra.get("completion_tokens") is not None else (res.chunks or None),
+            "max_tokens": settings.max_tokens,
+            "reasoning_chars": len(res.reasoning),
+            "content_chars": len(res.content),
+            "thinking_mode": getattr(settings, "thinking_mode", "auto"),
+            "reasoning_budget_tokens": getattr(settings, "reasoning_budget_tokens", 0),
+            "attempts": list(attempts),
+        }
 
     def vision_extract(self, image_bytes: bytes, mime_type: str = "image/png",
                          model: str | None = None) -> str:
