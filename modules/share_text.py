@@ -10,6 +10,7 @@ The LaTeX uses plain `amsmath` (`gather*`, `\\text`) and nothing that needs a pa
 that, and every unit and name is escaped, since a unit like "m/s^2" or a name with an underscore would
 otherwise break compilation.
 """
+from modules.latex_text import display_latex
 import re
 
 import sympy as sp
@@ -84,7 +85,7 @@ def build_latex(model: ProblemModel, report: VerificationReport,
     if include_steps and steps_by_target:
         for target, steps in steps_by_target.items():
             out += [f"% Solving for {tex_escape(target)}", r"\begin{gather*}",
-                    " \\\\\n".join(f"  {s.expression}" for s in steps), r"\end{gather*}", ""]
+                    " \\\\\n".join(f"  {display_latex(s.expression, None)}" for s in steps), r"\end{gather*}", ""]
     if not eq_lines and not ans:
         out.append("% (nothing to export: no parsed equations and no numeric answers)")
     return "\n".join(out).rstrip() + "\n"

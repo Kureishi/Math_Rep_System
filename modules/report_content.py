@@ -16,6 +16,7 @@ report never carries a heading over nothing.
 Content that is not part of the solved model is passed in as `ReportExtras`: the follow-up Q&A, the
 tutor-mode transcripts, the Monte Carlo runs, and the provenance (how the problem was solved).
 """
+from modules.latex_text import looks_like_prose
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -292,7 +293,10 @@ def _steps(steps_by_target) -> Section | None:
     for target, steps in steps_by_target.items():
         blocks.append(Block("subheading", f"Solving for {target}"))
         for i, s in enumerate(steps, 1):
-            blocks += [Block("label", f"Step {i}: {s.description}"), Block("equation", s.expression, style="step")]
+            # a sentence (the "Technique" step) is not math: typeset as math it would lose its spaces (modules/latex_text.py). It stays an "equation" block, which the slide
+            # layout expects after each step's label, but with style "raw" (the exporters draw that as plain text, as for an equation that did not parse).
+            blocks += [Block("label", f"Step {i}: {s.description}"),
+                       Block("equation", s.expression, style="raw" if looks_like_prose(s.expression) else "step")]
             if s.explanation:
                 blocks.append(Block("text", s.explanation, style="italic"))
     return Section("steps", SECTION_TITLES["steps"], blocks)

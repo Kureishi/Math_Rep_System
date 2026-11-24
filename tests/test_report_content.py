@@ -85,7 +85,10 @@ def test_derived_equations_carry_latex_and_a_style_hint():
     equations = [b for b in eq.blocks if b.kind == "equation"]
     assert equations and all(b.style == "plain" for b in equations)
     step_eqs = [b for b in next(s for s in sections() if s.id == "steps").blocks if b.kind == "equation"]
-    assert step_eqs and all(b.style == "step" for b in step_eqs)
+    # every step is typeset math ("step"), except a sentence (the "Technique" step), which is plain text ("raw") so it keeps its spaces
+    from modules.latex_text import looks_like_prose
+    assert step_eqs and all(b.style == ("raw" if looks_like_prose(b.text) else "step") for b in step_eqs)
+    assert any(b.style == "raw" for b in step_eqs) and any(b.style == "step" for b in step_eqs)
 
 
 def test_an_equation_that_never_parsed_is_marked_raw_so_formats_do_not_treat_it_as_math():

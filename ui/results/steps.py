@@ -3,6 +3,7 @@ The step-by-step solution section, split per feature: the step list, each target
 """
 import streamlit as st
 from ui.a11y import show_figure
+from modules.latex_text import display_latex
 import numpy as np
 import pandas as pd
 from modules import proof_card
@@ -83,7 +84,7 @@ def render_step_list(client: LMStudioClient, model: ProblemModel, report: Verifi
         badge = proof_card.step_badge(step.description, target_name, report, audits)
         if badge is not None:
             st.caption(f"{badge.text()}" + (f" · {badge.detail}" if badge.detail else ""))
-        st.latex(step.expression)
+        st.latex(display_latex(step.expression))
         if step.explanation:
             st.caption(step.explanation)
         # ---- step-level "explain just this" drill-down: a
@@ -204,7 +205,7 @@ def render_alternate_method(model: ProblemModel, target_name):
         if alt_steps:
             for i, step in enumerate(alt_steps, start=1):
                 st.markdown(f"**{step.description}**")
-                st.latex(step.expression)
+                st.latex(display_latex(step.expression))
         else:
             st.caption("No alternate method available for this target.")
 

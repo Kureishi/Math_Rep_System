@@ -5,6 +5,7 @@ from typing import Any
 
 import streamlit as st
 from ui.a11y import show_figure
+from modules.latex_text import display_latex
 import numpy as np
 import pandas as pd
 from modules.equation_engine import ProblemModel, Variable, target_kind
@@ -76,7 +77,7 @@ def _render_node_selection(state, nodes, edges) -> None:
             st.markdown(f"**Steps for `{target}`** (from {node.label}) -- also marked in the step-by-step section")
             for i, step in enumerate(steps_by_target[target], start=1):
                 st.markdown(f"{i}. {step.description}")
-                st.latex(step.expression)
+                st.latex(display_latex(step.expression))
     st.session_state["_graph_focus"] = focus
 
 

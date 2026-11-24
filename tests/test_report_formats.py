@@ -254,7 +254,8 @@ def test_the_word_document_has_a_heading_per_section_real_tables_and_equation_pi
     assert headings == [s.title for s in sections]
     n_tables = sum(1 for s in sections for b in s.blocks if b.kind == "table")
     assert len(doc.tables) == n_tables
-    n_equations = sum(1 for s in sections for b in s.blocks if b.kind == "equation")
+    # a sentence (a step's "Technique") is drawn as plain text, not as a picture of typeset math: only the real equations are pictures
+    n_equations = sum(1 for s in sections for b in s.blocks if b.kind == "equation" and b.style != "raw")
     assert len(doc.inline_shapes) == n_equations
 
 
