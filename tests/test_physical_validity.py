@@ -23,6 +23,13 @@ def _projectile_model(with_domain=True):
 # ---------------------------------------------------------------- filter_physically_valid
 
 
+def _leading_number(expression):
+    """The number in 'x = 4.1553 \\text{s}': the Numeric result step carries the target's unit after its value."""
+    import re
+    return float(re.match(r"\s*\S+\s*=\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)", expression).group(1))
+
+
+
 def test_filters_out_negative_root_when_domain_declared():
     model = _projectile_model(with_domain=True)
     t = sp.Symbol("t")
@@ -102,7 +109,7 @@ def test_solver_picks_physically_valid_root_when_domain_declared():
     assert "Discard a non-physical root" in descriptions
 
     numeric_step = next(s for s in steps["t"] if s.description == "Numeric result")
-    value = float(numeric_step.expression.split("=")[1].strip())
+    value = _leading_number(numeric_step.expression)
     assert value > 0  # the positive root, not the negative one
 
 
@@ -116,7 +123,7 @@ def test_solver_keeps_old_behavior_when_no_domain_declared():
     assert "Discard a non-physical root" not in descriptions
 
     numeric_step = next(s for s in steps["t"] if s.description == "Numeric result")
-    value = float(numeric_step.expression.split("=")[1].strip())
+    value = _leading_number(numeric_step.expression)
     assert value < 0  # sp.solve()'s first (negative) branch, same as before
 
 

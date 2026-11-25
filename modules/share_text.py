@@ -19,33 +19,7 @@ from modules.equation_engine import ProblemModel
 from modules.solver import SolutionStep
 from modules.verifier import VerificationReport
 
-_TEX_SPECIALS = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
-                 "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
-
-
-def tex_escape(text: str) -> str:
-    """`text` made safe to use inside \\text{...} (or running LaTeX text)."""
-    return "".join(_TEX_SPECIALS.get(ch, ch) for ch in text)
-
-
-def _unit_tex(unit: str | None) -> str:
-    """A unit string as LaTeX math: 'm/s^2' -> '\\,\\mathrm{m/s}^{2}'. Falls back to escaped text for
-    anything that is not a plain product/quotient of unit names with integer exponents."""
-    if not unit or unit.strip().lower() in ("unitless", "dimensionless", "none", "1"):
-        return ""
-    u = unit.strip().replace("**", "^")
-    m = re.fullmatch(r"([A-Za-z°µΩ/\*\s\.\-]+?)\^(-?\d+)", u)
-    if m:
-        return rf"\,\text{{{tex_escape(m.group(1).strip())}}}^{{{m.group(2)}}}"
-    # exponents inside a quotient, e.g. "kg*m/s^2": convert each name^n
-    parts = re.split(r"(\^-?\d+)", u)
-    out = ""
-    for p in parts:
-        if re.fullmatch(r"\^-?\d+", p):
-            out += "^{" + p[1:] + "}"
-        else:
-            out += rf"\text{{{tex_escape(p)}}}" if p else ""
-    return r"\," + out
+from modules.latex_text import tex_escape, unit_latex as _unit_tex  # noqa: E402,F401 -- kept under their old names
 
 
 def _number_tex(value: float) -> str:

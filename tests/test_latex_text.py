@@ -61,3 +61,46 @@ def test_the_report_draws_a_prose_step_as_plain_text_not_typeset_math():
 def test_the_latex_share_export_wraps_prose_in_text():
     from modules.share_text import display_latex as in_share
     assert in_share(SENTENCE, None) == r"\text{" + SENTENCE + "}"
+
+
+# ------------------------------------------------------------------------------------------ percent signs and units in the numeric steps
+
+def _rectangle():
+    from modules.equation_engine import build_model
+    return build_model({
+        "problem_domain": "geometry", "problem_type": "algebraic",
+        "variables": [
+            {"symbol": "L", "meaning": "length", "known_value": "12.4", "unit": "m", "uncertainty": "0.2"},
+            {"symbol": "W", "meaning": "width", "known_value": "5.1", "unit": "m", "uncertainty": "0.1"},
+            {"symbol": "A", "meaning": "area", "known_value": None, "unit": "m^2"},
+        ],
+        "equations": [{"name": "area", "kind": "equation", "expression": "Eq(A, L*W)", "derivation": ""}],
+        "solve_for": ["A"], "assumptions": [],
+    })
+
+
+def test_the_uncertainty_step_escapes_percent_and_carries_the_unit():
+    """Regression: '%' starts a comment in LaTeX, so '63.24 ± 1.606 (2.54%)' was drawn as '63.24 ± 1.606(2.54'; and the unit was missing."""
+    from modules.solver import compute_steps
+    steps = compute_steps(_rectangle())["A"]
+    unc = next(s for s in steps if s.description == "Propagate measurement uncertainty").expression
+    assert r"\%" in unc and not re.search(r"(?<!\\)%", unc)
+    assert r"\left(" in unc and r"\pm" in unc and r"\text{m}^{2}" in unc and unc.rstrip().endswith(r"\%)")
+    numeric = next(s for s in steps if s.description == "Numeric result").expression
+    assert numeric.startswith("A = 63.24") and r"\text{m}^{2}" in numeric
+
+
+def test_a_target_without_a_unit_gets_no_stray_unit_text():
+    from modules.solver import compute_steps
+    model = _rectangle()
+    for v in model.variables:
+        v.unit = ""
+    steps = compute_steps(model)["A"]
+    assert all(r"\text{" not in s.expression for s in steps if s.description in ("Numeric result", "Propagate measurement uncertainty"))
+    assert next(s for s in steps if s.description == "Propagate measurement uncertainty").expression.count(r"\left(") == 0
+
+
+def test_no_step_expression_in_the_app_contains_an_unescaped_percent():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "modules" / "solver.py").read_text(encoding="utf-8")
+    assert ":.2%" not in src                                            # a % format spec in a LaTeX string

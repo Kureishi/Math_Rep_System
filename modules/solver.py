@@ -25,6 +25,7 @@ from modules.physical_validity import filter_physically_valid
 from modules.timeout_utils import run_with_timeout, ComputationTimeoutError
 from modules.numerical_fallback import numerical_fallback_for_equation
 from modules.algebra_rules import classify_isolation
+from modules.latex_text import unit_latex
 
 NARRATION_PROMPT = """Given this verified sequence of steps solving for {target}, \
 write a brief, clear explanation for each step in plain language (one short sentence per step). \
@@ -155,8 +156,9 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
         steps.append(SolutionStep(description=f"Isolate and simplify to solve for {target_name}",
                                     expression=f"{target_name} = {sp.latex(result)}"))
         if result.is_number:
+            unit_tex = unit_latex(next((v.unit for v in model.variables if v.symbol == target_name), None))
             steps.append(SolutionStep(description="Numeric result",
-                                        expression=f"{target_name} = {sp.N(result, 6)}"))
+                                        expression=f"{target_name} = {sp.N(result, 6)}{unit_tex}"))
 
             # if any input this target depends on carries a stated
             # measurement uncertainty, propagate it (first-order error
@@ -166,10 +168,14 @@ def _algebraic_steps_for_target(model: ProblemModel, target_name: str, subs: dic
             # symbolic formula to differentiate; see uncertainty.py
             unc = uncertainty_for_target(model, target_name, subs)
             if unc is not None:
-                rel_text = f" ({unc.relative_uncertainty:.2%})" if unc.relative_uncertainty is not None else ""
+                # "%" starts a comment in LaTeX: unescaped, everything after it is swallowed ("63.24 ± 1.606(2.54"), so it is written \\% here
+                rel_text = f" \\; ({unc.relative_uncertainty * 100:.2f}\\%)" if unc.relative_uncertainty is not None else ""
+                spread = f"{unc.nominal:.6g} \\pm {unc.uncertainty:.4g}"
+                if unit_tex:
+                    spread = f"\\left({spread}\\right)"             # the unit applies to the value AND its uncertainty
                 steps.append(SolutionStep(
                     description="Propagate measurement uncertainty",
-                    expression=f"{target_name} = {unc.nominal:.6g} \\pm {unc.uncertainty:.4g}{rel_text}",
+                    expression=f"{target_name} = {spread}{unit_tex}{rel_text}",
                 ))
     elif not other_targets:
         # sp.solve() found no closed form at all (common for equations
