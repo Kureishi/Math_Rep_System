@@ -596,7 +596,7 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
                                           n_frames: int = 40) -> go.Figure:
     """Animates a Monte Carlo estimate stabilizing as samples accumulate --
     the running mean (with a running ±1 std band) plotted against sample
-    count, playing from the first handful of samples up to the full set.
+    count (hovering anywhere over the plot, band included, shows the running mean, std and relative std at that count), playing from the first handful of samples up to the full set.
     The complementary view to build_histogram_plot's static end-state
     snapshot: this one makes visible HOW the estimate settled down (or
     didn't, within the sample budget used), which is the point a
@@ -611,6 +611,14 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
     running_var = np.maximum(running_sq_mean - running_mean ** 2, 0.0)
     running_std = np.sqrt(running_var)
 
+    # relative std (the coefficient of variation, std / |mean|, in %): how big the spread is compared with the value itself. Undefined (None) where the mean is ~0.
+    scale = max(float(np.max(np.abs(arr))) if n else 0.0, 1e-300)
+    safe_mean = np.where(np.abs(running_mean) > 1e-9 * scale, np.abs(running_mean), np.nan)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        relative_std_pct = 100.0 * running_std / safe_mean
+    # rounded (std to 5 decimals, relative std to 3): the tooltip shows 4 and 2 digits, and full-precision floats would add ~4 MB to the figure's data (every frame repeats them)
+    hover_data = [[round(float(sd), 5), None if np.isnan(rel) else round(float(rel), 3)] for sd, rel in zip(running_std, relative_std_pct)]
+
     checkpoints = np.unique(np.linspace(1, n, min(n_frames, n)).astype(int))
     idx = np.arange(1, n + 1)
     y_min = float(np.min(running_mean - running_std))
@@ -624,8 +632,11 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
             go.Scatter(x=idx[:k].tolist() + idx[:k].tolist()[::-1], y=upper + lower[::-1],
                         fill="toself", fillcolor="rgba(46,94,170,0.15)",
                         line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip"),
+            # With layout.hovermode "x" this tooltip appears wherever the pointer is over the plot at that sample count, including over the shaded band
             go.Scatter(x=idx[:k], y=running_mean[:k], mode="lines", name="running mean",
-                        line=dict(color="#0072B2", width=3)),
+                        line=dict(color="#0072B2", width=3), customdata=hover_data[:k],
+                        hovertemplate=("<b>n = %{x}</b><br>running mean = %{y:.6g}<br>running std = %{customdata[0]:.4g}<br>"
+                                       "<b>relative std = %{customdata[1]:.2f}%</b> of the mean<extra></extra>")),
         ]
 
     frames = [go.Frame(data=frame_data(k), name=f"{k}") for k in checkpoints]
@@ -635,6 +646,7 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
             xaxis=dict(title="samples used", range=[1, n]),
             yaxis=dict(title=target_symbol, range=[y_min - pad, y_max + pad]),
             title=f"Convergence of the {target_symbol} estimate ({n} samples)",
+            hovermode="x",
             updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15, buttons=[
                 dict(label="\u25b6 Play", method="animate",
                       args=[None, {"frame": {"duration": 60, "redraw": True},

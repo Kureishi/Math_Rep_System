@@ -329,3 +329,27 @@ def test_pendulum_is_derived_tracks_the_cache():
     from modules import dynamics as dy
     dy.pendulum_sympy.cache_clear()
     assert dy.pendulum_is_derived() is False
+
+
+# ------------------------------------------------------------------------------------------ the convergence plot's tooltip
+
+def test_the_convergence_plot_shows_the_relative_std_when_hovering_over_the_band():
+    import numpy as np
+    from modules import plotter
+    rng = np.random.default_rng(1)
+    samples = list(rng.normal(63.2, 3.5, 4999))
+    fig = plotter.build_monte_carlo_convergence_plot(samples, "A")
+    assert fig.layout.hovermode == "x"                                        # the tooltip follows the pointer anywhere over the plot, not only on the line
+    band, mean = fig.frames[-1].data
+    assert band.hoverinfo == "skip" and "relative std" in mean.hovertemplate and "running std" in mean.hovertemplate
+    std, rel = mean.customdata[-1]
+    assert std == pytest.approx(np.std(samples), abs=1e-5)
+    assert rel == pytest.approx(100 * np.std(samples) / abs(np.mean(samples)), abs=1e-3)
+    assert len(mean.customdata) == len(mean.x)                                # one tooltip row per plotted point, in every frame
+    assert all(len(f.data[1].customdata) == len(f.data[1].x) for f in fig.frames)
+
+
+def test_the_relative_std_is_undefined_not_infinite_when_the_mean_is_zero():
+    from modules import plotter
+    fig = plotter.build_monte_carlo_convergence_plot([0.0] * 10, "A")
+    assert fig.frames[-1].data[1].customdata[-1] == [0.0, None]
