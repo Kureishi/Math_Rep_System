@@ -417,7 +417,7 @@ def status_line(history_id: int | None, solved_here: bool, warned: bool, still_s
         return ("Solved with warnings" if warned else "Solved") + " · not saved to history"
     head = ("Solved with warnings" if warned else "Solved") if solved_here else "Opened from history"
     if not still_saved:
-        return f"{head} · deleted from history · #{history_id}"
+        return f"{head} · no longer in history"          # no "#N": the number means nothing once the entry is gone
     return f"{head} · saved to history · #{history_id}" if solved_here else f"{head} · #{history_id}"
 
 
