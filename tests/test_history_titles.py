@@ -89,8 +89,8 @@ def test_a_database_made_before_titles_existed_is_upgraded_in_place(db, monkeypa
 def test_pickers_show_the_name_when_there_is_one_and_the_problem_start_otherwise():
     plain = {"id": 7, "problem_text": "A car accelerates from 8 m/s to 20 m/s in 6 s. Find a.", "title": None}
     named = {**plain, "title": "Motorway car"}
-    assert history.picker_label(plain, 20) == "#7 · A car accelerates fr"           # the first 20 characters of the problem
-    assert history.picker_label(named) == "#7 · Motorway car"
+    assert history.picker_label(plain, 20) == "7 · A car accelerates fr"           # the first 20 characters of the problem
+    assert history.picker_label(named) == "7 · Motorway car"
 
 
 def test_a_name_survives_a_project_bundle_round_trip_and_old_bundles_still_import(db, tmp_path, monkeypatch):

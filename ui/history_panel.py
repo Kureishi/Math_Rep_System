@@ -7,7 +7,7 @@ rename, and a delete that can be undone.
   rename        the pencil opens a name editor under the entry (unchanged)
   delete        immediate, but the History header then shows what was deleted with an "Undo" button (Streamlit's toasts cannot hold a
                 button, so the undo bar stays until the next delete, a click on its ✕, or the end of the session). Undo puts the entry back
-                under its old id, so the open problem's autosave and any link to "#12" keep working.
+                under its old id, so the open problem's autosave keeps working.
 """
 import streamlit as st
 
@@ -97,7 +97,7 @@ def _render_undo_bar() -> None:
         return
     name = saved.get("title") or saved.get("domain") or "entry"
     with st.container(border=True):
-        st.caption(f"🗑️ Deleted **{name}** (#{saved['id']})")
+        st.caption(f"🗑️ Deleted **{name}**")
         left, right = st.columns([3, 1])
         left.button("Undo", key="history_undo", icon=":material/undo:", type="primary", on_click=_undo, width="stretch")
         right.button("", key="history_undo_dismiss", icon=":material/close:", type="tertiary", on_click=_dismiss_undo, help="Dismiss (the entry stays deleted)")

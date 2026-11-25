@@ -188,9 +188,9 @@ def test_the_sidebar_filters_stars_and_groups(db):
 # ------------------------------------------------------------------------------------------ 6. the status line
 
 @pytest.mark.parametrize("hid, here, warned, saved, expected", [
-    (12, True, False, True, "Solved · saved to history · #12"),
-    (12, True, True, True, "Solved with warnings · saved to history · #12"),
-    (5, False, False, True, "Opened from history · #5"),
+    (12, True, False, True, "Solved · saved to history"),
+    (12, True, True, True, "Solved with warnings · saved to history"),
+    (5, False, False, True, "Opened from history"),
     (12, True, False, False, "Solved · no longer in history"),
     (None, True, False, True, "Solved · not saved to history"),
 ])
@@ -204,7 +204,7 @@ def test_a_problem_opened_from_history_says_so_and_a_deleted_one_says_it_was_del
     at.run()
     next(b for b in at.sidebar.button if b.key == f"load_{entry_id}").click()
     at.run()
-    assert not at.exception and f"Opened from history · #{entry_id}" in " ".join(c.value for c in at.caption)
+    assert not at.exception and "Opened from history" in " ".join(c.value for c in at.caption)
     next(b for b in at.sidebar.button if b.key == f"delhist_{entry_id}").click()
     at.run()
     status = next(c.value for c in at.caption if "no longer in history" in c.value)

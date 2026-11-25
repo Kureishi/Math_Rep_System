@@ -124,7 +124,7 @@ def snapshot_from_history(entry_id: int, label: str | None = None) -> SolveSnaps
     if loaded is None:
         return None
     problem_text, model, report, steps, _scenarios = loaded
-    first_line = problem_text.strip().splitlines()[0][:50] if problem_text.strip() else f"#{entry_id}"
+    first_line = problem_text.strip().splitlines()[0][:50] if problem_text.strip() else f"entry {entry_id}"
     return SolveSnapshot(label=label or first_line, problem_text=problem_text, model=model,
                          report=report, steps=steps)
 

@@ -208,7 +208,7 @@ Markdown, PDF, Python, or a Jupyter notebook.
   The History list sits right under the mode list and is grouped by day (**Today**, **Yesterday**, weekday names, then dates). A **filter box** keeps the entries whose name, domain or problem text contain every
   word typed. **★** stars an entry: it is listed first, under "⭐ Starred", is never removed when the history reaches its 100-entry cap (starred entries do not count toward it) and travels in project bundles.
   **Delete** is immediate, but an **Undo** bar appears at the top of History and puts the entry back under its old number. While a problem is on screen a line such as
-  "✅ Solved · saved to history · #12" stays visible (the "Solved" box itself disappears on the next click).
+  "✅ Solved · saved to history" stays visible (the "Solved" box itself disappears on the next click).
 - **Mode suggestion banner is one line.** "🧭 Looks like **🧪 Chemistry**" with **Switch**, **Keep it here** and a bell-off button ("don't suggest again"); the reason, the confidence and
   whether the mode needs LM Studio are in the tooltip. The same switch is the checkbox "Suggest another mode…" in Advanced settings (this session).
 - **Every icon-only button has a tooltip** (`tests/test_button_labels.py` fails if one is added without `help=`), and every button shows a keyboard focus ring (`outline: currentColor`, so it contrasts in both themes).

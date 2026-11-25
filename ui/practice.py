@@ -188,7 +188,7 @@ def _items_tab() -> None:
                     _, created = practice.add_item(loaded[0][:60], loaded[0], loaded[1].raw_json, [loaded[1].problem_domain], "history", today)
                     added += int(created)
                 except practice.PracticeError as exc:
-                    problems.append(f"#{e['id']}: {exc}")
+                    problems.append(f"entry {e['id']}: {exc}")
             if added:
                 st.success(f"Added {added}.")
             for msg in problems:

@@ -246,9 +246,10 @@ def display_title(entry: dict) -> str:
 
 
 def picker_label(entry: dict, width: int = 70) -> str:
-    """The label other pickers (Compare, Practice, Problem sets) show for an entry: '#id · name' when it has been named, otherwise '#id · the start of the problem'."""
+    """The label other pickers (Compare, Practice, Problem sets) show for an entry: 'id · name' when it has been named, otherwise 'id · the start of the problem'. The number is
+    what keeps two entries with the same text apart in a dropdown."""
     head = entry.get("title") or entry["problem_text"][:width]
-    return f"#{entry['id']} · {head}"
+    return f"{entry['id']} · {head}"
 
 
 def load(entry_id: int):
@@ -410,7 +411,7 @@ def filter_entries(entries: list[dict], query: str) -> list[dict]:
 
 
 def status_line(history_id: int | None, solved_here: bool, warned: bool, still_saved: bool) -> str:
-    """The small persistent line shown with a problem on screen, e.g. 'Solved · saved to history · #12'. `solved_here`: it was solved in this session
+    """The small persistent line shown with a problem on screen, e.g. 'Solved · saved to history'. `solved_here`: it was solved in this session
     (else it was opened from history); `warned`: the solve finished with warnings; `still_saved`: the record is still in the database (it may have been
     deleted since, which the Undo bar can reverse)."""
     if history_id is None:
@@ -418,7 +419,7 @@ def status_line(history_id: int | None, solved_here: bool, warned: bool, still_s
     head = ("Solved with warnings" if warned else "Solved") if solved_here else "Opened from history"
     if not still_saved:
         return f"{head} · no longer in history"          # no "#N": the number means nothing once the entry is gone
-    return f"{head} · saved to history · #{history_id}" if solved_here else f"{head} · #{history_id}"
+    return f"{head} · saved to history" if solved_here else head
 
 
 PINNED_LABEL = "⭐ Starred"
