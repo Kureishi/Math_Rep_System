@@ -246,10 +246,12 @@ def display_title(entry: dict) -> str:
 
 
 def picker_label(entry: dict, width: int = 70) -> str:
-    """The label other pickers (Compare, Practice, Problem sets) show for an entry: 'id · name' when it has been named, otherwise 'id · the start of the problem'. The number is
-    what keeps two entries with the same text apart in a dropdown."""
+    """The label other pickers (Compare, Practice, Problem sets) show for an entry: 'date time · name' when it has been named, otherwise 'date time · the start of the problem',
+    e.g. '2026-11-22 18:59:03 · Motorway car'. The timestamp (to the second) is what tells two entries with the same name or text apart in a dropdown; without one (a hand-made
+    entry) the label is the name alone."""
     head = entry.get("title") or entry["problem_text"][:width]
-    return f"{entry['id']} · {head}"
+    stamp = str(entry.get("timestamp") or "").replace("T", " ")
+    return f"{stamp} · {head}" if stamp else head
 
 
 def load(entry_id: int):

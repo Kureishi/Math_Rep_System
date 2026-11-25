@@ -87,10 +87,15 @@ def test_a_database_made_before_titles_existed_is_upgraded_in_place(db, monkeypa
 
 
 def test_pickers_show_the_name_when_there_is_one_and_the_problem_start_otherwise():
-    plain = {"id": 7, "problem_text": "A car accelerates from 8 m/s to 20 m/s in 6 s. Find a.", "title": None}
+    plain = {"id": 7, "timestamp": "2026-11-22T18:59:03", "problem_text": "A car accelerates from 8 m/s to 20 m/s in 6 s. Find a.", "title": None}
     named = {**plain, "title": "Motorway car"}
-    assert history.picker_label(plain, 20) == "7 · A car accelerates fr"           # the first 20 characters of the problem
-    assert history.picker_label(named) == "7 · Motorway car"
+    assert history.picker_label(plain, 20) == "2026-11-22 18:59:03 · A car accelerates fr"           # the first 20 characters of the problem
+    assert history.picker_label(named) == "2026-11-22 18:59:03 · Motorway car"
+    # two entries with the same name are told apart by their timestamps; one without a timestamp is just its name
+    later = {**named, "id": 8, "timestamp": "2026-11-22T19:05:41"}
+    assert history.picker_label(named) != history.picker_label(later)
+    assert history.picker_label({"id": 9, "problem_text": "x", "title": "Only a name"}) == "Only a name"
+    assert "#" not in history.picker_label(named)
 
 
 def test_a_name_survives_a_project_bundle_round_trip_and_old_bundles_still_import(db, tmp_path, monkeypatch):
