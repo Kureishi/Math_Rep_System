@@ -66,3 +66,14 @@ def unit_latex(unit: str | None) -> str:
     return r"\," + out
 
 
+
+
+_SUPERSCRIPTS = {"0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "-": "⁻"}
+
+
+def unit_plain(unit: str | None) -> str:
+    """A unit for plain text (a label, a markdown line): 'm^2' -> 'm²', 'kg*m/s^2' -> 'kg·m/s²'; '' when there is no real unit (None, 'unitless', 'dimensionless', ...)."""
+    if not unit or unit.strip().lower() in ("unitless", "dimensionless", "none", "1"):
+        return ""
+    u = unit.strip().replace("**", "^").replace("*", "·")
+    return re.sub(r"\^(-?\d+)", lambda m: "".join(_SUPERSCRIPTS.get(c, c) for c in m.group(1)), u)

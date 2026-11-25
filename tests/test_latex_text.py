@@ -104,3 +104,39 @@ def test_no_step_expression_in_the_app_contains_an_unescaped_percent():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "modules" / "solver.py").read_text(encoding="utf-8")
     assert ":.2%" not in src                                            # a % format spec in a LaTeX string
+
+
+# ------------------------------------------------------------------------------------------ goal seek shows units
+
+def _goal_seek_page():
+    from modules.equation_engine import build_model
+    from ui.results.steps import render_goal_seek
+    model = build_model({
+        "problem_domain": "geometry", "problem_type": "algebraic",
+        "variables": [{"symbol": "L", "meaning": "length", "known_value": "12.4", "unit": "m"},
+                      {"symbol": "W", "meaning": "width", "known_value": "5.1", "unit": "m"},
+                      {"symbol": "A", "meaning": "area", "known_value": None, "unit": "m^2"}],
+        "equations": [{"name": "area", "kind": "equation", "expression": "Eq(A, L*W)", "derivation": ""}],
+        "solve_for": ["A"], "assumptions": [],
+    })
+    render_goal_seek(model, [v for v in model.variables if v.symbol in ("L", "W")], "A")
+
+
+def test_unit_plain():
+    from modules.latex_text import unit_plain
+    assert [unit_plain(u) for u in ("m", "m^2", "kg*m/s^2", "s^-1", "unitless", None, "")] == ["m", "m²", "kg·m/s²", "s⁻¹", "", "", ""]
+
+
+def test_goal_seek_labels_and_result_carry_the_known_units():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_function(_goal_seek_page, default_timeout=60)
+    at.run()
+    assert not at.exception
+    assert at.number_input[0].label == "Desired value of A (m²)"
+    assert [o for o in at.selectbox[0].options] == ["L (m) -- length", "W (m) -- width"]
+    at.selectbox[0].select("W").run()
+    at.number_input[0].set_value(70.0).run()
+    next(b for b in at.button if b.key == "gs_run_A").click().run()
+    assert not at.exception
+    assert any(m.value == "**W = 5.64516 m**" for m in at.markdown)
+    assert any(r"\,\text{m}" in l.value for l in at.latex)

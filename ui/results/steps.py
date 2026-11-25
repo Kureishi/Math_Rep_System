@@ -3,7 +3,7 @@ The step-by-step solution section, split per feature: the step list, each target
 """
 import streamlit as st
 from ui.a11y import show_figure
-from modules.latex_text import display_latex
+from modules.latex_text import display_latex, unit_latex, unit_plain
 import numpy as np
 import pandas as pd
 from modules import proof_card
@@ -449,6 +449,10 @@ def render_interval_bounds(model: ProblemModel, known_vars_here, target_name):
 
 
 
+def model_unit_of(model: ProblemModel, symbol: str) -> str | None:
+    return next((v.unit for v in model.variables if v.symbol == symbol), None)
+
+
 @isolated
 def render_goal_seek(model: ProblemModel, other_vars, target_name):
     """Goal-seek (inverse solve) expander."""
@@ -457,10 +461,17 @@ def render_goal_seek(model: ProblemModel, other_vars, target_name):
             st.caption("What value of an input makes this target hit a specific number? "
                         "Solves for it directly -- exactly when possible, numerically "
                         "otherwise.")
+            units = {v.symbol: unit_plain(v.unit) for v in model.variables}
+            meanings = {v.symbol: v.meaning for v in model.variables}
+
+            def _with_unit(symbol: str) -> str:
+                return f"{symbol} ({units[symbol]})" if units.get(symbol) else symbol
+
             gs_symbol = st.selectbox("Solve for which input?",
                                        [v.symbol for v in other_vars],
+                                       format_func=lambda sym: f"{_with_unit(sym)} -- {meanings[sym]}" if meanings.get(sym) else _with_unit(sym),
                                        key=f"gs_symbol_{target_name}")
-            gs_target_value = st.number_input(f"Desired value of {target_name}",
+            gs_target_value = st.number_input(f"Desired value of {_with_unit(target_name)}",
                                                  key=f"gs_target_{target_name}")
             if st.button("Seek", key=f"gs_run_{target_name}"):
                 try:
@@ -473,12 +484,13 @@ def render_goal_seek(model: ProblemModel, other_vars, target_name):
             gs_result = st.session_state.get(f"gs_result_{target_name}")
             if gs_result is not None:
                 values_str = ", ".join(f"{v:.6g}" for v in gs_result.solutions)
-                st.write(f"**{gs_result.seek_symbol} = {values_str}**")
+                seek_unit = units.get(gs_result.seek_symbol, "")       # the unit the problem gave this input, if it gave one
+                st.write(f"**{gs_result.seek_symbol} = {values_str}{(' ' + seek_unit) if seek_unit else ''}**")
                 if gs_result.is_numerical:
                     st.caption("Found numerically (no exact closed-form inverse) -- "
                                 "treat as an approximation.")
                 if gs_result.formula:
-                    st.latex(f"{gs_result.seek_symbol} = {gs_result.formula}")
+                    st.latex(f"{gs_result.seek_symbol} = {gs_result.formula}{unit_latex(model_unit_of(model, gs_result.seek_symbol))}")
 
 
 
