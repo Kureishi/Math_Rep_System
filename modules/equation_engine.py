@@ -492,7 +492,8 @@ def extract_model(client: LMStudioClient, problem_text: str, retry_reason: str |
         user += (
             "\n\nThe following values are already known from earlier calculations. "
             "If the problem references one of them (by name or by clear description), "
-            "treat it as a known_value input rather than an unknown:\n" + known_context
+            "treat it as a known_value input rather than an unknown. If the problem gives a NEW value for something "
+            "(for example \"in 10 seconds instead of 6\"), use the new value (10), not the old one:\n" + known_context
         )
 
     from config import settings

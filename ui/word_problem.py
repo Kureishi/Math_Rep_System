@@ -108,7 +108,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                     st.write(f"✅ {label}")
                     solve_log.append(label)
 
-                result = run_pipeline(client, problem_text, known_context=known_context, stage=stage)
+                result = run_pipeline(client, problem_text, known_context=known_context, workspace_entries=dict(ws.entries), stage=stage)
                 status.update(label="Solved" if not result.warnings else "Solved (with warnings)", state="complete", expanded=False)
 
             model, report, steps, scenarios = result.model, result.report, result.steps, result.scenarios

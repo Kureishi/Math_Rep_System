@@ -39,6 +39,7 @@ from modules.llm_client import LMStudioClient
 from modules.scenarios import generate_alternative_scenarios
 from modules.solver import SolutionStep, compute_steps, narrate_steps
 from modules.verifier import VerificationReport, verify
+from modules.workspace import bind_workspace_values
 
 # label -> context manager. st.spinner satisfies this as-is.
 StageFn = Callable[[str], ContextManager[Any]]
@@ -84,6 +85,7 @@ class PipelineResult:
 
 def extract_and_verify(client: LMStudioClient, problem_text: str, *,
                         known_context: str | None = None,
+                        workspace_entries: dict | None = None,
                         max_retries: int | None = None,
                         stage: StageFn | None = None) -> VerifiedDerivation:
     """Extraction + verification with the bounded retry loop.
@@ -104,6 +106,7 @@ def extract_and_verify(client: LMStudioClient, problem_text: str, *,
 
     with _tagged(stage, "Deriving equations from the problem statement..."):
         model = extract_model(client, problem_text, known_context=known_context)
+        bind_workspace_values(model, workspace_entries, problem_text)         # the model may have ignored the values it was told
 
     with _tagged(stage, "Verifying the derivation..."):
         report = verify(model, client, problem_text)
@@ -113,6 +116,7 @@ def extract_and_verify(client: LMStudioClient, problem_text: str, *,
             with _tagged(stage, f"Verification failed -- retrying derivation ({retries}/{limit})..."):
                 model = extract_model(client, problem_text, retry_reason=report.failure_reason,
                                        known_context=known_context)
+                bind_workspace_values(model, workspace_entries, problem_text)
                 report = verify(model, client, problem_text)
 
     return VerifiedDerivation(model=model, report=report, retries=retries)
@@ -120,6 +124,7 @@ def extract_and_verify(client: LMStudioClient, problem_text: str, *,
 
 def run_pipeline(client: LMStudioClient, problem_text: str, *,
                   known_context: str | None = None,
+                  workspace_entries: dict | None = None,
                   narrate: bool = True,
                   with_scenarios: bool = True,
                   max_retries: int | None = None,
@@ -128,7 +133,7 @@ def run_pipeline(client: LMStudioClient, problem_text: str, *,
     each cost one extra LLM round trip and never change whether the math
     is right, which is why batch mode turns them off by default."""
     stage = stage or _no_stage
-    derived = extract_and_verify(client, problem_text, known_context=known_context,
+    derived = extract_and_verify(client, problem_text, known_context=known_context, workspace_entries=workspace_entries,
                                   max_retries=max_retries, stage=stage)
     model = derived.model
 
