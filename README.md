@@ -225,6 +225,10 @@ Markdown, PDF, Python, or a Jupyter notebook.
   reply and **stops it** when the reasoning alone has used the budget (default 1500 tokens) with no answer started, (3) retries once under a JSON schema (so the output starts as JSON) and (4) uses a finished JSON
   object found in the reasoning text when the answer field is empty. Any option LM Studio rejects is dropped and not sent again. If every step fails, the explanation lists what was tried and says what to do: **turn thinking off when you
   load the model in LM Studio** (its "Enable Thinking" model setting; the reliable switch) or use a non-thinking instruct variant, and *not* raise the token limit. Ordinary models cost exactly one call, as before.
+- **The results page is less cluttered** (`ui/layout.py`). Each target's main solution (steps and answer) sits in its own bordered card, with space below it; the extra tools for that answer are grouped under one
+  **🔬 Go further with A** header as tabs: **🎲 Uncertainty** (Monte Carlo, analytic error propagation, guaranteed bounds), **🎚️ Sensitivity**, **🎯 Goal seek** and **🔁 Another way**. A **📑 Contents panel**
+  (toggle at the top right of the results, on by default) puts a rail of jump links to each section on the right of the page; it stays in view while you scroll and is hidden automatically in windows narrower than
+  about 1100 px. Streamlit has no right-hand sidebar, so the rail is a column of the page, and the links are in-page anchors.
 - **The mode list is grouped** under **Solve**, **Science**, **Simulation labs** and **Tools**, each a collapsible section (the one holding the current mode opens by itself). A mode's section is its
   `group=` in `modules/modes/<file>.py` (default "Tools"; a plugin may name a new section).
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**

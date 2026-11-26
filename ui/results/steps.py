@@ -3,6 +3,7 @@ The step-by-step solution section, split per feature: the step list, each target
 """
 import streamlit as st
 from ui.a11y import show_figure
+from ui.layout import anchor, gap, panel
 from modules.latex_text import axis_label, display_latex, ratio_unit, unit_latex, unit_of, unit_plain, with_unit
 import numpy as np
 import pandas as pd
@@ -215,7 +216,7 @@ def render_alternate_method(model: ProblemModel, target_name):
 def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
     """Monte Carlo uncertainty propagation expander."""
     if known_vars_here:
-        with st.expander(f"🎲 Uncertainty propagation for {target_name}"):
+        with panel(f"🎲 Uncertainty propagation for {target_name}"):
             st.caption("Give one or more known inputs a measurement uncertainty and see "
                         "how that uncertainty propagates through to this target -- the "
                         "whole spread of plausible answers, not just a single point estimate.")
@@ -342,7 +343,7 @@ def render_analytic_error(model: ProblemModel, known_vars_here, target_name):
     # a highly nonlinear target or large uncertainties, but
     # needs sampling and gives no formula).
     if known_vars_here:
-        with st.expander(f"📐 Analytic error propagation for {target_name}"):
+        with panel(f"📐 Analytic error propagation for {target_name}"):
             st.caption("The standard first-order formula (σ² = Σ (∂f/∂xᵢ)² σᵢ²) -- "
                         "instant, and exact when the target is linear in its uncertain "
                         "inputs. Shows the actual formula, not just a number.")
@@ -403,7 +404,7 @@ def render_interval_bounds(model: ProblemModel, known_vars_here, target_name):
     # each input as a hard [lo, hi] range instead of a
     # distribution.
     if known_vars_here:
-        with st.expander(f"📏 Guaranteed bounds for {target_name}"):
+        with panel(f"📏 Guaranteed bounds for {target_name}"):
             st.caption("Give each uncertain input a hard range (not a probability "
                         "distribution) and get back a range for this target that is "
                         "GUARANTEED to contain every possible result -- not a confidence "
@@ -460,7 +461,7 @@ def model_unit_of(model: ProblemModel, symbol: str) -> str | None:
 def render_goal_seek(model: ProblemModel, other_vars, target_name):
     """Goal-seek (inverse solve) expander."""
     if other_vars:
-        with st.expander(f"🎯 Goal seek: find the input for a target {target_name}"):
+        with panel(f"🎯 Goal seek: find the input for a target {target_name}"):
             st.caption("What value of an input makes this target hit a specific number? "
                         "Solves for it directly -- exactly when possible, numerically "
                         "otherwise.")
@@ -536,7 +537,7 @@ def render_sensitivity(model: ProblemModel, target_name):
     # Distinct from the uncertainty-propagation step above:
     # this asks "if I deliberately changed this input" not
     # "given its stated measurement error"
-    with st.expander(f"🎚️ Sensitivity analysis for {target_name}"):
+    with panel(f"🎚️ Sensitivity analysis for {target_name}"):
         pct_range = st.slider("Sweep range (± %)", 5, 50, 20, key=f"sens_pct_{target_name}") / 100
         entries = tornado_analysis(model, target_name, _known_substitutions(model), pct_range)
         if not entries:
@@ -594,28 +595,29 @@ def render_step_by_step(client: LMStudioClient, ws: Workspace, model: ProblemMod
             file_name="solution.ipynb", mime="application/x-ipynb+json",
         )
     for target_name, steps in steps_by_target.items():
-        render_step_list(client, model, report, steps, target_name)
-        render_target_answer(ws, model, report, problem_text, opt_result, target_name)
+        # the main solution: its own card, so the extras below do not read as part of the answer
+        with st.container(border=True):
+            render_step_list(client, model, report, steps, target_name)
+            render_target_answer(ws, model, report, problem_text, opt_result, target_name)
         # Everything below only applies to algebraic (equation-kind) targets.
         if target_kind(model, target_name) == "equation":
-            render_alternate_method(model, target_name)
-            # ---- Monte Carlo uncertainty propagation: give one or
-            # more KNOWN inputs a measurement uncertainty (mean ±
-            # std) and see the resulting SPREAD in this target,
-            # sampled jointly across all of them at once -- see
-            # monte_carlo.py. Complementary to (not a replacement
-            # for) the sensitivity analysis below, which varies one
-            # input at a time deterministically rather than
-            # propagating a joint distribution.
+            gap(1.2)
+            anchor(f"tools-{target_name}", f"Go further: {target_name}")
+            st.markdown(f"#### 🔬 Go further with {target_name}")
+            st.caption("Uncertainty, sensitivity, goal seek and other ways to solve it, for this answer.")
             known_vars_here = [v for v in model.variables if v.known_value is not None]
-            render_monte_carlo(model, known_vars_here, target_name)
-            render_analytic_error(model, known_vars_here, target_name)
-            render_interval_bounds(model, known_vars_here, target_name)
-            # ---- goal seek / inverse solve: the inverse of
-            # chains.sweep_step_binding's "vary this input and see
-            # what happens" -- "what value of this input gives a
-            # SPECIFIC target number", solved directly rather than
-            # by sweeping and reading a chart.
             other_vars = [v for v in model.variables if v.symbol != target_name]
-            render_goal_seek(model, other_vars, target_name)
-            render_sensitivity(model, target_name)
+            tab_unc, tab_sens, tab_goal, tab_alt = st.tabs(["🎲 Uncertainty", "🎚️ Sensitivity", "🎯 Goal seek", "🔁 Another way"])
+            with tab_unc:
+                # Monte Carlo (sampled, joint), the first-order formula (instant, exact for a linear target) and hard interval bounds (a guarantee, not a probability)
+                render_monte_carlo(model, known_vars_here, target_name)
+                render_analytic_error(model, known_vars_here, target_name)
+                render_interval_bounds(model, known_vars_here, target_name)
+            with tab_sens:
+                render_sensitivity(model, target_name)
+            with tab_goal:
+                # the inverse of "vary this input and see what happens": which input value gives a SPECIFIC target number
+                render_goal_seek(model, other_vars, target_name)
+            with tab_alt:
+                render_alternate_method(model, target_name)
+        gap(2)

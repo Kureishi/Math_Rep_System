@@ -594,6 +594,13 @@ Decisions and operational details that don't belong in the README.
   switch is not honoured for some Qwen releases and a schema is applied to the reasoning stream (so the JSON may arrive in `reasoning_content`), which is why the ladder does not depend on either working.
   `.meta["attempts"]` feeds the failure explanation (`modules/llm_diagnosis.py`).
 
+- **Results layout** (`ui/layout.py`, `ui/results/__init__.py`, `ui/results/steps.py`). `render_results` is layout only: a "Contents panel" toggle, then `st.columns([5, 1.25])` with the sections in the main column
+  (`_render_sections`, unchanged order) and the rail in a keyed container (`results_rail`) created FIRST and filled LAST: each section calls `anchor(key, label)`, which records it in `session_state` and emits an
+  `<div id="sec-key" class="mrs-anchor">`, so the rail lists exactly what this problem produced (a link per anchor; Streamlit renders `[x](#id)` as a plain `<a href="#id">`, which the browser scrolls to).
+  CSS: anchors have zero height and a `scroll-margin-top` under the fixed header; the rail is `position: sticky` with its own scroll and is `display: none` under 1100 px (with its toggle). Per target,
+  `render_step_by_step` puts the steps and the answer in a bordered container, then `gap()`, an anchor, a "Go further" header and four tabs; the five tools use `panel()` (a bordered card with a bold title) in place
+  of the expanders they used to be, because inside a tab there is nothing to collapse. Unverified in a browser: the rail's stickiness depends on Streamlit's column flex layout.
+
 - **Mode navigation and History are separate sidebar modules** (`ui/mode_nav.py`, `ui/history_panel.py`). The mode list is buttons that set `session_state["app_mode"]` from an `on_click` callback, in sections from
   `ModeSpec.group` (`REGISTRY.grouped()`); because no widget owns that key any more it can be written at any point of a run. History's delete is a callback that stores a full-row snapshot in the session
   (`history.delete_with_undo`) for the Undo bar; `history.restore` re-inserts it under the old id. Starring is a `pinned` column (migration 005); pruning keeps every starred row and counts only the others toward the cap.

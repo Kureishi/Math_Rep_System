@@ -116,6 +116,22 @@ def inject_base_styles() -> None:
             transform: translateY(-1px);
             box-shadow: 0 3px 10px rgba(0, 0, 0, 0.10);
         }
+        /* ---- results page layout (ui/layout.py). Section anchors take no room and leave space under Streamlit's fixed header when jumped to; the "Contents" rail on
+           the right stays in view while scrolling (position: sticky inside its column), scrolls on its own if it is longer than the window, and is hidden together with
+           its toggle in windows under 1100 px, where a fifth of the width is better spent on the content. */
+        .mrs-anchor { scroll-margin-top: 4.5rem; height: 0; }
+        [data-testid="stElementContainer"]:has(.mrs-anchor) { height: 0; margin: 0; padding: 0; min-height: 0; }
+        [class*="st-key-results_rail"] {
+            position: sticky; top: 4.5rem; max-height: calc(100vh - 6rem); overflow-y: auto;
+            font-size: 0.9rem; padding-left: 0.9rem; border-left: 1px solid rgba(128, 128, 128, 0.3);
+        }
+        [class*="st-key-results_rail"] ul { list-style: none; padding-left: 0; margin: 0.2rem 0 0 0; }
+        [class*="st-key-results_rail"] li { margin: 0.35rem 0; }
+        [class*="st-key-results_rail"] a { text-decoration: none; }
+        [class*="st-key-results_rail"] a:hover { text-decoration: underline; }
+        @media (max-width: 1100px) {
+            [class*="st-key-results_rail"], [class*="st-key-show_rail"] { display: none; }
+        }
         /* Narrow windows (about 800 px or less): the main area is already tight, so give it back some of its side padding, and let a row of columns wrap
            instead of squeezing four buttons into 80 px each. Only below 900 px, so the normal layout is untouched. The sidebar is excluded. */
         @media (max-width: 900px) {
