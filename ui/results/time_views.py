@@ -4,6 +4,7 @@ FORMULA in its parameters (and initial values), not just one evaluated curve:
 the uncertainty fan and the parameter morph for an ODE, and the bifurcation
 diagram (with a cobweb) for a first-order map.
 """
+from modules.latex_text import unit_of, with_unit
 import numpy as np
 import streamlit as st
 from ui.a11y import show_figure
@@ -111,8 +112,9 @@ def _render_fan(model, group, symbolic, params, label, t0) -> None:
         show_figure(cached(f"fan:{label}", (fan,), lambda: build_uncertainty_fan(fan)),
                          width="stretch", key=f"fan_{label}")
         for i, name in enumerate(fan.names):
-            st.write(f"**{name}** at t = {fan.t[-1]:g}: nominal {fan.nominal[i][-1]:.4g}, 90% of samples in "
-                      f"[{fan.p5[i][-1]:.4g}, {fan.p95[i][-1]:.4g}]")
+            u = unit_of(model, name)
+            st.write(f"**{name}** at t = {with_unit(f'{fan.t[-1]:g}', unit_of(model, 't'))}: nominal {with_unit(f'{fan.nominal[i][-1]:.4g}', u)}, 90% of samples in "
+                      f"[{fan.p5[i][-1]:.4g}, {with_unit(f'{fan.p95[i][-1]:.4g}', u)}]")
         if want_envelope:
             st.caption(fan.envelope_note or "No guaranteed envelope for this solution.")
         if fan.finite_fraction < 1.0:

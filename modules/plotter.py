@@ -4,6 +4,7 @@ Plots any derived equation/expression that has exactly one free
 parameters are substituted in. Streamlit reruns the script on every
 slider move, so the figure is recomputed live -- no manual callback wiring.
 """
+from modules.latex_text import axis_label
 from modules.palette import INK
 import numpy as np
 import plotly.graph_objects as go
@@ -278,7 +279,7 @@ def build_dependency_graph_plot(nodes, edges):
     return fig
 
 
-def build_tornado_chart(entries):
+def build_tornado_chart(entries, unit: str = ""):
     """Interactive counterpart of plot_snapshot.snapshot_tornado_chart():
     a horizontal bar per input, largest swing at top."""
     fig = go.Figure()
@@ -288,15 +289,15 @@ def build_tornado_chart(entries):
     widths = [h - l for l, h in zip(lows, highs)]
     fig.add_trace(go.Bar(
         y=labels, x=widths, base=lows, orientation="h",
-        hovertext=[f"{e.symbol}: {e.low_target:.4g} to {e.high_target:.4g}" for e in entries],
+        hovertext=[f"{e.symbol}: {e.low_target:.4g} to {e.high_target:.4g}{(' ' + unit) if unit else ''}" for e in entries],
         hoverinfo="text",
     ))
-    fig.update_layout(xaxis_title="target value across each input's swept range",
+    fig.update_layout(xaxis_title=axis_label("target value across each input's swept range", unit),
                         yaxis=dict(autorange="reversed"))
     return fig
 
 
-def build_sweep_chart(sweep_result):
+def build_sweep_chart(sweep_result, x_unit: str = "", y_unit: str = ""):
     """Interactive counterpart of plot_snapshot.snapshot_sweep_chart()."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=sweep_result.values, y=sweep_result.target_values,
@@ -304,7 +305,7 @@ def build_sweep_chart(sweep_result):
     if sweep_result.nominal_target is not None:
         fig.add_trace(go.Scatter(x=[sweep_result.nominal_input], y=[sweep_result.nominal_target],
                                    mode="markers", marker=dict(size=10, color="red"), name="nominal"))
-    fig.update_layout(xaxis_title=sweep_result.symbol, yaxis_title="target value")
+    fig.update_layout(xaxis_title=axis_label(sweep_result.symbol, x_unit), yaxis_title=axis_label("target value", y_unit))
     return fig
 
 
@@ -414,7 +415,7 @@ def build_spread_plot(values: list[float], target_symbol: str, labels: list[str]
 
 def build_histogram_plot(samples: list[float], target_symbol: str,
                            mean: float | None = None, p5: float | None = None,
-                           p95: float | None = None) -> go.Figure:
+                           p95: float | None = None, unit: str = "") -> go.Figure:
     """Histogram of Monte Carlo output samples (see monte_carlo.py), with
     vertical reference lines for the mean and the 5th/95th percentile
     band -- the propagated-uncertainty counterpart of a single point
@@ -433,13 +434,14 @@ def build_histogram_plot(samples: list[float], target_symbol: str,
     if p95 is not None:
         fig.add_vline(x=p95, line_dash="dash", line_color="gray",
                        annotation_text="95th pct", annotation_position="top right")
-    fig.update_layout(xaxis_title=target_symbol, yaxis_title="count",
+    fig.update_layout(xaxis_title=axis_label(target_symbol, unit), yaxis_title="count",
                         title=f"Monte Carlo distribution of {target_symbol} ({len(samples)} samples)")
     return fig
 
 
 def build_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: str, y_label: str,
-                          target_symbol: str, selectable: bool = False) -> go.Figure:
+                          target_symbol: str, selectable: bool = False,
+                          x_unit: str = "", y_unit: str = "", target_unit: str = "") -> go.Figure:
     """A 2D parameter sweep's result as a heatmap -- x/y are the two
     swept variables, color is the target value at each grid point. The
     natural visualization for parameter_sweep.py's 2-variable case,
@@ -448,9 +450,9 @@ def build_sweep_heatmap(x_values: list, y_values: list, z_matrix, x_label: str, 
     glance the way a heatmap does."""
     fig = go.Figure(data=go.Heatmap(
         x=x_values, y=y_values, z=z_matrix, colorscale="Viridis",
-        colorbar=dict(title=target_symbol), hoverongaps=False,
+        colorbar=dict(title=axis_label(target_symbol, target_unit)), hoverongaps=False,
     ))
-    fig.update_layout(xaxis_title=x_label, yaxis_title=y_label,
+    fig.update_layout(xaxis_title=axis_label(x_label, x_unit), yaxis_title=axis_label(y_label, y_unit),
                         title=f"{target_symbol} across {x_label} \u00d7 {y_label}")
     if selectable:
         # Plotly cannot select points of a heatmap (no click/box/lasso selection for that trace type), so
@@ -593,7 +595,7 @@ def build_cobweb_plot(g, x0: float, x_range: tuple[float, float], n_steps: int =
 
 
 def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
-                                          n_frames: int = 40) -> go.Figure:
+                                          n_frames: int = 40, unit: str = "") -> go.Figure:
     """Animates a Monte Carlo estimate stabilizing as samples accumulate --
     the running mean (with a running ±1 std band) plotted against sample
     count (hovering anywhere over the plot, band included, shows the running mean, std and relative std at that count), playing from the first handful of samples up to the full set.
@@ -619,6 +621,7 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
     # rounded (std to 5 decimals, relative std to 3): the tooltip shows 4 and 2 digits, and full-precision floats would add ~4 MB to the figure's data (every frame repeats them)
     hover_data = [[round(float(sd), 5), None if np.isnan(rel) else round(float(rel), 3)] for sd, rel in zip(running_std, relative_std_pct)]
 
+    unit_sfx = f" {unit}" if unit else ""
     checkpoints = np.unique(np.linspace(1, n, min(n_frames, n)).astype(int))
     idx = np.arange(1, n + 1)
     y_min = float(np.min(running_mean - running_std))
@@ -635,7 +638,7 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
             # With layout.hovermode "x" this tooltip appears wherever the pointer is over the plot at that sample count, including over the shaded band
             go.Scatter(x=idx[:k], y=running_mean[:k], mode="lines", name="running mean",
                         line=dict(color="#0072B2", width=3), customdata=hover_data[:k],
-                        hovertemplate=("<b>n = %{x}</b><br>running mean = %{y:.6g}<br>running std = %{customdata[0]:.4g}<br>"
+                        hovertemplate=(f"<b>n = %{{x}}</b><br>running mean = %{{y:.6g}}{unit_sfx}<br>running std = %{{customdata[0]:.4g}}{unit_sfx}<br>"
                                        "<b>relative std = %{customdata[1]:.2f}%</b> of the mean<extra></extra>")),
         ]
 
@@ -644,7 +647,7 @@ def build_monte_carlo_convergence_plot(samples: list[float], target_symbol: str,
         data=frame_data(int(checkpoints[0])),
         layout=go.Layout(
             xaxis=dict(title="samples used", range=[1, n]),
-            yaxis=dict(title=target_symbol, range=[y_min - pad, y_max + pad]),
+            yaxis=dict(title=axis_label(target_symbol, unit), range=[y_min - pad, y_max + pad]),
             title=f"Convergence of the {target_symbol} estimate ({n} samples)",
             hovermode="x",
             updatemenus=[dict(type="buttons", showactive=False, x=0.05, y=1.15, buttons=[

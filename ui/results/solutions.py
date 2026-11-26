@@ -1,6 +1,7 @@
 """
 ODE and recurrence closed-form solution sections (plot + evaluate-at-a-point).
 """
+from modules.latex_text import unit_of, with_unit
 import streamlit as st
 from ui.a11y import show_figure
 import sympy as sp
@@ -78,7 +79,7 @@ def render_ode_solution(ws: Workspace, model: ProblemModel):
                 eval_point = st.number_input(f"Evaluate {func_name} at {indep_sym} =",
                                                value=float(t_range[1]), key=f"odeeval_{func_name}")
                 eval_value = float(np.real(complex(f(eval_point))))
-                st.write(f"**{func_name}({indep_sym}={eval_point:g}) = {eval_value:.6g}**")
+                st.write(f"**{func_name}({with_unit(f'{indep_sym}={eval_point:g}', unit_of(model, indep_sym))}) = {with_unit(f'{eval_value:.6g}', unit_of(model, func_name))}**")
                 if st.button(f"➕ Extract this value to workspace", key=f"odeextract_{func_name}"):
                     unit = next((v.unit for v in model.variables if v.symbol == func_name), None)
                     ws.store(f"{func_name}_at_{eval_point:g}", eval_value,
@@ -371,7 +372,7 @@ def render_recurrence_solution(ws: Workspace, model: ProblemModel):
                 eval_point = st.number_input(f"Evaluate {func_name} at {indep_sym} =",
                                                value=int(n_range[1]), step=1, key=f"receval_{func_name}")
                 eval_value = float(np.real(complex(f(eval_point))))
-                st.write(f"**{func_name}({indep_sym}={eval_point:g}) = {eval_value:.6g}**")
+                st.write(f"**{func_name}({with_unit(f'{indep_sym}={eval_point:g}', unit_of(model, indep_sym))}) = {with_unit(f'{eval_value:.6g}', unit_of(model, func_name))}**")
                 if st.button(f"➕ Extract this value to workspace", key=f"recextract_{func_name}"):
                     unit = next((v.unit for v in model.variables if v.symbol == func_name), None)
                     ws.store(f"{func_name}_at_{eval_point:g}", eval_value,

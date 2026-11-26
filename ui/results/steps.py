@@ -3,7 +3,7 @@ The step-by-step solution section, split per feature: the step list, each target
 """
 import streamlit as st
 from ui.a11y import show_figure
-from modules.latex_text import display_latex, unit_latex, unit_plain
+from modules.latex_text import axis_label, display_latex, ratio_unit, unit_latex, unit_of, unit_plain, with_unit
 import numpy as np
 import pandas as pd
 from modules import proof_card
@@ -296,8 +296,9 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                 st.session_state[f"mc_result_{target_name}"] = mc_result
             mc_result = st.session_state.get(f"mc_result_{target_name}")
             if mc_result is not None and mc_result.samples:
-                st.write(f"**{target_name} = {mc_result.mean:.6g} ± {mc_result.std:.4g}** "
-                          f"(5th–95th percentile: {mc_result.p5:.6g} to {mc_result.p95:.6g})")
+                t_unit = unit_of(model, target_name)
+                st.write(f"**{target_name} = {with_unit(f'{mc_result.mean:.6g} ± {mc_result.std:.4g}', t_unit)}** "
+                          f"(5th–95th percentile: {mc_result.p5:.6g} to {with_unit(f'{mc_result.p95:.6g}', t_unit)})")
                 st.caption(f"Seed used: {mc_result.seed} -- reuse it above to reproduce "
                             "this exact run.")
                 render_copy_popover(f"Copy {target_name} summary", monte_carlo_copy_forms(
@@ -309,7 +310,7 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                                 "didn't produce a real result and were excluded.")
                 hist_fig = build_histogram_plot(mc_result.samples, target_name,
                                                    mean=mc_result.mean, p5=mc_result.p5,
-                                                   p95=mc_result.p95)
+                                                   p95=mc_result.p95, unit=unit_of(model, target_name))
                 show_figure(hist_fig, width='stretch', key=f"mc_hist_{target_name}")
                 format_download_button(
                     key=f"mc_hist_{target_name}",
@@ -324,7 +325,7 @@ def render_monte_carlo(model: ProblemModel, known_vars_here, target_name):
                                     "where it ended up. A band that's still visibly narrowing "
                                     "at the right edge means more samples would still help; "
                                     "one that's flat well before the end means it's converged.")
-                        conv_fig = build_monte_carlo_convergence_plot(mc_result.samples, target_name)
+                        conv_fig = build_monte_carlo_convergence_plot(mc_result.samples, target_name, unit=unit_of(model, target_name))
                         show_figure(conv_fig, width="stretch", key=f"mc_conv_{target_name}")
             elif mc_result is not None:
                 st.warning("No samples produced a real result -- try smaller std values.")
@@ -382,13 +383,14 @@ def render_analytic_error(model: ProblemModel, known_vars_here, target_name):
                 st.session_state[f"ep_result_{target_name}"] = ep_result
             ep_result = st.session_state.get(f"ep_result_{target_name}")
             if ep_result is not None:
-                st.write(f"**{target_name} = {ep_result.value:.6g} ± {ep_result.std:.4g}**")
+                t_unit = unit_of(model, target_name)
+                st.write(f"**{target_name} = {with_unit(f'{ep_result.value:.6g} ± {ep_result.std:.4g}', t_unit)}**")
                 if ep_result.formula_latex:
                     st.latex(f"{target_name} = {ep_result.formula_latex}")
                 st.caption("Contribution to total variance:")
                 for sym, frac in sorted(ep_result.contributions.items(), key=lambda kv: -kv[1]):
                     st.write(f"- `{sym}`: {frac:.0%} "
-                              f"(∂{target_name}/∂{sym} = {ep_result.partials[sym]:.4g})")
+                              f"(∂{target_name}/∂{sym} = {with_unit(f'{ep_result.partials[sym]:.4g}', ratio_unit(t_unit, unit_of(model, sym)))})")
 
 
 
@@ -441,9 +443,10 @@ def render_interval_bounds(model: ProblemModel, known_vars_here, target_name):
                 st.session_state[f"iv_result_{target_name}"] = iv_result
             iv_result = st.session_state.get(f"iv_result_{target_name}")
             if iv_result is not None:
+                t_unit = unit_of(model, target_name)
                 st.success(f"**{target_name} is guaranteed to fall within "
-                            f"[{iv_result.lo:.6g}, {iv_result.hi:.6g}]** "
-                            f"(width {iv_result.width:.4g})")
+                            f"[{iv_result.lo:.6g}, {iv_result.hi:.6g}]{(' ' + t_unit) if t_unit else ''}** "
+                            f"(width {with_unit(f'{iv_result.width:.4g}', t_unit)})")
                 if iv_result.formula_latex:
                     st.latex(f"{target_name} = {iv_result.formula_latex}")
 
@@ -539,7 +542,7 @@ def render_sensitivity(model: ProblemModel, target_name):
         if not entries:
             st.caption("No swept inputs available for this target.")
         else:
-            tornado_fig = build_tornado_chart(entries)
+            tornado_fig = build_tornado_chart(entries, unit=unit_of(model, target_name))
             st.caption("Click a bar to act on that input.")
             tornado_state = selectable_chart(tornado_fig, key=f"tornado_{target_name}")
             picked = clicked_symbol(tornado_state, [e.symbol for e in entries])
@@ -559,7 +562,7 @@ def render_sensitivity(model: ProblemModel, target_name):
             sweep_result = sweep_input(model, target_name, sweep_symbol,
                                          _known_substitutions(model), pct_range)
             if sweep_result:
-                sweep_fig = build_sweep_chart(sweep_result)
+                sweep_fig = build_sweep_chart(sweep_result, x_unit=unit_of(model, sweep_symbol), y_unit=unit_of(model, target_name))
                 show_figure(sweep_fig, width='stretch', key=f"sweep_{target_name}")
                 snapshot_button(
                     key=f"sweep_{target_name}_{sweep_symbol}",

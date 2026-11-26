@@ -1,6 +1,7 @@
 """
 The Verify tab of a solved problem.
 """
+from modules.latex_text import unit_of, with_unit
 import streamlit as st
 from ui.a11y import show_figure
 from config import settings
@@ -25,9 +26,9 @@ def render_verify_tab(client: LMStudioClient, model: ProblemModel, report: Verif
                     margin_tag = f"  `confidence: {confidence_label(c.margin_ratio)}`"
                 (st.write if c.passed else st.error)(f"{icon} **{c.label}**: {c.detail}{margin_tag}")
             for target, val in report.sympy_numeric_answers.items():
-                st.write(f"Derived-equation answer for `{target}`: `{val:.6g}`")
+                st.write(f"Derived-equation answer for `{target}`: `{with_unit(f'{val:.6g}', unit_of(model, target))}`")
             for target, val in report.llm_independent_answers.items():
-                st.write(f"Independent cross-check for `{target}`: `{val:.6g}`")
+                st.write(f"Independent cross-check for `{target}`: `{with_unit(f'{val:.6g}', unit_of(model, target))}`")
 
         # ---- domain of validity: when does each formula's derived relation
         # actually make sense (never divide by zero, sqrt of a negative, log
@@ -80,8 +81,9 @@ def render_verify_tab(client: LMStudioClient, model: ProblemModel, report: Verif
                         st.write(f"Equation structure match: {paranoid_result.equations_match:.0%}")
                         if paranoid_result.disagreements:
                             for target, (primary_val, secondary_val) in paranoid_result.disagreements.items():
-                                st.error(f"**{target}** disagreement: primary = {primary_val:.6g}, "
-                                          f"{paranoid_result.secondary_model} = {secondary_val:.6g}")
+                                t_unit = unit_of(model, target)
+                                st.error(f"**{target}** disagreement: primary = {with_unit(f'{primary_val:.6g}', t_unit)}, "
+                                          f"{paranoid_result.secondary_model} = {with_unit(f'{secondary_val:.6g}', t_unit)}")
                         elif paranoid_result.secondary_answers:
                             st.success("Both models agree on every shared answer.")
 
@@ -131,8 +133,9 @@ def render_verify_tab(client: LMStudioClient, model: ProblemModel, report: Verif
                     if len(spread_values) >= 2:
                         fig = build_spread_plot(spread_values, sc_target)
                         show_figure(fig, width='stretch')
-                        st.caption(f"{sc_target}: mean {sum(spread_values) / len(spread_values):.4g}, "
-                                    f"min {min(spread_values):.4g}, max {max(spread_values):.4g} "
+                        sc_unit = unit_of(model, sc_target)
+                        st.caption(f"{sc_target}: mean {with_unit(f'{sum(spread_values) / len(spread_values):.4g}', sc_unit)}, "
+                                    f"min {with_unit(f'{min(spread_values):.4g}', sc_unit)}, max {with_unit(f'{max(spread_values):.4g}', sc_unit)} "
                                     f"across {len(spread_values)} runs.")
                         png = snapshot_spread_plot(spread_values, sc_target)
                         st.download_button("Download plot as PNG", data=png,

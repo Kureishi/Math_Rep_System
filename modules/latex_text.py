@@ -8,6 +8,7 @@ and it works on steps saved in History long ago, whose stored expression is stil
 """
 import re
 import textwrap
+from typing import Any
 
 _WORD = re.compile(r"(?<![A-Za-z])[A-Za-z]{3,}(?![A-Za-z])")
 _MATH_MARKS = set("\\={}^_$")
@@ -77,3 +78,29 @@ def unit_plain(unit: str | None) -> str:
         return ""
     u = unit.strip().replace("**", "^").replace("*", "·")
     return re.sub(r"\^(-?\d+)", lambda m: "".join(_SUPERSCRIPTS.get(c, c) for c in m.group(1)), u)
+
+
+def unit_of(model: Any, symbol: str) -> str:
+    """The plain-text unit the problem gave `symbol` ('m²', 'm/s'), or '' if it gave none."""
+    return unit_plain(next((v.unit for v in getattr(model, "variables", []) if v.symbol == symbol), None))
+
+
+def with_unit(text: str, unit: str) -> str:
+    """'63.24' + 'm²' -> '63.24 m²' (unchanged when there is no unit)."""
+    return f"{text} {unit}" if unit else text
+
+
+def axis_label(symbol: str, unit: str) -> str:
+    """'A' + 'm²' -> 'A (m²)': what an axis or a field is titled when the unit is known."""
+    return f"{symbol} ({unit})" if unit else symbol
+
+
+def ratio_unit(numerator: str, denominator: str) -> str:
+    """The unit of a derivative or ratio: 'm²' / 'm' -> 'm²/m'; a compound denominator is parenthesised ('J/(kg·K)'). '' when either side has no unit,
+    because then the ratio's unit is not known."""
+    if not numerator or not denominator:
+        return ""
+    if numerator == denominator:
+        return ""                                    # a pure number
+    den = f"({denominator})" if any(c in denominator for c in "/·") else denominator
+    return f"{numerator}/{den}"

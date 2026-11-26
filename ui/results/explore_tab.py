@@ -5,7 +5,7 @@ from typing import Any
 
 import streamlit as st
 from ui.a11y import show_figure
-from modules.latex_text import display_latex
+from modules.latex_text import display_latex, unit_of, with_unit
 import numpy as np
 import pandas as pd
 from modules.equation_engine import ProblemModel, Variable, target_kind
@@ -151,8 +151,9 @@ def _render_grid_point_actions(model: ProblemModel, target: str, x_sym: str, y_s
     (so the live plots, vector summary and what-if start from exactly that point), or open it in
     Compare against the original solve."""
     x, y = point
-    shown = f"{target} = {value:.6g}" if value is not None else f"no value of {target} at this point"
-    st.markdown(f"**{x_sym} = {x:.6g}, {y_sym} = {y:.6g}**  →  {shown}")
+    unit_of_symbol = lambda sym: unit_of(model, sym)                       # noqa: E731
+    shown = f"{target} = {with_unit(f'{value:.6g}', unit_of_symbol(target))}" if value is not None else f"no value of {target} at this point"
+    st.markdown(f"**{x_sym} = {with_unit(f'{x:.6g}', unit_of_symbol(x_sym))}, {y_sym} = {with_unit(f'{y:.6g}', unit_of_symbol(y_sym))}**  →  {shown}")
     loads = {f"var_{x_sym}": float(x), f"var_{y_sym}": float(y)}
     c1, c2 = st.columns(2)
     with c1:
@@ -219,7 +220,8 @@ def _render_sweep_panel(model: ProblemModel, sweep_targets: list[str], sweepable
             if len(sweep_result.swept_symbols) == 2:
                 x_sym, y_sym = sweep_result.swept_symbols
                 gx, gy, gz = sweep_result_to_grid(sweep_result)
-                heatmap_fig = build_sweep_heatmap(gx, gy, gz, x_sym, y_sym, sweep_result.target, selectable=True)
+                heatmap_fig = build_sweep_heatmap(gx, gy, gz, x_sym, y_sym, sweep_result.target, selectable=True,
+                                                  x_unit=unit_of(model, x_sym), y_unit=unit_of(model, y_sym), target_unit=unit_of(model, sweep_result.target))
                 st.caption("Click a grid point to load its values.")
                 heat_state = selectable_chart(heatmap_fig, key="sweep_heatmap")
                 picked_point = clicked_grid_point(heat_state, gx, gy)
