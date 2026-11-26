@@ -88,6 +88,10 @@ def test_the_rail_and_the_spacing_have_css_and_the_rail_hides_in_narrow_windows(
     css = seen[0]
     assert "st-key-results_rail" in css and "position: sticky" in css and ".mrs-anchor" in css and "scroll-margin-top" in css
     assert "@media (max-width: 1100px)" in css and "st-key-show_rail" in css
+    # sticky must sit on the COLUMN (a rail whose parent is as tall as itself has nowhere to stick) and the column must not stretch
+    sticky = css[css.index('[data-testid="stColumn"]:has([class*="st-key-results_rail"]) {'):]
+    sticky = sticky[:sticky.index("}")]
+    assert "position: sticky" in sticky and "align-self: flex-start" in sticky and "top: 4.5rem" in sticky
 
 
 def test_the_layout_helpers_work_standalone():
