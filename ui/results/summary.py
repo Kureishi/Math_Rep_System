@@ -322,6 +322,27 @@ def render_assumptions(model: ProblemModel):
 
 
 
+VAR_SEEDS_KEY = "_var_seeds"           # {widget key: the default it was last seeded with}
+
+
+def _seed_variable_widget(key: str, default: float) -> None:
+    """Put the model's value into a Variables input, and keep it there when the model changes.
+
+    Why not just `value=default`: a keyed Streamlit widget keeps its identity (and the browser keeps its value) when only the default changes, so after a new problem was solved the panel kept showing
+    the PREVIOUS problem's numbers (a = 0.00, t = 6.00) while the solution used the new ones (a = 2, t = 10). Deleting the key on the server is not enough either: the browser sends its old value back.
+    Setting the value through session_state before the widget is created is what the browser obeys. So:
+      - no value yet                      -> seed it with the model's value;
+      - the value is still what WE seeded, and the model's value has changed (a new problem)  -> re-seed;
+      - anything else (the person edited it, or a saved view was restored)  -> leave it alone."""
+    seeds = st.session_state.setdefault(VAR_SEEDS_KEY, {})
+    if key not in st.session_state:
+        st.session_state[key] = default
+        seeds[key] = default
+    elif key in seeds and seeds[key] != default and st.session_state[key] == seeds[key]:
+        st.session_state[key] = default
+        seeds[key] = default
+
+
 def render_variables(model: ProblemModel):
     """Editable variable table. Returns edited_values ({symbol: value the person changed it to}), consumed by the plot and vector sections."""
     # ---- variables (editable, modification support)
@@ -334,10 +355,9 @@ def render_variables(model: ProblemModel):
         for i, v in enumerate(scalar_vars):
             with var_cols[i % len(var_cols)]:
                 default = v.known_value if v.known_value is not None else 0.0
-                edited_values[v.symbol] = st.number_input(
-                    f"{v.symbol} — {v.meaning} ({v.unit or 'unitless'})",
-                    value=float(default), key=f"var_{v.symbol}",
-                )
+                key = f"var_{v.symbol}"
+                _seed_variable_widget(key, float(default))
+                edited_values[v.symbol] = st.number_input(f"{v.symbol} — {v.meaning} ({v.unit or 'unitless'})", key=key)
                 for note in model.assumptions:                  # where a value came from, when it did not come from the problem text itself (modules/workspace.py)
                     if note.startswith(f"{v.symbol} = ") and "taken from the workspace" in note:
                         st.caption("↳ from the workspace")

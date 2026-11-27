@@ -247,3 +247,48 @@ def test_the_whole_app_solves_the_follow_up_after_the_first_problem():
         assert captions.count("↳ from the workspace") == 1 and captions.count("↳ from the earlier problem") == 1 and captions.count("↳ changed as the problem says") == 1
     finally:
         lc.LMStudioClient = real                                  # type: ignore[misc]
+
+
+# ------------------------------------------------------------------------------------------ the Variables panel follows the model
+
+def _variables_page():
+    import streamlit as st
+    from ui.results.summary import render_variables
+    render_variables(st.session_state["m"])
+
+
+def _model_with(**known):
+    payload = json.loads(json.dumps(FOLLOW_MODEL))
+    for v in payload["variables"]:
+        v["known_value"] = None if known.get(v["symbol"]) is None else str(known[v["symbol"]])
+    return _model(payload)
+
+
+def test_the_variables_panel_shows_the_new_models_values_not_the_previous_problems():
+    """Regression: the panel kept a = 0.00, t = 6.00 from the previous problem while the solution used a = 2, t = 10."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_function(_variables_page, default_timeout=60)
+    at.session_state["m"] = _model_with(t=6)
+    at.run()
+    assert {n.key: n.value for n in at.number_input} == {"var_a": 0.0, "var_t": 6.0, "var_d": 0.0, "var_v0": 0.0}
+    at.session_state["m"] = _model_with(a=2, t=10, v0=8)                         # a new problem with the same symbols; the old widget values are still in place
+    at.run()
+    assert {n.key: n.value for n in at.number_input} == {"var_a": 2.0, "var_t": 10.0, "var_d": 0.0, "var_v0": 8.0}
+
+
+def test_a_value_the_person_edited_survives_a_rerun_and_a_restored_value_is_not_overwritten():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_function(_variables_page, default_timeout=60)
+    at.session_state["m"] = _model_with(t=6)
+    at.run()
+    next(n for n in at.number_input if n.key == "var_t").set_value(7.5).run()
+    at.run()
+    assert next(n for n in at.number_input if n.key == "var_t").value == 7.5      # same model, edited: untouched
+    at.session_state["m"] = _model_with(a=2, t=10, v0=8)
+    at.run()
+    assert next(n for n in at.number_input if n.key == "var_t").value == 7.5      # the person's edit is not thrown away
+    at2 = AppTest.from_function(_variables_page, default_timeout=60)
+    at2.session_state["m"] = _model_with(t=6)
+    at2.session_state["var_t"] = 9.0                                              # what restoring a saved view does
+    at2.run()
+    assert next(n for n in at2.number_input if n.key == "var_t").value == 9.0
