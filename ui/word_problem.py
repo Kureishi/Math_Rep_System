@@ -11,7 +11,7 @@ import streamlit as st
 from modules import history
 from modules.app_logging import logger
 from modules.llm_client import LMStudioClient
-from modules.workspace import Workspace
+from modules.workspace import Workspace, earlier_context, earlier_entries, is_follow_up
 from modules import provenance
 from ui import view_state
 from ui.common import check_upload_size
@@ -83,8 +83,15 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
     # ---------------------------------------------------------------- pipeline
     if solve_clicked and problem_text.strip():
         from modules.pipeline import run_pipeline
+        previous_model, previous_text = st.session_state.get("model"), st.session_state.get("problem_text")      # before they are replaced by this solve
         st.session_state["problem_text"] = problem_text
         known_context = ws.as_context_string()
+        earlier = None
+        if is_follow_up(problem_text):
+            # "the car from before, 10 seconds instead of 6": the model is shown the earlier problem's values, labelled as context, and the app fills in what it leaves out
+            earlier = earlier_entries(previous_model, dict(ws.entries))
+            block = earlier_context(previous_text, earlier)
+            known_context = f"{known_context}\n{block}" if known_context and block else (block or known_context)
 
         st.session_state["_pipeline_warnings"] = []
         saved_ok = False
@@ -108,7 +115,7 @@ def render_word_problem_page(client: LMStudioClient, ws: Workspace, ok: bool) ->
                     st.write(f"✅ {label}")
                     solve_log.append(label)
 
-                result = run_pipeline(client, problem_text, known_context=known_context, workspace_entries=dict(ws.entries), stage=stage)
+                result = run_pipeline(client, problem_text, known_context=known_context, workspace_entries=dict(ws.entries), earlier=earlier, stage=stage)
                 status.update(label="Solved" if not result.warnings else "Solved (with warnings)", state="complete", expanded=False)
 
             model, report, steps, scenarios = result.model, result.report, result.steps, result.scenarios

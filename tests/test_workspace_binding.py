@@ -130,3 +130,120 @@ def test_the_variables_panel_says_which_value_came_from_the_workspace():
     assert not at.exception
     assert [c.value for c in at.caption].count("↳ from the workspace") == 1
     assert next(n for n in at.number_input if n.key == "var_a").value == 2.0
+
+
+# ------------------------------------------------------------------------------------------ follow-ups: "the car from before, 10 seconds instead of 6"
+
+from modules.workspace import bind_earlier_values, earlier_context, earlier_entries, is_follow_up   # noqa: E402
+
+FOLLOW_UP = "Using the acceleration from before, how far would the car travel in 10 seconds instead of 6?"
+
+# the first problem: v0 = 8, v = 20, t = 6; a and d are the targets
+FIRST = {
+    "problem_domain": "kinematics", "problem_type": "algebraic",
+    "variables": [{"symbol": "a", "meaning": "acceleration", "known_value": None, "unit": "m/s^2"},
+                  {"symbol": "t", "meaning": "time interval", "known_value": "6", "unit": "s"},
+                  {"symbol": "v0", "meaning": "initial velocity", "known_value": "8", "unit": "m/s"},
+                  {"symbol": "v", "meaning": "final velocity", "known_value": "20", "unit": "m/s"},
+                  {"symbol": "d", "meaning": "distance traveled", "known_value": None, "unit": "m"}],
+    "equations": [{"name": "v", "kind": "equation", "expression": "Eq(v, v0 + a*t)", "derivation": ""},
+                  {"name": "d", "kind": "equation", "expression": "Eq(d, v0*t + a*t**2/2)", "derivation": ""}],
+    "solve_for": ["a", "d"], "assumptions": [],
+}
+# what the model returns for the follow-up: it reads the "6" of "instead of 6", and knows neither a nor v0
+FOLLOW_MODEL = {
+    "problem_domain": "kinematics", "problem_type": "algebraic",
+    "variables": [{"symbol": "a", "meaning": "acceleration", "known_value": None, "unit": "m/s^2"},
+                  {"symbol": "t", "meaning": "time", "known_value": "6", "unit": "s"},
+                  {"symbol": "d", "meaning": "distance traveled", "known_value": None, "unit": "m"},
+                  {"symbol": "v0", "meaning": "initial velocity", "known_value": None, "unit": "m/s"}],
+    "equations": [{"name": "distance", "kind": "equation", "expression": "Eq(d, v0*t + a*t**2/2)", "derivation": ""}],
+    "solve_for": ["d"], "assumptions": [],
+}
+
+
+def test_follow_up_phrases_are_recognised_and_ordinary_problems_are_not():
+    for text in (FOLLOW_UP, TEXT, "Same car, but 10 s instead of 6", "Using x from the workspace", "like before, but heavier"):
+        assert is_follow_up(text), text
+    assert not is_follow_up("A car accelerates from 8 m/s to 20 m/s in 6 s. How far does it travel before stopping?")
+
+
+def test_the_earlier_problems_givens_and_the_workspace_become_follow_up_context():
+    previous = _model(FIRST)
+    entries = earlier_entries(previous, ENTRIES)
+    assert {k: v.value for k, v in entries.items()} == {"t": 6.0, "v0": 8.0, "v": 20.0, "a": 2.0}      # a from the workspace
+    block = earlier_context("A car accelerates from 8 m/s to 20 m/s over 6 seconds. Find a and d.", entries)
+    assert block.startswith("EARLIER PROBLEM") and "only where the new problem refers to it" in block and "instead of 6" in block and "v0 = 8 m/s" in block
+    assert earlier_context(None, {}) is None
+
+
+def test_the_missing_input_comes_from_the_earlier_problem_and_instead_of_changes_the_time():
+    model = _model(FOLLOW_MODEL)
+    notes = bind_earlier_values(model, earlier_entries(_model(FIRST), ENTRIES), FOLLOW_UP)
+    values = {v.symbol: v.known_value for v in model.variables}
+    assert values == {"a": 2.0, "t": 10.0, "d": None, "v0": 8.0}
+    assert any("v0 = 8 m/s was taken from the earlier problem" in n for n in notes) and any("t is 10, not 6" in n for n in notes)
+    assert all(n in model.assumptions for n in notes)
+
+
+def test_nothing_is_filled_in_for_an_ordinary_problem_and_a_target_is_never_filled():
+    model = _model(FOLLOW_MODEL)
+    assert bind_earlier_values(model, earlier_entries(_model(FIRST), ENTRIES), "A car travels for 6 s. How far?") == []
+    assert next(v for v in model.variables if v.symbol == "v0").known_value is None
+    model = _model(FOLLOW_MODEL)
+    bind_earlier_values(model, {"d": WorkspaceEntry(name="d", value=84.0, source="p", unit="m")}, FOLLOW_UP)
+    assert next(v for v in model.variables if v.symbol == "d").known_value is None                     # d is what is asked for
+
+
+def test_instead_of_changes_nothing_when_two_inputs_share_the_old_value():
+    payload = json.loads(json.dumps(FOLLOW_MODEL))
+    payload["variables"][3]["known_value"] = "6"            # v0 is also 6: which one does "instead of 6" mean? Do not guess.
+    model = _model(payload)
+    bind_earlier_values(model, {}, FOLLOW_UP)
+    assert {v.symbol: v.known_value for v in model.variables if v.known_value is not None} == {"t": 6.0, "v0": 6.0}
+
+
+def test_a_workspace_value_is_found_by_its_meaning_when_the_name_is_not_in_the_text():
+    model = _model(FOLLOW_MODEL)
+    assert bind_workspace_values(model, ENTRIES, FOLLOW_UP) != []                                       # "the acceleration from before" -> a
+    assert next(v for v in model.variables if v.symbol == "a").known_value == 2.0
+    model = _model(FOLLOW_MODEL)
+    assert bind_workspace_values(model, ENTRIES, "A car's velocity is 5. How far in 10 s?") == []        # not a follow-up
+
+
+def test_the_whole_app_solves_the_follow_up_after_the_first_problem():
+    """Two solves in one session through the real page: the follow-up's inputs come from the first problem and the workspace, and its time is 10."""
+    import tempfile
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    from modules import history, practice
+    import modules.llm_client as lc
+    tmp = Path(tempfile.mkdtemp())
+    current = {"payload": json.dumps(FIRST)}
+
+    class C(FakeClient):
+        def __init__(self, *a, **k):
+            super().__init__(payload_json=current["payload"], final_answers={"d": 180.0, "a": 2.0})
+            self.payload_json = current["payload"]
+
+    history.DB_PATH, practice.DB_PATH = tmp / "h.db", tmp / "p.db"
+    real = lc.LMStudioClient
+    lc.LMStudioClient = C                                         # type: ignore[misc,assignment]
+    try:
+        at = AppTest.from_file(str(Path(__file__).resolve().parent.parent / "app.py"), default_timeout=180)
+        at.run()
+        at.text_area[0].set_value("A car accelerates uniformly from 8 m/s to 20 m/s over 6 seconds. Find a and d.").run()
+        next(b for b in at.button if "Represent & Solve" in b.label).click().run()
+        assert not at.exception
+        at.session_state["workspace_entries"] = dict(ENTRIES)
+        current["payload"] = json.dumps(FOLLOW_MODEL)
+        at.text_area[0].set_value(FOLLOW_UP).run()
+        next(b for b in at.button if "Represent & Solve" in b.label).click().run()
+        assert not at.exception
+        values = {v.symbol: v.known_value for v in at.session_state["model"].variables}
+        assert values == {"a": 2.0, "t": 10.0, "d": None, "v0": 8.0}
+        assert {n.key: n.value for n in at.number_input if (n.key or "").startswith("var_")} == {"var_a": 2.0, "var_t": 10.0, "var_d": 0.0, "var_v0": 8.0}
+        captions = [c.value for c in at.caption]
+        assert captions.count("↳ from the workspace") == 1 and captions.count("↳ from the earlier problem") == 1 and captions.count("↳ changed as the problem says") == 1
+    finally:
+        lc.LMStudioClient = real                                  # type: ignore[misc]

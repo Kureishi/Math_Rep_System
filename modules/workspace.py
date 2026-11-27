@@ -86,9 +86,13 @@ def bind_workspace_values(model, entries: dict[str, WorkspaceEntry] | None, prob
     notes: list[str] = []
     for name, entry in (entries or {}).items():
         explicit, likely = references_workspace_value(problem_text, name)
+        var = next((v for v in model.variables if v.symbol == name), None)
+        if not (explicit or likely) and var is not None and is_follow_up(problem_text):
+            # no name in the text, but the variable's MEANING is ("the acceleration from before"): a word of 4+ letters of its description
+            lowered = problem_text.lower()
+            likely = any(w in lowered for w in re.findall(r"[a-z]{4,}", (var.meaning or "").lower()))
         if not (explicit or likely):
             continue
-        var = next((v for v in model.variables if v.symbol == name), None)
         if var is None or var.is_function:
             continue
         # A value the model gave stays when the text only LIKELY points at the workspace; an explicit quoted name ('a' in workspace) is the person's own instruction, so the workspace
@@ -105,4 +109,64 @@ def bind_workspace_values(model, entries: dict[str, WorkspaceEntry] | None, prob
         note = f"{name} = {entry.value:.6g}{unit} was taken from the workspace" + (f" (the model had {replaced:g})" if replaced is not None else "")
         model.assumptions.append(note)
         notes.append(note)
+    return notes
+
+
+# ---------------------------------------------------------------------------------------------- follow-up problems ("the car from before, 10 seconds instead of 6")
+_FOLLOW_UP = re.compile(
+    r"\b(workspace|(?:from|as|like) before|(?:from )?earlier (?:problem|result|calculation|example)|previous(?:ly)? (?:problem|result|calculation|example)|last (?:problem|result)"
+    r"|instead of|rather than|same (?:car|ball|object|setup|system|problem|circuit|mass|spring|rectangle|triangle))\b", re.IGNORECASE)
+_REPLACED = re.compile(r"(-?\d+(?:\.\d+)?)\s*[A-Za-z%°/²³^·]*\s+(?:instead of|rather than)\s+(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def is_follow_up(problem_text: str) -> bool:
+    """Does the text say it builds on something earlier ('from before', 'in workspace', 'instead of 6', 'the same car')?"""
+    return bool(_FOLLOW_UP.search(problem_text or ""))
+
+
+def earlier_entries(previous_model, workspace_entries: dict[str, WorkspaceEntry] | None) -> dict[str, WorkspaceEntry]:
+    """The values of the problem solved just before (its given inputs) and of the workspace (results kept from earlier), by symbol: what a follow-up may mean by 'the car from before'.
+    The workspace wins where both have a symbol (it holds the later, solved values)."""
+    out: dict[str, WorkspaceEntry] = {}
+    for v in getattr(previous_model, "variables", None) or []:
+        if v.known_value is not None and not v.is_function and not v.is_vector:
+            out[v.symbol] = WorkspaceEntry(name=v.symbol, value=float(v.known_value), source="the previous problem", unit=v.unit)
+    out.update(workspace_entries or {})
+    return out
+
+
+def earlier_context(previous_text: str | None, entries: dict[str, WorkspaceEntry]) -> str | None:
+    """A labelled block for the extraction prompt, added ONLY for a follow-up. It states that these values are context and may be used only if the new problem refers to them, because
+    an unlabelled copy of the earlier text made a model take its numbers into the new problem (v0 = 8, t = 6)."""
+    if not entries:
+        return None
+    values = "; ".join(f"{e.name} = {e.value:.6g}{(' ' + e.unit) if e.unit else ''}" for e in entries.values())
+    head = f'The earlier problem was: "{previous_text.strip()[:300]}". ' if previous_text else ""
+    return (f"EARLIER PROBLEM (context for a follow-up; use it only where the new problem refers to it, e.g. 'the car from before'): {head}Its values: {values}. "
+            "Where the new problem gives a different value (\"10 seconds instead of 6\"), use the new one.")
+
+
+def bind_earlier_values(model, entries: dict[str, WorkspaceEntry] | None, problem_text: str) -> list[str]:
+    """For a follow-up, fill the inputs the model left without a value from the earlier problem (same symbol), then apply 'N instead of M' changes.
+
+    Only inputs that are NOT targets and have no value are filled, so nothing the problem or the model stated is overridden; 'N instead of M' changes the one input whose value is M."""
+    notes: list[str] = []
+    if not is_follow_up(problem_text):
+        return notes
+    for name, entry in (entries or {}).items():
+        var = next((v for v in model.variables if v.symbol == name), None)
+        if var is None or var.is_function or var.known_value is not None or name in model.solve_for:
+            continue
+        var.known_value = float(entry.value)
+        if not var.unit and entry.unit:
+            var.unit = entry.unit
+        unit = f" {entry.unit}" if entry.unit else ""
+        notes.append(f"{name} = {entry.value:.6g}{unit} was taken from the earlier problem")
+    for m in _REPLACED.finditer(problem_text):
+        new, old = float(m.group(1)), float(m.group(2))
+        holders = [v for v in model.variables if v.known_value is not None and abs(v.known_value - old) < 1e-12 and not v.is_function]
+        if len(holders) == 1 and new != old:
+            holders[0].known_value = new
+            notes.append(f"{holders[0].symbol} is {new:g}, not {old:g}: the problem says \"{m.group(0).strip()}\"")
+    model.assumptions.extend(notes)
     return notes

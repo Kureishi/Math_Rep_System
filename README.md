@@ -229,6 +229,10 @@ Markdown, PDF, Python, or a Jupyter notebook.
   **🔬 Go further with A** header as tabs: **🎲 Uncertainty** (Monte Carlo, analytic error propagation, guaranteed bounds), **🎚️ Sensitivity**, **🎯 Goal seek** and **🔁 Another way**. A **📑 Contents panel**
   (toggle at the top right of the results, on by default) puts a rail of jump links to each section on the right of the page; it stays in view while you scroll and is hidden automatically in windows narrower than
   about 1100 px. Streamlit has no right-hand sidebar, so the rail is a column of the page, and the links are in-page anchors.
+- **Follow-up problems** ("using the acceleration ('a' in workspace) from before, how far in 10 seconds instead of 6?"; `modules/workspace.py`). The model is told the workspace values and, for a follow-up (text with "from before",
+  "workspace", "instead of", "the same car", ...), a labelled EARLIER PROBLEM block with the previous problem's values. Because a model may still ignore it, the app then fills in by itself: a workspace variable named in
+  quotes (replaces whatever the model wrote), one the text calls by its meaning ("the acceleration from before"), inputs the model left empty from the previous problem, and "N instead of M" (the one input equal to M becomes N,
+  unless two inputs share M). Each such value says where it came from in the Variables panel and in the assumptions.
 - **The mode list is grouped** under **Solve**, **Science**, **Simulation labs** and **Tools**, each a collapsible section (the one holding the current mode opens by itself). A mode's section is its
   `group=` in `modules/modes/<file>.py` (default "Tools"; a plugin may name a new section).
 - **`cli.py`** runs batch solves and Monte Carlo without Streamlit. A **REST API**

@@ -338,8 +338,13 @@ def render_variables(model: ProblemModel):
                     f"{v.symbol} — {v.meaning} ({v.unit or 'unitless'})",
                     value=float(default), key=f"var_{v.symbol}",
                 )
-                if any(a.startswith(f"{v.symbol} = ") and "taken from the workspace" in a for a in model.assumptions):
-                    st.caption("↳ from the workspace")
+                for note in model.assumptions:                  # where a value came from, when it did not come from the problem text itself (modules/workspace.py)
+                    if note.startswith(f"{v.symbol} = ") and "taken from the workspace" in note:
+                        st.caption("↳ from the workspace")
+                    elif note.startswith(f"{v.symbol} = ") and "taken from the earlier problem" in note:
+                        st.caption("↳ from the earlier problem")
+                    elif note.startswith(f"{v.symbol} is ") and "instead of" in note:
+                        st.caption("↳ changed as the problem says")
                 if v.uncertainty:
                     st.caption(f"± {v.uncertainty:g} {v.unit or ''} (stated measurement uncertainty)")
     if function_vars:
