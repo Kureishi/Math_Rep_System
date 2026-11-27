@@ -43,7 +43,9 @@ Edit `config.py`, or set environment variables before launching:
 export LM_REASONING_MODEL="qwen2.5-14b-instruct"   # must match the model ID shown in LM Studio
 export LM_VISION_MODEL="qwen2-vl-7b-instruct"
 export LM_STUDIO_BASE_URL="http://localhost:1234/v1"   # change if you used a different port
-export LM_MAX_TOKENS=2048                               # longest reply the model may write (raise to 8192+ for "thinking" models)
+export LM_MAX_TOKENS=2048                               # longest reply the model may write
+export LM_THINKING_MODE=auto                            # auto | hints | leave: how to treat "thinking" models (see Troubleshooting)
+export LM_REASONING_BUDGET=1500                         # tokens a thinking model may reason, with no answer started, before the reply is stopped (0 = no limit)
 export COMPUTATION_TIMEOUT_SECONDS=10                   # how long one symbolic computation may run
 ```
 
@@ -62,8 +64,9 @@ A failure is explained, not just reported, and one failing part never hides the 
 
 - **"The model sent back an empty reply" / "answered in words instead of the structured format" / "JSON is malformed".** The page shows what the model said, the likely
   causes ranked with the specific fix for each, and the facts they rest on (finish reason, tokens generated against the limit, prompt size, model, temperature). The
-  commonest cause with a "thinking" model is a reply that spent its whole budget reasoning: raise **Max response tokens** in the sidebar's Advanced settings (or set
-  `LM_MAX_TOKENS`), or load a non-thinking model. An empty reply after almost no tokens usually means the prompt does not fit the model's context window: reload the model in
+  commonest cause with a "thinking" model is a reply that spent its whole budget reasoning. Raising **Max response tokens** does not help (it only lets the model think for longer);
+  the app already asks for no thinking, stops a runaway reasoning stream, retries under a JSON schema and reads the answer out of the reasoning text (Advanced settings → *Thinking models*).
+  The reliable fix is to **turn thinking off when you load the model in LM Studio** ("Enable Thinking"), or to load a non-thinking (instruct) model. An empty reply after almost no tokens usually means the prompt does not fit the model's context window: reload the model in
   LM Studio with a context length of at least 4096.
 - **"This derivation did not pass its checks".** The equations were extracted but a check still fails after the retries; the panel says which checks and what that usually means.
 - **"`<something>` could not be shown".** One panel failed and the rest of the page is intact. The notice says why, names the package to install if one is missing, and

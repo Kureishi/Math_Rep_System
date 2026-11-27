@@ -3,7 +3,7 @@ Command-palette-style fuzzy search over the app's navigable targets --
 see app.py's sidebar for where this gets wired to an actual search box
 plus a Ctrl/Cmd+K keyboard shortcut that focuses it.
 
-Scoped to MODE-level jumps (every item in the sidebar radio), not
+Scoped to MODE-level jumps (every item in the sidebar's mode list), not
 sub-tabs within a mode: Streamlit's st.tabs() has no programmatic
 "jump to tab index" API -- each tab's content is shown/hidden entirely
 client-side, with no server-side concept of "which tab is active" to
@@ -39,7 +39,7 @@ class PaletteEntry:
 _ENTRIES = [PaletteEntry(spec.label, spec.keywords) for spec in REGISTRY.specs]
 
 
-# The single source of truth for the sidebar's mode list, in display order. The sidebar radio is built from this, ui/__init__.py's
+# The single source of truth for the sidebar's mode list, in display order. The sidebar's mode list is built from this, ui/__init__.py's
 # dispatch table comes from the same declarations, and tests/test_app_modes.py checks that every mode has a page that resolves.
 MODE_LABELS: list[str] = [e.mode for e in _ENTRIES]
 

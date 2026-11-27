@@ -105,10 +105,13 @@ math-rep-system/
 │                              #   /dimensional-analysis -- deliberately NOT covering
 │                              #   every one of the Streamlit app's modes, see its
 │                              #   own module docstring for which and why
-├── config.py                 # LM Studio endpoint/model settings, tunables
+├── config.py                 # LM Studio endpoint/model settings, tunables (incl. thinking_mode / reasoning_budget_tokens: LM_THINKING_MODE, LM_REASONING_BUDGET)
 ├── plugins/                   # your own modes, one file each (git-ignored; see plugins/README.md)
 ├── scripts/                   # repository hygiene, stdlib only: check_conflict_markers.py (CI, pre-commit, tests)
-│                              #   and apply_delivery.py (apply a delivered snapshot without forking history)
+│                              #   and apply_delivery.py (apply a delivered snapshot without forking history);
+│                              #   package_zip.py (the delivery zip, without data/*.db); dev-only browser tools
+│                              #   (Playwright): dark_mode_gallery.py, dark_mode_contrast_scan.py,
+│                              #   chart_text_overlap_scan.py, _scan_common.py (the stale-server guard)
 ├── requirements.txt
 ├── requirements-dev.txt      # + pytest, pre-commit (dev/test only)
 ├── requirements-api.txt      # + fastapi/uvicorn, for api_server.py only
@@ -131,8 +134,9 @@ math-rep-system/
 │   │                          #   page's imports up front. The mode list itself is declared
 │   │                          #   one file per mode in modules/modes/ (see mode_registry.py);
 │   │                          #   this table, the sidebar and the palette are derived from it
-│   ├── a11y.py                  # show_figure: every chart goes through it (theme, colour-blind-safe
-│   │                          #   colours, text description for screen readers)
+│   ├── a11y.py                  # show_figure: every chart goes through it (Streamlit's light/dark theme,
+│   │                          #   colour-blind-safe colours, wrapped subplot titles, the animation speed /
+│   │                          #   reduce-motion settings, text description for screen readers)
 │   ├── common.py                # helpers shared by several pages (upload-size guard,
 │   │                          #   snapshot/download buttons, query-param syncing, ...)
 │   ├── routing.py               # go(route): the jump shared by the sidebar's Ask box and the word-problem page's mode-suggestion banner
@@ -160,13 +164,18 @@ math-rep-system/
 │   ├── relativity.py            # the General relativity mode: six tabs (curvature, geodesics, potentials, coordinate
 │   │                          #   changes, cones & Penrose, gravitational waves), each shown with its checks
 │   ├── theme.py                   # visual design system: inject_base_styles() (cards,
-│   │                          #   badges, button/spacing polish -- called once from app.py),
-│   │                          #   render_hero(), badge()/badge_row(), and dark_mode_css()
-│   │                          #   (the sidebar dark-mode toggle's CSS, kept here so all of
-│   │                          #   the app's styling lives in one file)
+│   │                          #   badges, button/spacing/focus polish, the results rail, narrow-window rules --
+│   │                          #   called once from app.py), LIGHT_ONLY_RULES (contrast fixes scoped to the
+│   │                          #   light theme), page_helper_iframe() (Ctrl/Cmd+K and theme detection),
+│   │                          #   render_theme_toggle(), render_hero(), badge()/badge_row(). Light/dark
+│   │                          #   themselves are Streamlit's own (.streamlit/config.toml)
 │   ├── sidebar.py                # the whole left sidebar as one function
 │   ├── mode_nav.py               # the grouped, collapsible mode list (Solve / Science / Simulation labs / Tools)
 │   ├── history_panel.py          # the History list: day groups, filter, stars, rename, delete with Undo
+│   ├── layout.py                 # results-page layout: gap(), panel() cards, anchor() + the sticky Contents rail
+│   ├── build_stamp.py            # fingerprint of the look-deciding files; the browser scans refuse a stale server
+│   ├── lab_common.py             # display helpers shared by the three simulation labs
+│   ├── posterior.py              # the Posterior sampling (MCMC) mode (no language model)
 │   ├── word_problem.py            # the default page: input, Solve button, calls
 │   │                          #   modules/pipeline.py, then ui/results/
 │   ├── batch.py, chains.py, curve_fitting.py, dimensional.py, equivalence.py,
@@ -177,9 +186,11 @@ math-rep-system/
 │       ├── summary.py              # confidence banner, derived equations, variables,
 │       │                          #   vector summary, follow-up Q&A, scenarios, ...
 │       ├── steps.py                # the step-by-step section: step list, per-target answer
-│       │                          #   extras, and the uncertainty/bounds/goal-seek/
-│       │                          #   sensitivity expanders (split per feature)
+│       │                          #   extras, grouped as a bordered solution card plus the "Go further" tabs
+│       │                          #   (uncertainty / sensitivity / goal seek / another way)
 │       ├── verify_tab.py, explore_tab.py, practice_tab.py, solutions.py
+│       ├── time_views.py           # time-resolved views that need the solution as a formula: uncertainty fan,
+│       │                          #   parameter morph, bifurcation
 │
 └── modules/                   # math/LLM logic -- zero Streamlit imports, so it's
     │                          #   reusable as-is from cli.py, api_server.py, or a future
@@ -188,10 +199,14 @@ math-rep-system/
     │                          #   narrate -> scenarios sequence -- ui/word_problem.py
     │                          #   and batch_solver.py both call this; see its own
     │                          #   docstring for what's deliberately NOT routed through it
+    ├── llm_thinking.py       # "thinking" models: stream with a reasoning budget, recover JSON from the reasoning text
+    ├── latex_text.py         # prose-in-math (\\text{} wrapping), units for display (unit_latex / unit_plain / unit_of / with_unit)
+    ├── layout_audit.py       # static pixel check of multi-panel figures; fit_subplot_titles()
+    ├── motion_prefs.py       # animation speed / reduce-motion applied to Plotly frames (copies, never edits)
     ├── llm_diagnosis.py      # turns any pipeline failure into an explanation: ranked causes, each with its fix,
     │                         #   from the facts (finish reason, tokens used vs the limit, reasoning text, the reply)
     ├── optional_deps.py      # which package each feature needs, whether it is installed, the exact pip command
-    ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper -- the
+    ├── llm_client.py         # LM Studio (OpenAI-compatible) client wrapper (chat() runs the thinking-model ladder) -- the
     │                         #   connection check (is_available/list_models) does a
     │                         #   fast, hard-timeout TCP probe before ever making an HTTP
     │                         #   call, and uses a separate no-retry client for that call,
@@ -386,8 +401,15 @@ math-rep-system/
     │                                 #   templates, settings_profiles, chains) at startup
     ├── research_journal.py            # stitches a chosen set of history entries into ONE
     │                                 #   running Markdown document
-    ├── workspace.py                  # cross-problem variable memory (session_state)
-    ├── history.py                     # SQLite-backed solved-problem history (names: rename()/display_title()/picker_label(); migration 004 adds `title`) (and, inside each
+    ├── workspace.py                  # cross-problem variable memory (session_state); binds workspace / earlier-problem values
+    │                                 #   into a follow-up's model (bind_workspace_values, bind_earlier_values, "N instead of M")
+    ├── project_bundle.py             # export/import of history, chains and workspace as ONE portable JSON file
+    ├── settings_profiles.py          # named presets for the Advanced-settings knobs
+    ├── step_explainer.py             # "explain just this step" drill-down
+    ├── named_formulas.py             # recognises well-known named formulas in a derived equation
+    ├── dimensional_analysis.py       # dimension-only mode: candidate exponent combinations
+    ├── adversarial_testing.py        # QA generator of nasty variants of a model's own inputs
+    ├── history.py                     # SQLite-backed solved-problem history (names: rename()/display_title()/picker_label() with a timestamp; stars: `pinned`, migration 005, exempt from pruning; delete_with_undo()/restore(); filter, day sections, status_line()) (and, inside each
     │                                 #   record's JSON, the saved exploration view)
     ├── progress.py                    # the optional progress hook long computations call at their
     │                                 #   checkpoints (and chunk_bounds / scaled helpers)

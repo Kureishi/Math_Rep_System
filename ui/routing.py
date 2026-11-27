@@ -8,8 +8,8 @@ from modules import mode_registry, router
 
 
 def go(route: "router.Route") -> None:
-    """Navigate to a route's mode and fill in what it prefills. Safe to call from a button callback (callbacks run before the page is rebuilt, so the mode radio's own
-    state may be set) and from the sidebar before that radio is built."""
+    """Navigate to a route's mode and fill in what it prefills. Safe to call from a button callback (callbacks run before the page is rebuilt) and from anywhere
+    else in a run: app_mode is plain session state (ui/mode_nav.py), not a widget's key."""
     st.session_state["app_mode"] = route.mode
     for key, value in route.prefill.items():
         st.session_state[key] = value

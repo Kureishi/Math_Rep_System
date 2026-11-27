@@ -72,12 +72,12 @@ def render_quick_start_tab():
             st.caption(f"{target_mode} · {description}")
             if st.button("Try this →", key=f"quickstart_{title}"):
                 # can't set st.session_state["app_mode"] directly here --
-                # the app_mode radio widget was already instantiated
+                # the target mode's widgets were already instantiated
                 # earlier in THIS script run (Streamlit forbids writing to
                 # a widget's key after that widget exists in the current
                 # run), so the mode switch + prefill is deferred to a
                 # pending-state flag, applied at the very top of the next
-                # run BEFORE the radio widget is (re)created -- see the
+                # run BEFORE the target mode's widgets are (re)created -- see the
                 # "_pending_mode" handling near the top of this file.
                 st.session_state["_pending_mode"] = target_mode
                 st.session_state["_pending_prefill"] = prefill

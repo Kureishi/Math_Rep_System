@@ -1,5 +1,5 @@
 """
-A static check of a Plotly figure's panel layout, in pixels, at a given page width (Streamlit-free; used by tests/test_layout_audit.py and scripts/figure_layout_audit.py).
+A static check of a Plotly figure's panel layout, in pixels, at a given page width (Streamlit-free; used by tests/test_layout_audit.py, ui/a11y.py (fit_subplot_titles) and the MRS_AUDIT_FIGURES hook in tests/conftest.py).
 
 It cannot see rendered text (scripts/chart_text_overlap_scan.py measures that in a real browser), but it can do the arithmetic that decides whether text FITS: the gap between two
 stacked panels against what sits in it (the upper panel's tick labels and axis title, the lower panel's subplot title), the gap between two side-by-side panels against the right

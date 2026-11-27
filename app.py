@@ -60,13 +60,12 @@ for key, default in _SESSION_DEFAULTS:
 
 # ---- apply a pending Quick Start example (mode switch + prefilled
 # inputs), queued by render_quick_start_tab()'s "Try this" buttons.
-# Must happen HERE, before the sidebar's app_mode radio widget (or any
-# of the target mode's own widgets) are instantiated in this run --
-# Streamlit forbids writing to a widget's session_state key once that
-# widget already exists in the current script run, which is exactly
-# what set st.session_state["app_mode"] = ... from inside the Quick
-# Start tab's own button handler (itself running AFTER the radio
-# widget, later in the same script) directly.
+# Must happen HERE, before the target mode's own widgets are instantiated
+# in this run -- Streamlit forbids writing to a widget's session_state key
+# once that widget already exists in the current script run. (app_mode
+# itself is no longer a widget's key: the sidebar's mode list is buttons,
+# ui/mode_nav.py, so it could be set anywhere; the queue is kept because
+# the prefilled inputs of the target mode have the restriction.)
 if "_pending_mode" in st.session_state:
     st.session_state["app_mode"] = st.session_state.pop("_pending_mode")
     for _k, _v in st.session_state.pop("_pending_prefill", {}).items():
@@ -91,7 +90,7 @@ if not st.session_state.get("_booted"):
 st.session_state["_booted"] = True
 
 # ---------------------------------------------------------------- mode dispatch
-# `sidebar.mode` comes from the sidebar's navigation radio. Every mode except the default word-problem
+# `sidebar.mode` comes from the sidebar's grouped mode list (ui/mode_nav.py). Every mode except the default word-problem
 # solver is a standalone page in ui.PAGES, gated with an early st.stop() so the word-problem page
 # below never renders underneath it.
 # Both are run under `guarded`: a failure inside a page is shown as a notice with its technical details and the sidebar stays usable, instead of a bare

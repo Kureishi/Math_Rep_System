@@ -9,4 +9,4 @@ hypothesis>=6.100
 fastapi==0.141.1
 httpx==0.28.1
 pre-commit>=3.5  # optional local hook -- see .pre-commit-config.yaml
-playwright==1.63.0   # optional: scripts/dark_mode_contrast_scan.py (then `playwright install chromium`); not needed to run the app or the tests
+playwright==1.63.0   # optional, dev tools only: scripts/dark_mode_gallery.py + dark_mode_contrast_scan.py + chart_text_overlap_scan.py (then `playwright install chromium`); not needed to run the app or the tests
