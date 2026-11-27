@@ -35,12 +35,36 @@ def test_a_quoted_workspace_name_is_filled_in_when_the_model_left_it_unknown():
     assert any("taken from the workspace" in s and "a = 2" in s for s in model.assumptions)       # visible in the result
 
 
-def test_a_value_the_model_did_give_is_never_overwritten():
+def test_a_value_the_model_gave_is_kept_unless_the_workspace_name_was_quoted():
     payload = json.loads(json.dumps(IGNORED))
     payload["variables"][0]["known_value"] = "3"
     model = _model(payload)
-    assert bind_workspace_values(model, ENTRIES, TEXT) == []
+    assert bind_workspace_values(model, ENTRIES, "Using accel from before ...") == []              # no reference at all
     assert next(v for v in model.variables if v.symbol == "a").known_value == 3.0
+    entries = {"accel": WorkspaceEntry(name="accel", value=2.0, source="p1", unit="m/s^2")}
+    payload["variables"][0]["symbol"] = "accel"
+    model = _model(payload)
+    assert bind_workspace_values(model, entries, "Using accel from before, how far?") == []        # only LIKELY: the model's value stands
+    assert bind_workspace_values(model, entries, "Using 'accel' from the workspace, how far?") != []  # explicit: the workspace wins
+    assert next(v for v in model.variables if v.symbol == "accel").known_value == 2.0
+    assert any("the model had 3" in s for s in model.assumptions)
+
+
+def test_a_model_that_wrote_zero_for_the_workspace_variable_is_corrected():
+    payload = json.loads(json.dumps(IGNORED))
+    payload["variables"][0]["known_value"] = "0"
+    model = _model(payload)
+    assert bind_workspace_values(model, ENTRIES, TEXT) != []
+    assert next(v for v in model.variables if v.symbol == "a").known_value == 2.0
+
+
+def test_the_context_does_not_repeat_the_earlier_problems_text():
+    """Regression: '(previously solved from: A car accelerates ... from 8 m/s ... over 6 seconds)' led the model to use v0 = 8 and t = 6 in the NEW problem."""
+    ws = Workspace({})
+    ws.store("a", 2.0, "A car accelerates uniformly from 8 m/s to 20 m/s over 6 seconds", "m/s^2")
+    ctx = ws.as_context_string()
+    assert ctx == "- a = 2 m/s^2 (a value from an earlier calculation)"
+    assert "8 m/s" not in ctx and "6 seconds" not in ctx
 
 
 def test_a_single_letter_is_only_matched_when_quoted_because_a_is_also_an_article():
@@ -88,3 +112,21 @@ def test_the_extraction_prompt_tells_the_model_to_use_a_new_value_over_an_old_on
     extract_model(client, TEXT, known_context="- a = 2 m/s^2")
     user = client.calls[0][1]
     assert "NEW value" in user and "instead of 6" in user and "- a = 2 m/s^2" in user
+
+
+def test_the_variables_panel_says_which_value_came_from_the_workspace():
+    from streamlit.testing.v1 import AppTest
+
+    def page():
+        from modules.workspace import WorkspaceEntry, bind_workspace_values
+        from tests.test_workspace_binding import ENTRIES, TEXT, _model
+        from ui.results.summary import render_variables
+        model = _model()
+        bind_workspace_values(model, ENTRIES, TEXT)
+        render_variables(model)
+
+    at = AppTest.from_function(page, default_timeout=60)
+    at.run()
+    assert not at.exception
+    assert [c.value for c in at.caption].count("↳ from the workspace") == 1
+    assert next(n for n in at.number_input if n.key == "var_a").value == 2.0

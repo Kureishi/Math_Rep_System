@@ -338,6 +338,8 @@ def render_variables(model: ProblemModel):
                     f"{v.symbol} — {v.meaning} ({v.unit or 'unitless'})",
                     value=float(default), key=f"var_{v.symbol}",
                 )
+                if any(a.startswith(f"{v.symbol} = ") and "taken from the workspace" in a for a in model.assumptions):
+                    st.caption("↳ from the workspace")
                 if v.uncertainty:
                     st.caption(f"± {v.uncertainty:g} {v.unit or ''} (stated measurement uncertainty)")
     if function_vars:

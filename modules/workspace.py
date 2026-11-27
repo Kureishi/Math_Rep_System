@@ -53,10 +53,8 @@ class Workspace:
         when a new problem references them by name."""
         if not self.entries:
             return None
-        return "\n".join(
-            f"- {e.name} = {e.value:.6g} {e.unit or ''} (previously solved from: {e.source})"
-            for e in self.entries.values()
-        )
+        # NOT the text of the problem each value came from: a model reading "8 m/s ... over 6 seconds" there took those numbers (v0 = 8, t = 6) into the NEW problem.
+        return "\n".join(f"- {e.name} = {e.value:.6g} {e.unit or ''} (a value from an earlier calculation)".replace("  ", " ") for e in self.entries.values())
 
     def as_substitution_dict(self) -> dict[str, float]:
         return {k: v.value for k, v in self.entries.items()}
@@ -84,22 +82,27 @@ def bind_workspace_values(model, entries: dict[str, WorkspaceEntry] | None, prob
     The model is TOLD the workspace values (`as_context_string`), but a model that ignores them leaves the variable unknown (the symptom: "using the acceleration ('a' in workspace) from before"
     came back with a = 0 unknown, and the problem could not be solved). So after extraction, for each workspace name the problem points at (see references_workspace_value) that the model
     has as an input without a value, the value is filled in from the workspace, its unit is filled in if the model gave none, and the name is removed from `solve_for` when the problem named it explicitly.
-    Returns a note per binding (also added to model.assumptions, so it is visible in the result). Never overwrites a value the model did give."""
+    Returns a note per binding (also added to model.assumptions, so it is visible in the result). A value the model gave is kept unless the problem names the workspace variable explicitly (in quotes)."""
     notes: list[str] = []
     for name, entry in (entries or {}).items():
         explicit, likely = references_workspace_value(problem_text, name)
         if not (explicit or likely):
             continue
         var = next((v for v in model.variables if v.symbol == name), None)
-        if var is None or var.known_value is not None or var.is_function:
+        if var is None or var.is_function:
             continue
+        # A value the model gave stays when the text only LIKELY points at the workspace; an explicit quoted name ('a' in workspace) is the person's own instruction, so the workspace
+        # value replaces whatever the model put there (the symptom: a model that ignored the workspace and wrote 0 for the unknown).
+        if var.known_value is not None and not (explicit and var.known_value != float(entry.value)):
+            continue
+        replaced = var.known_value
         var.known_value = float(entry.value)
         if not var.unit and entry.unit:
             var.unit = entry.unit
         if explicit and name in model.solve_for and len(model.solve_for) > 1:
             model.solve_for = [s for s in model.solve_for if s != name]
         unit = f" {entry.unit}" if entry.unit else ""
-        note = f"{name} = {entry.value:.6g}{unit} was taken from the workspace (from: {entry.source[:60]})"
+        note = f"{name} = {entry.value:.6g}{unit} was taken from the workspace" + (f" (the model had {replaced:g})" if replaced is not None else "")
         model.assumptions.append(note)
         notes.append(note)
     return notes
